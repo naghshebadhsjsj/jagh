@@ -227,8 +227,9 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # آپدیت اتمیک: فقط اگه ۵ دقیقه گذشته باشه پول اضافه میشه
     updated = await pool.fetchrow(
-        "UPDATE users SET balance = balance + $1, last_ts = $2 "
-        "WHERE user_id = $3 AND last_ts <= $2 - $4 RETURNING balance",
+        "UPDATE users SET balance = balance + $1::bigint, last_ts = $2::double precision "
+        "WHERE user_id = $3::bigint AND last_ts <= $2::double precision - $4::double precision "
+        "RETURNING balance",
         amount,
         now,
         user.id,
