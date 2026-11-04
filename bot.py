@@ -26,7 +26,6 @@ MAX_REWARD = 100
 # کانال‌های اجباری
 CHANNELS = [
     "@selfsaz_iran",
-    "@fox_frenzy",
     "@fox_frnzy",
 ]
 
