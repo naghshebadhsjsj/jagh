@@ -1,11 +1,10 @@
 import logging
 import os
 import random
-import sqlite3
 import time
 
+import asyncpg
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.constants import ChatType
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -17,14 +16,14 @@ from telegram.ext import (
 
 # ───────────────────────── تنظیمات ─────────────────────────
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-DB_PATH = os.environ.get("DB_PATH", "bot.db")  # روی Railway بهتره روی Volume باشه
+DATABASE_URL = os.environ["DATABASE_URL"]  # از Postgres ریلوی میاد
 
 TRIGGER_WORD = "جق"
 COOLDOWN_SECONDS = 5 * 60
 MIN_REWARD = 5
 MAX_REWARD = 100
 
-# کانال‌های اجباری (دقیقاً همونی که دادی)
+# کانال‌های اجباری
 CHANNELS = [
     "@selfsaz_iran",
     "@fox_frenzy",
@@ -64,49 +63,52 @@ def pick_reply(amount: int) -> str:
             return random.choice(texts).format(amount=amount)
     return random.choice(REPLY_TIERS[-1][1]).format(amount=amount)
 
+
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
 )
 log = logging.getLogger("jagh-bot")
 
-
-# ───────────────────────── دیتابیس ─────────────────────────
-def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+pool: asyncpg.Pool | None = None
 
 
-def init_db():
-    with db() as c:
-        c.execute(
+# ───────────────────────── دیتابیس (PostgreSQL) ─────────────────────────
+async def init_db(app: Application):
+    global pool
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+    async with pool.acquire() as c:
+        await c.execute(
             """CREATE TABLE IF NOT EXISTS users (
-                user_id  INTEGER PRIMARY KEY,
+                user_id  BIGINT PRIMARY KEY,
                 name     TEXT,
-                balance  INTEGER NOT NULL DEFAULT 0,
-                last_ts  REAL    NOT NULL DEFAULT 0,
-                started  INTEGER NOT NULL DEFAULT 0
+                balance  BIGINT NOT NULL DEFAULT 0,
+                last_ts  DOUBLE PRECISION NOT NULL DEFAULT 0,
+                started  BOOLEAN NOT NULL DEFAULT FALSE
             )"""
         )
+    log.info("database ready")
 
 
-def upsert_user(user_id: int, name: str):
-    with db() as c:
-        c.execute(
-            "INSERT INTO users (user_id, name) VALUES (?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET name = excluded.name",
-            (user_id, name),
-        )
+async def close_db(app: Application):
+    if pool:
+        await pool.close()
 
 
-def set_started(user_id: int):
-    with db() as c:
-        c.execute("UPDATE users SET started = 1 WHERE user_id = ?", (user_id,))
+async def upsert_user(user_id: int, name: str):
+    await pool.execute(
+        "INSERT INTO users (user_id, name) VALUES ($1, $2) "
+        "ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name",
+        user_id,
+        name,
+    )
 
 
-def get_user(user_id: int):
-    with db() as c:
-        return c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+async def set_started(user_id: int):
+    await pool.execute("UPDATE users SET started = TRUE WHERE user_id = $1", user_id)
+
+
+async def get_user(user_id: int):
+    return await pool.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
 
 
 # ───────────────────────── عضویت اجباری ─────────────────────────
@@ -149,19 +151,19 @@ JOIN_MSG = "🔒 برای استفاده از ربات باید توی کانا�
 # ───────────────────────── هندلرها ─────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    upsert_user(user.id, user.full_name)
+    await upsert_user(user.id, user.full_name)
     missing = await missing_channels(context.bot, user.id)
     if missing:
         await update.message.reply_text(JOIN_MSG, reply_markup=join_keyboard(missing))
         return
-    set_started(user.id)
+    await set_started(user.id)
     await update.message.reply_text(WELCOME_OK)
 
 
 async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     user = q.from_user
-    upsert_user(user.id, user.full_name)
+    await upsert_user(user.id, user.full_name)
     missing = await missing_channels(context.bot, user.id)
     if missing:
         await q.answer("هنوز عضو همه کانال‌ها نشدی ❌", show_alert=True)
@@ -170,24 +172,21 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         return
-    set_started(user.id)
+    await set_started(user.id)
     await q.answer("تایید شد ✅")
     await q.edit_message_text(WELCOME_OK)
 
 
 async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    row = get_user(user.id)
+    row = await get_user(update.effective_user.id)
     bal = row["balance"] if row else 0
     await update.message.reply_text(f"💰 موجودی شما: {bal:,} تومن")
 
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with db() as c:
-        rows = c.execute(
-            "SELECT name, balance FROM users WHERE balance > 0 "
-            "ORDER BY balance DESC LIMIT 10"
-        ).fetchall()
+    rows = await pool.fetch(
+        "SELECT name, balance FROM users WHERE balance > 0 ORDER BY balance DESC LIMIT 10"
+    )
     if not rows:
         await update.message.reply_text("هنوز کسی پولی نگرفته!")
         return
@@ -203,8 +202,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if msg.text.strip() != TRIGGER_WORD:
         return
 
-    upsert_user(user.id, user.full_name)
-    row = get_user(user.id)
+    await upsert_user(user.id, user.full_name)
+    row = await get_user(user.id)
     bot_username = (await context.bot.get_me()).username
 
     # باید قبلاً /start زده و عضو کانال‌ها شده باشه
@@ -225,26 +224,53 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     now = time.time()
-    remaining = COOLDOWN_SECONDS - (now - row["last_ts"])
-    if remaining > 0:
-        m, s = divmod(int(remaining) + 1, 60)
+    amount = random.randint(MIN_REWARD, MAX_REWARD)
+
+    # آپدیت اتمیک: فقط اگه ۵ دقیقه گذشته باشه پول اضافه میشه
+    updated = await pool.fetchrow(
+        "UPDATE users SET balance = balance + $1, last_ts = $2 "
+        "WHERE user_id = $3 AND last_ts <= $2 - $4 RETURNING balance",
+        amount,
+        now,
+        user.id,
+        float(COOLDOWN_SECONDS),
+    )
+    if updated is None:
+        row = await get_user(user.id)
+        remaining = COOLDOWN_SECONDS - (now - row["last_ts"])
+        m, s = divmod(int(max(remaining, 0)) + 1, 60)
         await msg.reply_text(f"⏳ صبر کن! {m} دقیقه و {s} ثانیه دیگه می‌تونی دوباره بنویسی.")
         return
 
-    amount = random.randint(MIN_REWARD, MAX_REWARD)
-    with db() as c:
-        c.execute(
-            "UPDATE users SET balance = balance + ?, last_ts = ? WHERE user_id = ?",
-            (amount, now, user.id),
-        )
     await msg.reply_text(pick_reply(amount))
 
 
+async def debug_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/check — نشون میده چک عضویت هر کانال چی برمی‌گردونه (برای عیب‌یابی)."""
+    me = await context.bot.get_me()
+    uid = update.effective_user.id
+    lines = [f"🤖 ربات: @{me.username}\n"]
+    for ch in CHANNELS:
+        try:
+            chat = await context.bot.get_chat(ch)
+            m = await context.bot.get_chat_member(ch, uid)
+            lines.append(f"✅ {ch} ({chat.type}) → وضعیت شما: {m.status}")
+        except Exception as e:
+            lines.append(f"❌ {ch} → {type(e).__name__}: {e}")
+    await update.message.reply_text("\n".join(lines))
+
+
 def main():
-    init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(init_db)
+        .post_shutdown(close_db)
+        .build()
+    )
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(check_join, pattern="^check_join$"))
+    app.add_handler(CommandHandler("check", debug_channels, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("wallet", wallet))
     app.add_handler(CommandHandler("top", top))
     app.add_handler(
