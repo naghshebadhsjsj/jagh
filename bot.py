@@ -195,7 +195,10 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not msg or not msg.text or not user or user.is_bot:
         return
-    if msg.text.strip() != TRIGGER_WORD:
+    # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
+    text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
+    log.info("group text from %s: %r", user.id, msg.text)
+    if text != TRIGGER_WORD:
         return
 
     await upsert_user(user.id, user.full_name)
