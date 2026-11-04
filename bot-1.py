@@ -1,3 +1,4 @@
+import html
 import logging
 import os
 import random
@@ -13,6 +14,37 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+
+# ───────────────────── ایموجی پرمیوم ─────────────────────
+# شماره‌ها رو با دستور /emojis (تو پی‌وی ربات) می‌تونی ببینی کدوم کدومه.
+# اگه ایموجی پرمیوم نمایش داده نشد، همون ایموجی معمولی داخل تگ دیده میشه.
+EMOJI_IDS = {
+    1: "5411097243165929032",
+    2: "5397669599145636159",
+    3: "5987616823636401062",
+    4: "5830203935775789535",
+    5: "5834643712189141114",
+    6: "5830326445422940546",
+    7: "5832353674281620438",
+    8: "5397818149179502406",
+    9: "5938264290740933445",
+    10: "5938388342281343001",
+}
+# کدوم شماره برای چی استفاده بشه (برای عوض کردن فقط عدد رو تغییر بده)
+E_HAND, E_DROPS, E_FIRE, E_TROPHY, E_MEH = 1, 2, 3, 4, 5
+E_WALLET, E_WAIT, E_OK = 6, 7, 8
+E_CROWN = 9  # تاج لیدربرد (نفرات برتر)
+
+
+def ce(n: int, fallback: str) -> str:
+    return f'<tg-emoji emoji-id="{EMOJI_IDS[n]}">{fallback}</tg-emoji>'
+
+
+HAND_DROPS = ce(E_HAND, "🤛") + ce(E_DROPS, "💦")
+FIRE = ce(E_FIRE, "🔥")
+TROPHY = ce(E_TROPHY, "🏆")
+MEH = ce(E_MEH, "😐")
 
 # ───────────────────────── تنظیمات ─────────────────────────
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -31,24 +63,24 @@ CHANNELS = []  # خالی = عضویت اجباری خاموش
 # و یکی از متن‌هاش رندوم میاد. {amount} = مبلغ
 REPLY_TIERS = [
     (20, [
-        "اوه ضعیف بود 😐 فقط {amount} تومن بابتش گرفتی 🤛💦",
-        "این که آبکی بود! {amount} تومن بیشتر نمی‌ارزید 🤛💦",
+        "اوه ضعیف بود {MEH} فقط {amount} تومن بابتش گرفتی {HD}",
+        "این که آبکی بود! {amount} تومن بیشتر نمی‌ارزید {HD}",
     ]),
     (45, [
-        "بد نبود! {amount} تومن بابتش گرفتی 🤛💦",
-        "اوکی بود، {amount} تومن به حسابت اضافه شد 🤛💦",
+        "بد نبود! {amount} تومن بابتش گرفتی {HD}",
+        "اوکی بود، {amount} تومن به حسابت اضافه شد {HD}",
     ]),
     (70, [
-        "اوه قوی بود! انقدر پول بابتش گرفتی: {amount} تومن 🤛💦",
-        "اوه چه قوی! {amount} تومن بابتش گرفتی 🤛💦",
+        "اوه قوی بود! انقدر پول بابتش گرفتی: {amount} تومن {HD}",
+        "اوه چه قوی! {amount} تومن بابتش گرفتی {HD}",
     ]),
     (90, [
-        "اوهوووو خیلی قوی بود!! {amount} تومن بابتش گرفتی 🔥🤛💦",
-        "وحشی بود! {amount} تومن گرفتی 🔥🤛💦",
+        "اوهوووو خیلی قوی بود!! {amount} تومن بابتش گرفتی {FIRE}{HD}",
+        "وحشی بود! {amount} تومن گرفتی {FIRE}{HD}",
     ]),
     (100, [
-        "اوه خدایا افسانه‌ای بود!!! {amount} تومن، جکپات 🏆🤛💦",
-        "رکورد زدی!!! {amount} تومن بابتش گرفتی 🏆🤛💦",
+        "اوه خدایا افسانه‌ای بود!!! {amount} تومن، جکپات {TROPHY}{HD}",
+        "رکورد زدی!!! {amount} تومن بابتش گرفتی {TROPHY}{HD}",
     ]),
 ]
 
@@ -56,8 +88,8 @@ REPLY_TIERS = [
 def pick_reply(amount: int) -> str:
     for max_amount, texts in REPLY_TIERS:
         if amount <= max_amount:
-            return random.choice(texts).format(amount=amount)
-    return random.choice(REPLY_TIERS[-1][1]).format(amount=amount)
+            return random.choice(texts).format(amount=amount, HD=HAND_DROPS, FIRE=FIRE, TROPHY=TROPHY, MEH=MEH)
+    return random.choice(REPLY_TIERS[-1][1]).format(amount=amount, HD=HAND_DROPS, FIRE=FIRE, TROPHY=TROPHY, MEH=MEH)
 
 
 logging.basicConfig(
@@ -136,7 +168,7 @@ def join_keyboard(missing: list[str]) -> InlineKeyboardMarkup:
 
 
 WELCOME_OK = (
-    "✅ عضویتت تایید شد!\n\n"
+    ce(E_OK, "✅") + " عضویتت تایید شد!\n\n"
     f"حالا ربات رو توی گروه اضافه کن و هر ۵ دقیقه یه بار بنویس «{TRIGGER_WORD}» "
     f"تا بین {MIN_REWARD} تا {MAX_REWARD} تومن بگیری.\n\n"
     "دستورها:\n/wallet — موجودی\n/top — برترین‌ها"
@@ -153,7 +185,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(JOIN_MSG, reply_markup=join_keyboard(missing))
         return
     await set_started(user.id)
-    await update.message.reply_text(WELCOME_OK)
+    await update.message.reply_text(WELCOME_OK, parse_mode="HTML")
 
 
 async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -170,13 +202,13 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await set_started(user.id)
     await q.answer("تایید شد ✅")
-    await q.edit_message_text(WELCOME_OK)
+    await q.edit_message_text(WELCOME_OK, parse_mode="HTML")
 
 
 async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = await get_user(update.effective_user.id)
     bal = row["balance"] if row else 0
-    await update.message.reply_text(f"💰 موجودی شما: {bal:,} تومن")
+    await update.message.reply_text(f"{ce(E_WALLET, '💰')} موجودی شما: {bal:,} تومن", parse_mode="HTML")
 
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,8 +218,13 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         await update.message.reply_text("هنوز کسی پولی نگرفته!")
         return
-    lines = [f"{i}. {r['name']} — {r['balance']:,} تومن" for i, r in enumerate(rows, 1)]
-    await update.message.reply_text("🏆 برترین‌ها:\n\n" + "\n".join(lines))
+    lines = []
+    for i, r in enumerate(rows, 1):
+        mark = ce(E_CROWN, "👑") if i == 1 else f"{i}."
+        lines.append(f"{mark} {html.escape(r['name'] or '')} — {r['balance']:,} تومن")
+    await update.message.reply_text(
+        f"{ce(E_CROWN, '👑')} نفرات برتر:\n\n" + "\n".join(lines), parse_mode="HTML"
+    )
 
 
 async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,10 +276,10 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = await get_user(user.id)
         remaining = COOLDOWN_SECONDS - (now - row["last_ts"])
         m, s = divmod(int(max(remaining, 0)) + 1, 60)
-        await msg.reply_text(f"⏳ صبر کن! {m} دقیقه و {s} ثانیه دیگه می‌تونی دوباره بنویسی.")
+        await msg.reply_text(f"{ce(E_WAIT, '⏳')} صبر کن! {m} دقیقه و {s} ثانیه دیگه می‌تونی دوباره بنویسی.", parse_mode="HTML")
         return
 
-    await msg.reply_text(pick_reply(amount))
+    await msg.reply_text(pick_reply(amount), parse_mode="HTML")
 
 
 async def debug_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -260,6 +297,12 @@ async def debug_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def show_emojis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/emojis — شماره هر ایموجی پرمیوم رو نشون میده."""
+    lines = [f"{n} → {ce(n, '⭐')}" for n in EMOJI_IDS]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
 def main():
     app = (
         Application.builder()
@@ -271,6 +314,7 @@ def main():
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(check_join, pattern="^check_join$"))
     app.add_handler(CommandHandler("check", debug_channels, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("emojis", show_emojis, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("wallet", wallet))
     app.add_handler(CommandHandler("top", top))
     app.add_handler(
