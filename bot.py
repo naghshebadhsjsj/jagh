@@ -588,14 +588,38 @@ BASE_DIR = Path(__file__).parent
 _FA_DIGITS = str.maketrans("0123456789,", "۰۱۲۳۴۵۶۷۸۹،")
 
 
+def _first_existing(*paths: Path) -> Path | None:
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+
+def card_path(gender: str, level: int) -> Path | None:
+    """عکس کارت: یا کنار bot.py با اسم m_3.png / f_3.png، یا تو پوشه‌ی chars/m/char_3.png"""
+    return _first_existing(
+        BASE_DIR / f"{gender}_{level}.png",
+        BASE_DIR / "chars" / gender / f"char_{level}.png",
+    )
+
+
+def font_path() -> Path | None:
+    return _first_existing(BASE_DIR / "DejaVuSans-Bold.ttf", BASE_DIR / "fonts" / "DejaVuSans-Bold.ttf")
+
+
 def render_card_image(gender: str, level: int, balance: int) -> BytesIO | None:
     """عکس آماده‌ی سطح (چاپ‌شده با اسم و لقب) رو برمیدارد و عدد دارایی رو تو کادر پایینش می‌نویسه."""
-    path = BASE_DIR / "chars" / gender / f"char_{level}.png"
-    if not path.exists():
+    path = card_path(gender, level)
+    if not path:
+        log.warning("card image NOT FOUND: %s_%s.png (کنار bot.py آپلودش کردی؟)", gender, level)
+        return None
+    fp = font_path()
+    if not fp:
+        log.warning("font NOT FOUND: DejaVuSans-Bold.ttf (کنار bot.py آپلودش کن)")
         return None
     im = Image.open(path).convert("RGB")
     d = ImageDraw.Draw(im)
-    font = ImageFont.truetype(str(BASE_DIR / "fonts" / "DejaVuSans-Bold.ttf"), 52)
+    font = ImageFont.truetype(str(fp), 52)
     d.text((355, 912), f"{balance:,}".translate(_FA_DIGITS), font=font, fill=(255, 255, 255), anchor="mm")
     out = BytesIO()
     im.save(out, "JPEG", quality=92)
@@ -757,6 +781,24 @@ async def set_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text(BP(f"✅ عکس «{title}» ذخیره شد."), parse_mode="HTML")
 
 
+
+async def card_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/cardcheck — فقط پشتیبان‌ها: نشون میده عکس‌ها و فونت رو سرور پیدا کرده یا نه."""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    lines = [f"پوشه‌ی ربات: {BASE_DIR}"]
+    lines.append(f"فونت: {'✅' if font_path() else '❌ پیدا نشد (DejaVuSans-Bold.ttf کنار bot.py)'}")
+    for g, label in (("m", "آقا"), ("f", "خانوم")):
+        have = [str(i) for i in range(1, len(LEVEL_THRESHOLDS) + 1) if card_path(g, i)]
+        lines.append(f"عکس {label} ({g}_N.png): {len(have)} از {len(LEVEL_THRESHOLDS)} — سطح‌ها: {', '.join(have) or 'هیچی'}")
+    try:
+        ok = render_card_image("m", 1, 123) is not None
+        lines.append(f"ساخت کارت تستی: {'✅' if ok else '❌'}")
+    except Exception as e:
+        lines.append(f"ساخت کارت تستی: ❌ {type(e).__name__}: {e}")
+    await update.message.reply_text("\n".join(lines))
+
+
 def main():
     app = (
         Application.builder()
@@ -771,6 +813,7 @@ def main():
     app.add_handler(CommandHandler("emojis", show_emojis, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("setemoji", set_emoji, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("myid", my_id, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("cardcheck", card_check, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("setphoto", photo_help, filters=filters.ChatType.PRIVATE))
     app.add_handler(
         MessageHandler(
