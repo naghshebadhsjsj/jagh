@@ -264,7 +264,7 @@ ME_WORD = "خودم"  # تو گروه این کلمه رو بنویسی کارا
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "گاراژ: عکس همیشگی ماشین + رنگ سفید پیش‌فرض + جدول قطعات و درآمد"
+BOT_VERSION = "گاراژ: عکس‌های جدید ماشین‌ها + جدول گاراژ شبیه جدول شغل‌ها"
 
 
 def norm_word(text: str) -> str:
@@ -3171,20 +3171,17 @@ def _vw(s: str) -> int:
 
 
 def mono_table(headers, rows) -> str:
-    """جدول با کادر، داخل <pre> (تلگرام جدول واقعی نداره). \u200e اول هر خط باعث میشه ستون‌ها وسط فارسی بهم نریزن."""
+    """جدول مونواسپیس داخل <pre> دقیقاً به سبک جدول شغل‌ها: سطر عنوان، خط ─┼─، بدون کادر بیرونی."""
     cols = len(headers)
-    widths = [max(_vw(x) for x in [headers[i]] + [r[i] for r in rows]) for i in range(cols)]
-
-    def line(l, m, r):
-        return l + m.join("─" * (w + 2) for w in widths) + r
-
-    def row(cells):
-        return "│" + "│".join(" " + str(c) + " " * (widths[i] - _vw(c)) + " " for i, c in enumerate(cells)) + "│"
-
-    out = [line("┌", "┬", "┐"), row(headers), line("├", "┼", "┤")]
-    out += [row(r) for r in rows]
-    out.append(line("└", "┴", "┘"))
-    return "<pre>" + html.escape("\n".join("\u200e" + l for l in out)) + "</pre>"
+    cells = [tuple(str(x) for x in headers)] + [tuple(str(x) for x in r) for r in rows]
+    widths = [max(_vw(r[i]) for r in cells) for i in range(cols)]
+    sep = "─┼─".join("─" * w for w in widths)
+    lines = []
+    for k, r in enumerate(cells):
+        lines.append(" │ ".join(r[i] + " " * max(widths[i] - _vw(r[i]), 0) for i in range(cols)))
+        if k == 0:
+            lines.append(sep)
+    return "<pre>" + html.escape("\n".join("\u200e" + l for l in lines)) + "</pre>"
 
 
 def _bar(lv: int) -> str:
@@ -3220,7 +3217,7 @@ def _find_car_file(idx: int):
     return None
 
 
-def _recolor_white_car(img: Image.Image, rgb: tuple) -> Image.Image:
+def _recolor_white_car_legacy(img: Image.Image, rgb: tuple) -> Image.Image:
     """بدنه‌ی سفید ماشین رو به رنگ دلخواه درمیاره؛ سایه‌روشن‌ها حفظ میشن، شیشه/لاستیک/پس‌زمینه‌ی بیرونی دست‌نخورده می‌مونن."""
     im = img.convert("RGB")
     if im.width > _CAR_IMG_MAX_W:
@@ -3253,6 +3250,72 @@ def _recolor_white_car(img: Image.Image, rgb: tuple) -> Image.Image:
     return Image.composite(colored, im, body)
 
 
+# ───── رنگ‌دهی عکس‌های گاراژ (بدنه‌ی سفید با انعکاس نارنجی/آبی) ─────
+# برای هر ماشین چند نقطه‌ی مطمئنِ روی بدنه (کسری از عرض/ارتفاع) و کادری که بدنه توش قرار داره.
+_CAR_SEEDS = {
+    "pride":       ([(0.25, 0.43), (0.72, 0.50), (0.50, 0.33), (0.60, 0.56)], 0.27),
+    "supra":       ([(0.28, 0.50), (0.50, 0.38), (0.80, 0.53), (0.55, 0.45)], 0.31),
+    "bmw":         ([(0.35, 0.46), (0.60, 0.44), (0.80, 0.55), (0.20, 0.62)], 0.31),
+    "lamborghini": ([(0.30, 0.52), (0.50, 0.45), (0.75, 0.50), (0.62, 0.40)], 0.34),
+    "bugatti":     ([(0.35, 0.50), (0.55, 0.42), (0.80, 0.56), (0.20, 0.58)], 0.34),
+}
+_CAR_BODY_YMAX = 0.75
+
+
+def _car_body_mask(im: Image.Image, stem: str):
+    """ماسک بدنه: نقاط روشن و کم‌رنگ که به نقطه‌های مطمئن بدنه وصل‌اند (کف، دیوار و چراغ‌ها جدا می‌مونن)."""
+    seeds, ymin = _CAR_SEEDS[stem]
+    W = 640
+    sm = im.resize((W, max(1, int(im.height * W / im.width))), Image.LANCZOS)
+    _h, sat, val = sm.convert("HSV").split()
+    cand = ImageChops.multiply(sat.point(lambda x: 255 if x < 185 else 0), val.point(lambda x: 255 if x > 95 else 0))
+    cand = cand.filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.MinFilter(9))
+    m = cand.point(lambda x: 255 if x > 127 else 0)
+    w, h = m.size
+    clip = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(clip).rectangle([int(0.01 * w), int(ymin * h), int(0.98 * w), int(_CAR_BODY_YMAX * h)], fill=255)
+    m = ImageChops.multiply(m, clip)
+    for fx, fy in seeds:
+        x, y = int(fx * w), int(fy * h)
+        found = None
+        for r in range(0, 30, 2):
+            for dx in (-r, 0, r):
+                for dy in (-r, 0, r):
+                    xx, yy = min(w - 1, max(0, x + dx)), min(h - 1, max(0, y + dy))
+                    if m.getpixel((xx, yy)) == 255:
+                        found = (xx, yy)
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if found:
+            ImageDraw.floodfill(m, found, 128)
+    return m.point(lambda x: 255 if x == 128 else 0)
+
+
+def _recolor_white_car(img: Image.Image, rgb: tuple, stem: str = "") -> Image.Image:
+    """بدنه‌ی سفید رو به رنگ دلخواه درمیاره؛ سایه‌روشن‌ها، شیشه‌ها، چرخ‌ها و گاراژ دست‌نخورده می‌مونن."""
+    im = img.convert("RGB")
+    if im.width > _CAR_IMG_MAX_W:
+        im = im.resize((_CAR_IMG_MAX_W, int(im.height * _CAR_IMG_MAX_W / im.width)), Image.LANCZOS)
+    if sum(rgb) >= 700:  # سفید = عکس اصلی
+        return im
+    if stem not in _CAR_SEEDS:
+        return _recolor_white_car_legacy(img, rgb)
+    body = _car_body_mask(im, stem)
+    if body.histogram()[255] < 0.02 * body.width * body.height:  # تشخیص بدنه خراب شد
+        return _recolor_white_car_legacy(img, rgb)
+    body = body.resize(im.size, Image.BILINEAR).filter(ImageFilter.GaussianBlur(1.5))
+    gray = im.convert("L")
+
+    def ch(t):
+        return gray.point(lambda x: min(255, int(t * (0.30 + 0.70 * x / 255) + 255 * max(0.0, x / 255 - 0.86) * 0.9)))
+
+    colored = Image.merge("RGB", tuple(ch(t) for t in rgb))
+    return Image.composite(colored, im, body)
+
+
 def car_image_bytes(idx: int, color: int) -> bytes:
     key = (idx, color)
     if key not in _CAR_IMG_CACHE:
@@ -3262,7 +3325,7 @@ def car_image_bytes(idx: int, color: int) -> bytes:
         if f is not None:
             try:
                 with Image.open(f) as im:
-                    out = _recolor_white_car(im, rgb)
+                    out = _recolor_white_car(im, rgb, Path(CAR_IMAGE_FILES[idx]).stem)
                     buf = BytesIO()
                     out.save(buf, format="JPEG", quality=88, optimize=True)
                     data = buf.getvalue()
@@ -3316,6 +3379,71 @@ def garage_main(uid: int, balance: int, owned: dict):
     if not owned:
         lines += ["", "برای شروع باید اولین ماشین را بخری."]
     return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+GARAGE_NEED_PREV = "ابتدا ماشین قبلی"
+
+
+def garage_rows(owned: dict):
+    """[(ایموجی، اسم، قیمت، درآمد ساعتی، وضعیت: 'own' | 'buy' | 'lock')]"""
+    next_idx = next((i for i in range(len(CARS)) if i not in owned), len(CARS))
+    rows = []
+    for i, (name, _en, emo, price, base) in enumerate(CARS):
+        if i in owned:
+            rows.append((emo, name, "—", fmt_short(car_profit(i, owned[i])), "own"))
+        elif i == next_idx:
+            rows.append((emo, name, fmt_short(price), fmt_short(base), "buy"))
+        else:
+            rows.append((emo, name, fmt_short(price), fmt_short(base), "lock"))
+    return rows
+
+
+def garage_rich_html(balance: int, owned: dict) -> str:
+    """جدول واقعی تلگرام (Rich Message) مثل جدول شغل‌ها: قفل باز برای ماشین‌هایی که داری، قفل بسته برای بقیه."""
+    out = ["<table><tr><th>ماشین</th><th>قیمت</th><th>درآمد ساعتی</th><th>وضعیت</th></tr>"]
+    for emo, name, price, income, st in garage_rows(owned):
+        if st == "own":
+            status = f"{lock_open()} داری"
+        elif st == "buy":
+            status = "🛒 قابل خرید"
+        else:
+            status = f"{lock_closed()} {GARAGE_NEED_PREV}"
+        out.append(f"<tr><td>{emo} {html.escape(name)}</td><td>{price}</td><td>{income}</td><td>{status}</td></tr>")
+    out.append("</table>")
+    out.append(f"<p>{ce('wallet', 1, '💰')} دارایی شما: {balance:,} تومن</p>")
+    return "".join(out)
+
+
+def garage_pre_text(balance: int, owned: dict) -> str:
+    """نسخه‌ی جایگزین: جدول مونواسپیس (اگه Rich Message کار نکرد)."""
+    rows = []
+    for emo, name, price, income, st in garage_rows(owned):
+        status = "داری ✅" if st == "own" else ("قابل خرید 🛒" if st == "buy" else "قفل 🔒")
+        rows.append((f"{emo} {name}", price, income, status))
+    table = mono_table(("ماشین", "قیمت", "درآمد ساعتی", "وضعیت"), rows)
+    return f"<b>🚗 گاراژ ماشین‌ها</b>\n{table}\n" + B(f"{ce('wallet', 1, '💰')} دارایی شما: {balance:,} تومن")
+
+
+async def send_garage_list(bot, chat_id: int, uid: int, reply_to: int | None = None):
+    """لیست گاراژ: اول جدول واقعی تلگرام، زیرش پیام دکمه‌ها؛ اگه جدول واقعی نشد، جدول مونواسپیس + دکمه‌ها تو یه پیام."""
+    owned = await _owned_cars(uid)
+    row = await get_user(uid)
+    bal = row["balance"] if row else 0
+    _t, kb = garage_main(uid, bal, owned)
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    rich_ok = False
+    try:
+        payload = {"chat_id": chat_id, "rich_message": {"html": garage_rich_html(bal, owned)}}
+        if rp:
+            payload["reply_parameters"] = rp.to_dict()
+        await bot._post("sendRichMessage", payload)
+        rich_ok = True
+    except Exception:
+        log.warning("garage sendRichMessage failed, using <pre> table", exc_info=True)
+    if rich_ok:
+        await send_html(bot, chat_id, B("🚗 برای دیدن یا خرید، یکی از ماشین‌ها رو انتخاب کن 👇"), reply_markup=kb)
+        return
+    await send_html(bot, chat_id, garage_pre_text(bal, owned), reply_markup=kb, reply_parameters=rp)
+
 
 def garage_car(uid: int, idx: int, color: int, owned_row, balance: int):
     name, _en, emo, price, base = CARS[idx]
@@ -3400,10 +3528,7 @@ async def show_garage(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = max(owned.keys())
         await _send_car_panel(msg.chat_id, context, user.id, idx)
         return
-    row = await get_user(user.id)
-    text, kb = garage_main(user.id, row["balance"], owned)
-    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
-    await msg.reply_text(text, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+    await send_garage_list(context.bot, msg.chat_id, user.id, msg.message_id)
 
 async def _garage_show_car(q, context, uid: int, idx: int, color: int = 0):
     owned = await _owned_cars(uid)
@@ -3463,13 +3588,9 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _garage_show_car(q, context, uid, idx)
     elif act == "garage":
         await q.answer()
-        owned = await _owned_cars(uid); user = await get_user(uid)
-        text, kb = garage_main(uid, user["balance"], owned)
-        try: await q.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=kb)
-        except Exception:
-            try: await q.message.delete()
-            except Exception: pass
-            await context.bot.send_message(q.message.chat_id, text=text, parse_mode="HTML", reply_markup=kb)
+        try: await q.message.delete()
+        except Exception: pass
+        await send_garage_list(context.bot, q.message.chat_id, uid)
     elif act == "buy":
         price = CARS[idx][3]
         owned = await _owned_cars(uid)
