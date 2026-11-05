@@ -264,7 +264,7 @@ ME_WORD = "خودم"  # تو گروه این کلمه رو بنویسی کارا
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "گاراژ: عکس‌های جدید ماشین‌ها + جدول گاراژ شبیه جدول شغل‌ها"
+BOT_VERSION = "گاراژ جدید + کازینو بسته + پنل پشتیبانی با یوزرنیم"
 
 
 def norm_word(text: str) -> str:
@@ -344,6 +344,7 @@ async def init_db(app: Application):
             )"""
         )
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS jaghs BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_shift DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS shift_seen TEXT NOT NULL DEFAULT ''")
@@ -2174,6 +2175,9 @@ async def card_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───────────────────────── کازینو: تاس و اسلات ─────────────────────────
 # «کازینو» پنل رو باز می‌کنه: تاس / اسلات ← ۱ نفره / ۲ نفره ← مبلغ ← بازی؛ همه‌چی تو همون پنل.
 # میان‌بر متنی: «تاس 3 100هزار»، «اسلات 100هزار»، «میز تاس 100هزار»، «میز اسلات 100هزار».
+CASINO_OPEN = False   # False = بخش کازینو بسته‌ست (برای باز کردن True کن)
+CASINO_CLOSED_EID = "5938149692423541565"
+CASINO_CLOSED_TEXT = "بخش کازینو به دستور پاول دورف فعلا بسته‌ست."
 CASINO_MIN_BET = 1_000
 DICE_NET = 5          # حدس درست تاس: سود ۵ برابر شرط (کلاً ۶ برابر برمی‌گرده)
 CASINO_WAIT = 3.8     # صبر برای تموم شدن انیمیشن تاس/اسلات
@@ -2581,8 +2585,11 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     parts = q.data.split(":")
     act = parts[1]
-    if act in ("mx", "mc"):
+    if act in ("mx", "mc"):  # بازی مینِ نیمه‌کاره می‌تونه تموم/برداشت بشه
         await mines_cb(update, context, parts)
+        return
+    if not CASINO_OPEN and act != "close":
+        await q.answer(CASINO_CLOSED_TEXT, show_alert=True)
         return
     chat_id = q.message.chat_id
     user = q.from_user
@@ -2748,6 +2755,17 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     """متن‌های کازینو رو تشخیص میده. True = مصرف شد."""
     msg, user = update.effective_message, update.effective_user
     t = norm_word(text).translate(_DIG)
+    if not CASINO_OPEN:
+        if re.fullmatch(r"کازینو|casino|(?:میز\s*)?(?:تاس|اسلات|مین)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I):
+            await send_html(
+                context.bot, msg.chat_id,
+                B(f'<tg-emoji emoji-id="{CASINO_CLOSED_EID}">🔒</tg-emoji> {CASINO_CLOSED_TEXT}'),
+                reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True),
+            )
+            return True
+        context.user_data.pop("casino_custom_bet", None)
+        context.user_data.pop("casino_custom_dice", None)
+        return False
     bot, chat_id = context.bot, msg.chat_id
     rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
     custom_choice = context.user_data.pop("casino_custom_bet", None)
@@ -3208,12 +3226,14 @@ _CAR_IMG_MAX_W = 1280
 
 
 def _find_car_file(idx: int):
-    base = Path(os.environ.get("CARS_DIR") or (Path(__file__).resolve().parent / "cars"))
+    here = Path(__file__).resolve().parent
     stem = Path(CAR_IMAGE_FILES[idx]).stem
-    for ext in (".jpg", ".jpeg", ".png", ".webp", ".JPG", ".JPEG", ".PNG", ".WEBP"):
-        f = base / (stem + ext)
-        if f.exists():
-            return f
+    # اول پوشه‌ی cars، اگه نبود خود عکس‌ها کنار bot.py
+    for base in (Path(os.environ.get("CARS_DIR") or (here / "cars")), here):
+        for ext in (".jpg", ".jpeg", ".png", ".webp", ".JPG", ".JPEG", ".PNG", ".WEBP"):
+            f = base / (stem + ext)
+            if f.exists():
+                return f
     return None
 
 
@@ -3703,6 +3723,13 @@ async def car_profit_loop():
 async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """قبل از همه‌ی هندلرها: ثبت گروه‌ها + اگه ربات خاموش باشه فقط پشتیبان‌ها کار می‌کنن."""
     user, chat = update.effective_user, update.effective_chat
+    if user and user.username and not user.is_bot:
+        try:  # یوزرنیم ذخیره میشه تا پشتیبان بتونه با @یوزرنیم هم کاربر رو پیدا کنه
+            await pool.execute(
+                "UPDATE users SET username = $1 WHERE user_id = $2 AND username IS DISTINCT FROM $1",
+                user.username.lower(), user.id)
+        except Exception:
+            log.warning("username save failed", exc_info=True)
     if chat and chat.type in ("group", "supergroup") and chat.id not in KNOWN_CHATS:
         KNOWN_CHATS.add(chat.id)
         try:
@@ -3765,7 +3792,7 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         what = "پول" if act.startswith("money") else "جق"
         operation = "اضافه کردن" if act.endswith("_add") else "کم کردن"
         await q.edit_message_text(
-            f"{operation} {what}\n\nآیدی عددی کاربر رو بفرست، یا یه پیام ازش اینجا فوروارد کن.\n(لغو: بنویس «لغو»)",
+            f"{operation} {what}\n\nآیدی عددی یا @یوزرنیم کاربر رو بفرست، یا یه پیام ازش اینجا فوروارد کن.\n(لغو: بنویس «لغو»)",
             reply_markup=CANCEL_KB,
         )
     elif act in ("task_daily", "task_weekly"):
@@ -3866,8 +3893,13 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
                 uid = fo.sender_user.id
             elif msg.text and msg.text.strip().lstrip("-").isdigit():
                 uid = int(msg.text.strip())
+            elif msg.text and re.fullmatch(r"@?[A-Za-z0-9_]{3,32}", msg.text.strip()):
+                uid = await pool.fetchval("SELECT user_id FROM users WHERE username = $1", msg.text.strip().lstrip("@").lower())
+                if uid is None:
+                    await msg.reply_text("این یوزرنیم تو دیتابیس نیست (کاربر باید بعد از آپدیت یه بار با ربات کار کرده باشه). آیدی عددی بفرست.", reply_markup=CANCEL_KB)
+                    return True
             if uid is None:
-                await msg.reply_text("آیدی عددی بفرست یا یه پیام از کاربر فوروارد کن (اگه کاربر فوروارد رو بسته باشه آیدی عددی لازمه).", reply_markup=CANCEL_KB)
+                await msg.reply_text("آیدی عددی یا @یوزرنیم بفرست، یا یه پیام از کاربر فوروارد کن (اگه فوروارد بسته‌ست آیدی عددی لازمه).", reply_markup=CANCEL_KB)
                 return True
             row = await get_user(uid)
             if not row:
@@ -3876,7 +3908,7 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
             st.update(step="amount", uid=uid)
             what = "پول (مثلا 50000 یا 100 هزار)" if act.startswith("money") else "جق (مثلا 20)"
             await msg.reply_text(
-                f"👤 {row['name'] or uid}\nدارایی: {row['balance']:,} تومن | جق‌ها: {row['jaghs']:,}\n\nچقدر {what} کم بشه؟",
+                f"👤 {row['name'] or uid}\nدارایی: {row['balance']:,} تومن | جق‌ها: {row['jaghs']:,}\n\nچقدر {what} {'اضافه' if act.endswith('_add') else 'کم'} بشه؟",
                 reply_markup=CANCEL_KB,
             )
             return True
