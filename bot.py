@@ -75,7 +75,7 @@ import asyncpg
 import math
 from io import BytesIO
 from pathlib import Path
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, MessageEntity, ReplyParameters, Update
 from telegram.ext import (
     Application,
@@ -355,14 +355,26 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS chats (chat_id BIGINT PRIMARY KEY, title TEXT)")
         await c.execute(
             """CREATE TABLE IF NOT EXISTS cars (
-                user_id  BIGINT NOT NULL,
-                car_idx  INT    NOT NULL,
-                color    INT    NOT NULL DEFAULT 0,
-                level    INT    NOT NULL DEFAULT 1,
+                user_id BIGINT NOT NULL, car_idx INT NOT NULL,
+                color INT NOT NULL DEFAULT 0, level INT NOT NULL DEFAULT 1,
                 last_pay DOUBLE PRECISION NOT NULL DEFAULT 0,
+                pending_profit BIGINT NOT NULL DEFAULT 0,
+                purchased_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+                tires INT NOT NULL DEFAULT 1, body INT NOT NULL DEFAULT 1,
+                glass INT NOT NULL DEFAULT 1, computer INT NOT NULL DEFAULT 1,
+                engine INT NOT NULL DEFAULT 1, turbo INT NOT NULL DEFAULT 1,
                 PRIMARY KEY (user_id, car_idx)
             )"""
         )
+        for col, definition in (
+            ("pending_profit", "BIGINT NOT NULL DEFAULT 0"),
+            ("purchased_at", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+            ("tires", "INT NOT NULL DEFAULT 1"), ("body", "INT NOT NULL DEFAULT 1"),
+            ("glass", "INT NOT NULL DEFAULT 1"), ("computer", "INT NOT NULL DEFAULT 1"),
+            ("engine", "INT NOT NULL DEFAULT 1"), ("turbo", "INT NOT NULL DEFAULT 1"),
+        ):
+            await c.execute(f"ALTER TABLE cars ADD COLUMN IF NOT EXISTS {col} {definition}")
+        await c.execute("UPDATE cars SET purchased_at = last_pay WHERE purchased_at = 0")
         # کاربرهای قدیمی که تعداد جقشون ثبت نشده: از روی موجودی تخمین زده میشه (میانگین هر جق ≈ ۵۲ تومن)
         await c.execute("UPDATE users SET jaghs = balance / 52 WHERE jaghs = 0 AND balance > 0")
         await c.execute(
@@ -805,6 +817,9 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _word_key(text) in WALLET_WORDS:
         await wallet(update, context)
         return
+    if _word_key(text) in {"ماشین", "ماشینم", "ماشینمو", "ماشینمن"}:
+        await show_my_car(update, context)
+        return
     if _word_key(text) in CAR_WORDS:
         await show_garage(update, context)
         return
@@ -1246,6 +1261,8 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await top(update, context)
     elif msg and msg.text and _word_key(msg.text) in WALLET_WORDS:
         await wallet(update, context)
+    elif msg and msg.text and _word_key(msg.text) in {"ماشین", "ماشینم", "ماشینمو", "ماشینمن"}:
+        await show_my_car(update, context)
     elif msg and msg.text and _word_key(msg.text) in CAR_WORDS:
         await show_garage(update, context)
     elif msg and msg.text:
@@ -3103,7 +3120,7 @@ def render_car_image(idx: int, rgb: tuple) -> BytesIO:
 
 
 # ───────────────────────── 🚗 گاراژ ماشین ─────────────────────────
-CAR_WORDS = {"ماشین", "ماشینم", "ماشینمن", "ماشینها", "ماشینهام", "ماشینهایم", "گاراژ", "گاراژم", "گاراژمن", "گاراژماشین", "cars", "garage"}
+CAR_WORDS = {"ماشین", "ماشینم", "ماشینمو", "ماشینمن", "ماشینها", "ماشینهام", "ماشینهایم", "گاراژ", "گاراژم", "گاراژمن", "گاراژماشین", "cars", "garage"}
 CAR_MAX_LEVEL = 5
 CAR_PAY_EVERY = 3600  # هر ساعت یه بار سود میده
 # (اسم فارسی، اسم انگلیسی، ایموجی، قیمت به تومن، سود ساعتی سطح ۱)
@@ -3121,6 +3138,7 @@ CAR_COLORS = [
     ("زرد", "🟡", (245, 196, 0)),
     ("صورتی", "🌸", (255, 111, 181)),
     ("مشکی", "⚫", (21, 21, 21)),
+    ("سفید", "⚪", (245, 245, 245)),
 ]
 _CAR_IMG_CACHE: dict[tuple[int, int], bytes] = {}
 
@@ -3143,32 +3161,60 @@ def fmt_toman(n: int) -> str:
     return " و ".join(parts) + " تومن"
 
 
-def car_profit(idx: int, level: int) -> int:
-    base = CARS[idx][4]
-    return int(base * (1 + 0.5 * (level - 1)))
+CAR_IMAGE_FILES = ["bugatti.jpg", "pride.jpg", "supra.jpg", "bmw.jpg", "lamborghini.jpg"]
+PARTS = {
+    "tires": ("لاستیک‌ها", "🛞"), "body": ("بدنه", "🛡"),
+    "glass": ("شیشه‌ها", "🪟"), "computer": ("کامپیوتر", "💻"),
+    "engine": ("موتور", "⚙️"), "turbo": ("توربو", "🌪"),
+}
+PART_MAX_LEVEL = 5
+CAR_COLOR_PRICE = 20_000_000
+
+
+def car_profit(idx: int, level: int, row=None) -> int:
+    base = CARS[idx][4] * (1 + 0.5 * (level - 1))
+    if row:
+        part_total = sum(max(0, int(row[k]) - 1) for k in PARTS)
+        base *= (1 + 0.10 * part_total)
+    return int(base)
 
 
 def car_upgrade_cost(idx: int, level: int) -> int:
     return int(CARS[idx][3] * 0.3 * level)
 
 
+def car_part_cost(idx: int, level: int) -> int:
+    return int(CARS[idx][3] * (0.025 * level))
+
+
 def car_image_bytes(idx: int, color: int) -> bytes:
     key = (idx, color)
     if key not in _CAR_IMG_CACHE:
-        _CAR_IMG_CACHE[key] = render_car_image(idx, CAR_COLORS[color][2]).getvalue()
+        from pathlib import Path as _Path
+        from PIL import ImageOps as _ImageOps
+        src = _Path(__file__).resolve().parent / "cars" / CAR_IMAGE_FILES[idx]
+        with Image.open(src) as im:
+            im = im.convert("RGB")
+            if color != 0:
+                # تصاویر سفید هستند؛ رنگ انتخابی با حفظ سایه و انعکاس روی بدنه اعمال می‌شود.
+                palette = [(30,90,214), (214,32,32), (245,196,0), (255,111,181), (21,21,21), (245,245,245)]
+                target = palette[color] if color < len(palette) else palette[0]
+                gray = _ImageOps.grayscale(im)
+                tinted = _ImageOps.colorize(gray, black=tuple(int(v*.28) for v in target), white=(245,245,245))
+                if color != 5:
+                    im = Image.blend(im, tinted, 0.78)
+            buf = BytesIO(); im.save(buf, "JPEG", quality=91); _CAR_IMG_CACHE[key] = buf.getvalue()
     return _CAR_IMG_CACHE[key]
 
 
 async def _car_photo(idx: int, color: int):
     try:
         data = await asyncio.to_thread(car_image_bytes, idx, color)
-        bio = BytesIO(data)
-        bio.name = f"car_{idx}_{color}.jpg"
+        bio = BytesIO(data); bio.name = f"car_{idx}_{color}.jpg"
         return bio
     except Exception:
         log.exception("car image failed")
         return None
-
 
 async def _owned_cars(uid: int) -> dict[int, asyncpg.Record]:
     rows = await pool.fetch("SELECT * FROM cars WHERE user_id = $1", uid)
@@ -3188,7 +3234,7 @@ def garage_main(uid: int, balance: int, owned: dict):
             rows.append([btn(f"{emo} {name} • سطح {lv}", "success", callback_data=f"car:v:{uid}:{i}:{owned[i]['color']}")])
         else:
             lines.append(f"🔒 {emo} {name} | قیمت: {fmt_toman(price)}")
-            rows.append([btn(f"🛒 {name} • {fmt_toman(price)}", "primary", callback_data=f"car:v:{uid}:{i}:0")])
+            rows.append([btn(f"🛒 {name} • {fmt_toman(price)}", "primary", callback_data=f"car:v:{uid}:{i}:5")])
     if owned:
         lines += ["", f"⏱ مجموع سود هر ساعت: {fmt_toman(total)}"]
     else:
@@ -3201,37 +3247,32 @@ def garage_car(uid: int, idx: int, color: int, owned_row, balance: int):
     cname = CAR_COLORS[color][0]
     if owned_row:
         lv = owned_row["level"]
-        left = max(0, owned_row["last_pay"] + CAR_PAY_EVERY - time.time())
-        lines = [
-            f"{emo} {name}",
-            f"🎨 رنگ: {cname}",
-            f"⭐ سطح: {lv} از {CAR_MAX_LEVEL}",
-            f"{MONEY_CE} سود هر ساعت: {fmt_toman(car_profit(idx, lv))}",
-            f"⏳ سود بعدی: {int(left // 60) + 1} دقیقه دیگه",
-        ]
-        if lv < CAR_MAX_LEVEL:
-            lines.append(f"⬆️ ارتقا به سطح {lv + 1}: {fmt_toman(car_upgrade_cost(idx, lv))} (سود: {fmt_toman(car_profit(idx, lv + 1))})")
+        pending = int(owned_row["pending_profit"] or 0)
+        pr = car_profit(idx, lv, owned_row)
+        lines = [f"{emo} {name}", f"🎨 رنگ: {cname} (تغییر هر رنگ: {fmt_toman(CAR_COLOR_PRICE)})", f"⭐ سطح کلی: {lv} از {CAR_MAX_LEVEL}",
+                 f"💰 درآمد ساعتی: {fmt_toman(pr)}", f"🏦 درآمد آماده برداشت: {fmt_toman(pending)}"]
+        for key, (label, _emoji) in PARTS.items():
+            lines.append(f"{label}: سطح {owned_row[key]}/{PART_MAX_LEVEL}")
     else:
-        lines = [
-            f"{emo} {name}",
-            f"🎨 رنگ: {cname}",
-            f"🏷 قیمت: {fmt_toman(price)}",
-            f"{MONEY_CE} سود هر ساعت: {fmt_toman(car_profit(idx, 1))}",
-            f"👛 دارایی شما: {balance:,} تومن",
-        ]
-    color_row = [
-        btn(("✔️" if c == color else ci), callback_data=f"car:c:{uid}:{idx}:{c}") for c, (_n, ci, _rgb) in enumerate(CAR_COLORS)
-    ]
+        paint_fee = CAR_COLOR_PRICE if color != 5 else 0
+        lines = [f"{emo} {name}", f"🎨 رنگ: {cname} (هزینه رنگ: {fmt_toman(paint_fee)})", f"🏷 قیمت خودرو: {fmt_toman(price)}",
+                 f"💰 درآمد ساعتی پایه: {fmt_toman(car_profit(idx, 1))}", f"👛 دارایی شما: {balance:,} تومن"]
+    color_row = [btn(("✔️" if c == color else ci), callback_data=f"car:c:{uid}:{idx}:{c}") for c, (_n, ci, _rgb) in enumerate(CAR_COLORS)]
     rows = [color_row]
     if not owned_row:
-        rows.append([btn(f"🛒 خرید ({fmt_toman(price)})", "success", callback_data=f"car:b:{uid}:{idx}:{color}")])
-    elif owned_row["level"] < CAR_MAX_LEVEL:
-        rows.append([btn(f"⬆️ ارتقا ({fmt_toman(car_upgrade_cost(idx, owned_row['level']))})", "primary", callback_data=f"car:u:{uid}:{idx}:{color}")])
+        buy_total = price + (CAR_COLOR_PRICE if color != 5 else 0)
+        rows.append([btn(f"🛒 خرید ({fmt_toman(buy_total)})", "success", callback_data=f"car:b:{uid}:{idx}:{color}")])
     else:
-        rows.append([btn("👑 حداکثر سطح", callback_data=f"car:x:{uid}:{idx}:{color}")])
+        rows.append([btn("💰 برداشت درآمد", "success", callback_data=f"car:w:{uid}:{idx}:{color}")])
+        for key, (label, em) in PARTS.items():
+            lv = int(owned_row[key])
+            if lv < PART_MAX_LEVEL:
+                cost = car_part_cost(idx, lv)
+                rows.append([btn(f"{em} ارتقای {label} ({fmt_toman(cost)})", "primary", callback_data=f"car:p:{uid}:{idx}:{list(PARTS).index(key)}")])
+        if owned_row["level"] < CAR_MAX_LEVEL:
+            rows.append([btn(f"⭐ ارتقای سطح کلی ({fmt_toman(car_upgrade_cost(idx, owned_row['level']))})", "primary", callback_data=f"car:u:{uid}:{idx}:{color}")])
     rows.append([btn("🔙 برگشت به گاراژ", callback_data=f"car:m:{uid}:0:0")])
     return B("\n".join(lines)), InlineKeyboardMarkup(rows)
-
 
 async def show_garage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/garage یا نوشتن «ماشین / ماشینم / گاراژ»."""
@@ -3246,6 +3287,21 @@ async def show_garage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("garage send failed, retry without premium emoji")
         await msg.reply_text(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\\1", text), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+
+
+async def show_my_car(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg, user = update.effective_message, update.effective_user
+    await upsert_user(user.id, user.full_name)
+    row = await pool.fetchrow("SELECT * FROM cars WHERE user_id=$1 ORDER BY purchased_at DESC, car_idx LIMIT 1", user.id)
+    if not row:
+        await show_garage(update, context)
+        return
+    text, kb = garage_car(user.id, row["car_idx"], row["color"], row, (await get_user(user.id))["balance"])
+    photo = await _car_photo(row["car_idx"], row["color"])
+    if photo:
+        await msg.reply_photo(photo, caption=re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), parse_mode="HTML", reply_markup=kb)
+    else:
+        await msg.reply_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 async def _garage_show_car(q, context, uid: int, idx: int, color: int, edit_media: bool):
@@ -3305,7 +3361,7 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if idx not in range(len(CARS)) and act != "m":
         await q.answer()
         return
-    color = color if color in range(len(CAR_COLORS)) else 0
+    color = color if color in range(len(CAR_COLORS)) else 5
 
     if act == "m":
         await q.answer()
@@ -3318,16 +3374,21 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif act == "c":
         owned = await _owned_cars(uid)
         if idx in owned and owned[idx]["color"] != color:
-            await pool.execute("UPDATE cars SET color = $1 WHERE user_id = $2 AND car_idx = $3", color, uid, idx)
-        await q.answer(f"رنگ: {CAR_COLORS[color][0]}")
+            async with pool.acquire() as c:
+                async with c.transaction():
+                    ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance >= $1 RETURNING 1", CAR_COLOR_PRICE, uid)
+                    if not ok:
+                        await q.answer(f"برای تغییر رنگ {fmt_toman(CAR_COLOR_PRICE)} لازم داری.", show_alert=True); return
+                    await c.execute("UPDATE cars SET color=$1 WHERE user_id=$2 AND car_idx=$3", color, uid, idx)
+        await q.answer(f"رنگ: {CAR_COLORS[color][0]} | هزینه: {fmt_toman(CAR_COLOR_PRICE)}")
         await _garage_show_car(q, context, uid, idx, color, edit_media=True)
     elif act == "b":
-        price = CARS[idx][3]
+        price = CARS[idx][3] + (CAR_COLOR_PRICE if color != 5 else 0)
         try:
             async with pool.acquire() as c:
                 async with c.transaction():
                     ins = await c.fetchval(
-                        "INSERT INTO cars (user_id, car_idx, color, level, last_pay) VALUES ($1, $2, $3, 1, $4) "
+                        "INSERT INTO cars (user_id, car_idx, color, level, last_pay, purchased_at) VALUES ($1, $2, $3, 1, $4, $4) "
                         "ON CONFLICT DO NOTHING RETURNING 1", uid, idx, color, time.time(),
                     )
                     if not ins:
@@ -3343,6 +3404,41 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer(f"پولت کافی نیست! قیمت: {fmt_toman(price)}", show_alert=True)
             return
         await q.answer(f"🎉 {CARS[idx][0]} مال تو شد!", show_alert=True)
+        await _garage_show_car(q, context, uid, idx, color, edit_media=True)
+    elif act == "w":
+        async with pool.acquire() as c:
+            async with c.transaction():
+                amount = await c.fetchval("SELECT pending_profit FROM cars WHERE user_id=$1 AND car_idx=$2 FOR UPDATE", uid, idx)
+                if amount and amount > 0:
+                    await c.execute("UPDATE cars SET pending_profit=0 WHERE user_id=$1 AND car_idx=$2", uid, idx)
+                    await c.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", amount, uid)
+                else:
+                    amount = 0
+        if not amount:
+            await q.answer("فعلاً درآمدی برای برداشت نداری.", show_alert=True); return
+        await q.answer(f"{fmt_toman(amount)} به موجودی اضافه شد!", show_alert=True)
+        await _garage_show_car(q, context, uid, idx, color, edit_media=True)
+    elif act == "p":
+        part_names = list(PARTS)
+        try: part = part_names[int(parts[4])]
+        except (IndexError, ValueError): await q.answer(); return
+        cur = await pool.fetchrow("SELECT * FROM cars WHERE user_id=$1 AND car_idx=$2", uid, idx)
+        if not cur:
+            await q.answer("اول ماشین رو بخر.", show_alert=True); return
+        lv = int(cur[part])
+        if lv >= PART_MAX_LEVEL:
+            await q.answer("این قطعه به آخرین سطح رسیده.", show_alert=True); return
+        cost = car_part_cost(idx, lv)
+        try:
+            async with pool.acquire() as c:
+                async with c.transaction():
+                    paid = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance >= $1 RETURNING 1", cost, uid)
+                    if not paid: raise _CarRollback()
+                    changed = await c.fetchval(f"UPDATE cars SET {part}={part}+1 WHERE user_id=$1 AND car_idx=$2 AND {part}=$3 RETURNING 1", uid, idx, lv)
+                    if not changed: raise _CarRollback()
+        except _CarRollback:
+            await q.answer(f"موجودی کافی نیست یا سطح قطعه تغییر کرده؛ هزینه: {fmt_toman(cost)}", show_alert=True); return
+        await q.answer(f"ارتقای {PARTS[part][0]} انجام شد!", show_alert=True)
         await _garage_show_car(q, context, uid, idx, color, edit_media=True)
     elif act == "u":
         owned = await _owned_cars(uid)
@@ -3384,13 +3480,13 @@ async def car_profit_loop():
         try:
             now = time.time()
             due = await pool.fetch(
-                "SELECT user_id, car_idx, level, last_pay FROM cars WHERE last_pay <= $1::double precision", now - CAR_PAY_EVERY,
+                "SELECT user_id, car_idx, level, last_pay, tires, body, glass, computer, engine, turbo FROM cars WHERE last_pay <= $1::double precision", now - CAR_PAY_EVERY,
             )
             for r in due:
                 hours = int((now - r["last_pay"]) // CAR_PAY_EVERY)
                 if hours <= 0 or r["car_idx"] not in range(len(CARS)):
                     continue
-                profit = car_profit(r["car_idx"], r["level"]) * hours
+                profit = car_profit(r["car_idx"], r["level"], r) * hours
                 async with pool.acquire() as c:
                     async with c.transaction():
                         moved = await c.fetchval(
@@ -3398,7 +3494,7 @@ async def car_profit_loop():
                             hours * CAR_PAY_EVERY, r["user_id"], r["car_idx"], r["last_pay"],
                         )
                         if moved:
-                            await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", profit, r["user_id"])
+                            await c.execute("UPDATE cars SET pending_profit = pending_profit + $1::bigint WHERE user_id=$2 AND car_idx=$3", profit, r["user_id"], r["car_idx"])
         except asyncio.CancelledError:
             raise
         except Exception:
