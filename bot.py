@@ -915,44 +915,85 @@ JOB_GLYPHS = {"دانشجو": "🎓", "سرباز": "🪖", "راننده تاک
 JOBS_WORDS = {"شغل", "شغلها", "jobs"}
 
 
-def jobs_text(gender: str, jaghs: int) -> str:
-    lines = [f"{ce('me', 1, '🎖')} شغل‌ها", ""]
-    nxt = None
-    for i, (name, char_lvl) in enumerate(JOBS[gender]):
-        need = JOB_REQUIRED_JAGHS[i]
-        left = max(need - jaghs, 0)
-        eid = (CHAR_EMOJIS.get(gender, {}).get(char_lvl) or [None])[0]
-        glyph = JOB_GLYPHS.get(name, "💼")
-        em = f'<tg-emoji emoji-id="{eid}">{glyph}</tg-emoji>' if eid else glyph
+def _w(t: str) -> int:
+    """عرض متن در فونت مونواسپیس (نیم‌فاصله عرض نداره)."""
+    return len(t.replace("\u200c", ""))
+
+
+def _pad(t: str, n: int) -> str:
+    return t + " " * max(n - _w(t), 0)
+
+
+def jobs_rows(gender: str, jaghs: int):
+    """[(ایموجی، اسم، حقوق، جق مانده یا None، پیدا شده؟)] + شغل بعدی."""
+    rows, nxt = [], None
+    for i, (name, _lvl) in enumerate(JOBS[gender]):
+        left = max(JOB_REQUIRED_JAGHS[i] - jaghs, 0)
         lo, hi = JOB_PAY[i]
-        if left == 0:
-            status = "✅ داری"
-        else:
-            status = f"🔒 جق مانده به این شغل: {left:,} جق"
-            if nxt is None:
-                nxt = (name, left)
-        lines.append(f"{em} {html.escape(name)}")
-        lines.append(f"{ce('wallet', 1, '💰')} حقوق: {lo} تا {hi}")
-        lines.append(status)
-        lines.append("")
-    lines.append(f"{ce('jagh', 1, '🤛')} جق‌های تو: {jaghs:,}")
+        if left and nxt is None:
+            nxt = (name, left)
+        rows.append((JOB_GLYPHS.get(name, "💼"), name, f"{lo}-{hi}", left))
+    return rows, nxt
+
+
+def jobs_footer(jaghs: int, nxt) -> str:
+    lines = [f"✅ داری · 🔒 جق کم", f"{ce('jagh', 1, '🤛')} جق‌های تو: {jaghs:,}"]
     if nxt:
         lines.append(f"{ce('me', 2, '⬆️')} شغل بعدی: {html.escape(nxt[0])} — {nxt[1]:,} جق دیگه")
     else:
         lines.append(f"{ce('top', 1, '👑')} همه‌ی شغل‌ها رو داری!")
-    return B("\n".join(lines))
+    return "\n".join(lines)
+
+
+def jobs_rich_html(gender: str, jaghs: int) -> str:
+    """جدول واقعی (Rich Message تلگرام)."""
+    rows, nxt = jobs_rows(gender, jaghs)
+    out = ["<table><tr><th>شغل</th><th>حقوق</th><th>جق مانده</th></tr>"]
+    for glyph, name, pay, left in rows:
+        st = "✅ داری" if left == 0 else f"🔒 {left:,}"
+        out.append(f"<tr><td>{glyph} {html.escape(name)}</td><td>{pay}</td><td>{st}</td></tr>")
+    out.append("</table>")
+    out.append("<p>" + jobs_footer(jaghs, nxt).replace("\n", "<br>") + "</p>")
+    return "".join(out)
+
+
+def jobs_text(gender: str, jaghs: int) -> str:
+    """نسخه‌ی جایگزین: جدول مونواسپیس داخل <pre> (اگه Rich Message کار نکرد)."""
+    rows, nxt = jobs_rows(gender, jaghs)
+    cells = [("شغل", "حقوق", "جق مانده")]
+    for glyph, name, pay, left in rows:
+        cells.append((name, pay, "داری ✅" if left == 0 else f"{left:,}"))
+    w = [max(_w(r[c]) for r in cells) for c in range(3)]
+    sep = "─" * w[0] + "─┼─" + "─" * w[1] + "─┼─" + "─" * w[2]
+    lines = []
+    for k, r in enumerate(cells):
+        lines.append(" │ ".join(_pad(r[c], w[c]) for c in range(3)))
+        if k == 0:
+            lines.append(sep)
+    table = "<pre>" + html.escape("\n".join(lines)) + "</pre>"
+    return f"{ce('me', 1, '🎖')} <b>شغل‌ها</b>\n{table}\n" + jobs_footer(jaghs, nxt)
 
 
 async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/jobs یا نوشتن «شغل» / «شغل ها» — لیست شغل‌ها."""
+    """/jobs یا نوشتن «شغل» / «شغل ها» — جدول شغل‌ها."""
     msg, user = update.effective_message, update.effective_user
     await upsert_user(user.id, user.full_name)
     row = await get_user(user.id)
     if not row["gender"]:
         await ask_gender(update, context)
         return
-    text = jobs_text(row["gender"], row["jaghs"])
     rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    # اول جدول واقعی تلگرام (Bot API 10.1)، اگه نشد جدول مونواسپیس
+    try:
+        await context.bot._post("sendRichMessage", {
+            "chat_id": msg.chat_id,
+            "rich_message": {"html": jobs_rich_html(row["gender"], row["jaghs"])},
+            "reply_parameters": rp.to_dict(),
+        })
+        return
+    except Exception:
+        log.warning("sendRichMessage failed, using <pre> table", exc_info=True)
+    text = jobs_text(row["gender"], row["jaghs"])
     try:
         await msg.reply_text(text, parse_mode="HTML", reply_parameters=rp)
     except Exception:
