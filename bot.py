@@ -5,6 +5,9 @@ import random
 import time
 
 import asyncpg
+from io import BytesIO
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, Update
 from telegram.ext import (
     Application,
@@ -102,29 +105,48 @@ LEVEL_THRESHOLDS = [0, 300, 1_000, 2_500, 5_000, 10_000, 20_000, 40_000, 80_000,
 CHARACTERS = {
     "m": [
         ("سرباز جقی", "تازه از پادگان اومده، هنوز دستش گرم نشده."),
-        ("گروهبان کف‌دست", "اولین نشانش رو گرفته و دستش آموزش دیده."),
-        ("ستوان آبکی", "هنوز آبکیه ولی داره پیشرفت می‌کنه."),
-        ("سروان فوران", "خط دفاعی رو با یه حرکت شکست."),
-        ("سرگرد سیلاب", "هر جا میره پشت سرش سیل میاد."),
-        ("سرهنگ بی‌امان", "نه خسته میشه نه کم میاره."),
-        ("سرتیپ طوفان", "وقتی میاد گروه به لرزه میفته."),
-        ("سرلشکر آبشار", "ارتش دشمن با اسمش فرار می‌کنه."),
-        ("مارشال بی‌پایان", "افسانه‌ایه؛ کسی ته‌شو ندیده."),
-        ("امپراطور افسانه‌ای جق", "اوج قدرت. همه جلوش کلاه از سر برمی‌دارن."),
+        ("دانشجو جقی", "جزوه‌ش خالیه ولی دستش همیشه پره."),
+        ("راننده تاکسی جقی", "کرایه نمی‌گیره، فقط می‌پیچونه."),
+        ("فروشنده جقی", "ساعت ۳ شبه و فقط یه مشتری داره."),
+        ("وکیل جقی", "پرونده‌ها رو ول کرده و خوابیده."),
+        ("فضانورد جقی", "تا مدار زمین رفته ولی دستش هنوز همونجاست."),
+        ("آقای رئیس خسته", "جلسه ۴ ساعته شد و هنوز ساعت یک ظهره."),
+        ("رئیس‌جمهور چرتی", "وسط جلسه خوابید، کسی بیدارش نمی‌کنه."),
+        ("رهبر خواب‌آلود", "از خستگیه یا از حوصله‌سررفتگی؟."),
+        ("میلیاردر بی‌خواب", "راکت داره، ربات داره، خواب نداره."),
     ],
     "f": [
-        ("سرباز بانو جقی", "تازه وارد شده ولی چشماش برق می‌زنه."),
-        ("گروهبان خانوم کف‌دست", "اولین نشانش رو گرفته و جدی‌تر شده."),
-        ("ستوان بانو آبکی", "هنوز آبکیه ولی سریع یاد می‌گیره."),
-        ("سروان بانو فوران", "خط دفاعی رو با یه حرکت شکست."),
-        ("سرگرد بانو سیلاب", "هر جا میره پشت سرش سیل میاد."),
-        ("سرهنگ بانو بی‌امان", "نه خسته میشه نه کم میاره."),
-        ("سرتیپ بانو طوفان", "وقتی میاد گروه به لرزه میفته."),
-        ("سرلشکر بانو آبشار", "ارتش دشمن با اسمش فرار می‌کنه."),
-        ("مارشال بانو بی‌پایان", "افسانه‌ایه؛ کسی ته‌شو ندیده."),
-        ("ملکه افسانه‌ای جق", "اوج قدرت. همه جلوش کلاه از سر برمی‌دارن."),
+        ("سرباز جقی", "تازه از پادگان اومده، هنوز دستش گرم نشده."),
+        ("دانشجو جقی", "جزوه‌ش خالیه ولی دستش همیشه پره."),
+        ("راننده تاکسی جقی", "کرایه نمی‌گیره، فقط می‌پیچونه."),
+        ("فروشنده جقی", "ساعت ۳ شبه و فقط یه مشتری داره."),
+        ("وکیل جقی", "پرونده‌ها رو ول کرده و خوابیده."),
+        ("فضانورد جقی", "تا مدار زمین رفته ولی دستش هنوز همونجاست."),
+        ("آقای رئیس خسته", "جلسه ۴ ساعته شد و هنوز ساعت یک ظهره."),
+        ("رئیس‌جمهور چرتی", "وسط جلسه خوابید، کسی بیدارش نمی‌کنه."),
+        ("رهبر خواب‌آلود", "از خستگیه یا از حوصله‌سررفتگی؟."),
+        ("میلیاردر بی‌خواب", "راکت داره، ربات داره، خواب نداره."),
     ],
 }
+
+# ایموجی پرمیومِ هر سطح (کنار اسم کاراکتر تو کپشن میاد)
+CHAR_EMOJIS = {
+    1: ["5253988473349640454"],
+    2: ["6325398374921016616", "5447485932674494985"],
+    3: ["5379668974596302326"],
+    4: ["5947405845162629459"],
+    5: ["5992274629769566150", "5992496323096483934"],
+    6: ["5992127827787388962", "5992470763746105553"],
+    7: ["5947405845162629459"],
+    8: ["5285185006958828732", "5388837552952205051"],
+    9: ["5947405845162629459"],
+    10: ["6316490939166625054", "5343870765781493324", "5071341394199578555"],
+}
+
+
+def char_emojis(lvl: int) -> str:
+    return "".join(f'<tg-emoji emoji-id="{e}">⭐</tg-emoji>' for e in CHAR_EMOJIS.get(lvl, []))
+
 GENDER_WORDS = {
     "m": "m", "مرد": "m", "آقا": "m", "پسر": "m",
     "f": "f", "زن": "f", "خانوم": "f", "دختر": "f",
@@ -529,7 +551,7 @@ def card_text(name: str, gender: str, balance: int) -> str:
     lines = [
         f"{ce('me', 1, '🎖')} {html.escape(name)}",
         "",
-        f"سطح {lvl} از {len(LEVEL_THRESHOLDS)}: {html.escape(title)}",
+        f"سطح {lvl} از {len(LEVEL_THRESHOLDS)}: {html.escape(title)} {char_emojis(lvl)}",
         html.escape(tagline),
         "",
         f"{ce('wallet', 1, '💰')} موجودی: {balance:,} تومن",
@@ -543,11 +565,43 @@ def card_text(name: str, gender: str, balance: int) -> str:
     return B("\n".join(lines))
 
 
+
+# ───────────── عکس کاراکتر با دارایی کاربر ─────────────
+BASE_DIR = Path(__file__).parent
+_FA_DIGITS = str.maketrans("0123456789,", "۰۱۲۳۴۵۶۷۸۹،")
+
+
+def render_card_image(level: int, balance: int) -> BytesIO | None:
+    """عکس آماده‌ی سطح (چاپ‌شده با اسم و لقب) رو برمیدارد و عدد دارایی رو تو کادر پایینش می‌نویسه."""
+    path = BASE_DIR / "chars" / f"char_{level}.png"
+    if not path.exists():
+        return None
+    im = Image.open(path).convert("RGB")
+    d = ImageDraw.Draw(im)
+    font = ImageFont.truetype(str(BASE_DIR / "fonts" / "DejaVuSans-Bold.ttf"), 52)
+    d.text((355, 912), f"{balance:,}".translate(_FA_DIGITS), font=font, fill=(255, 255, 255), anchor="mm")
+    out = BytesIO()
+    im.save(out, "PNG")
+    out.seek(0)
+    out.name = f"char_{level}.png"
+    return out
+
+
 async def send_card(bot, chat_id: int, row, reply_to: int | None = None):
     """کارت کاراکتر کاربر: عکس (اگه ست شده باشه) + اسم و سطح و موجودی."""
     gender = row["gender"]
     text = card_text(row["name"] or "", gender, row["balance"])
-    fid = CHAR_PHOTOS.get((gender, level_for(row["balance"])))
+    lvl = level_for(row["balance"])
+    fid = CHAR_PHOTOS.get((gender, lvl))  # اگه پشتیبان با /setphoto عکس دلخواه گذاشته باشه همون اولویت داره
+    if not fid:
+        try:
+            img = render_card_image(lvl, row["balance"])
+            if img:
+                rp0 = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+                await bot.send_photo(chat_id, img, caption=text, parse_mode="HTML", reply_parameters=rp0)
+                return
+        except Exception as e:
+            log.warning("render card failed (%s) — sending text only", e)
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
     if fid:
         try:
