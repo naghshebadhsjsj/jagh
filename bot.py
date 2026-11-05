@@ -264,7 +264,7 @@ ME_WORD = "خودم"  # تو گروه این کلمه رو بنویسی کارا
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "گاراژ جدید + کازینو بسته + پنل پشتیبانی با یوزرنیم"
+BOT_VERSION = "گاراژ جدید + کازینو بسته + محرومیت کاربر + آیدی تو لیدربرد"
 
 
 def norm_word(text: str) -> str:
@@ -345,6 +345,7 @@ async def init_db(app: Application):
         )
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS jaghs BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_shift DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS shift_seen TEXT NOT NULL DEFAULT ''")
@@ -413,6 +414,9 @@ async def init_db(app: Application):
         if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'car_white_migr_1'"):
             await c.execute("UPDATE cars SET color = color + 1 WHERE color >= 1")
             await c.execute("INSERT INTO bot_settings (key, value) VALUES ('car_white_migr_1', '1') ON CONFLICT (key) DO NOTHING")
+        BANNED.clear()
+        for r in await c.fetch("SELECT user_id, banned_until FROM users WHERE banned_until > $1", time.time()):
+            BANNED[r["user_id"]] = r["banned_until"]
         global BOT_ENABLED
         _be = await c.fetchval("SELECT value FROM bot_settings WHERE key = 'bot_enabled'")
         BOT_ENABLED = _be != "0"
@@ -569,7 +573,7 @@ async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def _top_lines(rows, col: str, unit: str) -> str:
+def _top_lines(rows, col: str, unit: str, show_ids: bool = False) -> str:
     out = []
     for i, r in enumerate(rows, 1):
         name = html.escape((r["name"] or "کاربر")[:30])
@@ -577,22 +581,25 @@ def _top_lines(rows, col: str, unit: str) -> str:
         out.append(
             f'{mark} <tg-emoji emoji-id="{TOP_NAME_EMOJI}">⭐</tg-emoji> '
             f'<a href="tg://user?id={r["user_id"]}">‏{name}‏</a> — {r[col]:,} {unit}'
+            + (f'\n🆔 <code>{r["user_id"]}</code>' + (f' | @{html.escape(r["username"])}' if r["username"] else "") if show_ids else "")
         )
     return "\n\n".join(out)  # بین هر نفر یه خط فاصله
 
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/top یا «لیدربرد» / «برترین» / «برترین ها» — ۱۰ نفر اول جق و دارایی."""
-    by_j = await pool.fetch("SELECT user_id, name, jaghs FROM users WHERE jaghs > 0 ORDER BY jaghs DESC LIMIT 10")
-    by_b = await pool.fetch("SELECT user_id, name, balance FROM users WHERE balance > 0 ORDER BY balance DESC LIMIT 10")
+    by_j = await pool.fetch("SELECT user_id, name, username, jaghs FROM users WHERE jaghs > 0 AND user_id <> ALL($1::bigint[]) ORDER BY jaghs DESC LIMIT 10", list(ADMIN_IDS))
+    by_b = await pool.fetch("SELECT user_id, name, username, balance FROM users WHERE balance > 0 AND user_id <> ALL($1::bigint[]) ORDER BY balance DESC LIMIT 10", list(ADMIN_IDS))
     if not by_j and not by_b:
         await update.effective_message.reply_text(BP("هنوز کسی تو لیست نیست!"), parse_mode="HTML")
         return
+    # آیدی عددی و یوزرنیم فقط برای پشتیبان‌ها و فقط تو پی‌وی ربات نشون داده میشه (تو گروه همه می‌بینن)
+    ids = update.effective_user.id in ADMIN_IDS and update.effective_chat.type == "private"
     text = (
         f"{ce('top', 1, '👑')} <b>برترین‌ها</b>\n\n"
-        f"{ce('jagh', 1, '🤛')} <b>بیشترین جق</b>\n\n{_top_lines(by_j, 'jaghs', 'جق')}\n\n"
+        f"{ce('jagh', 1, '🤛')} <b>بیشترین جق</b>\n\n{_top_lines(by_j, 'jaghs', 'جق', ids)}\n\n"
         f"〰️〰️〰️\n\n"
-        f"{ce('wallet', 1, '💰')} <b>بیشترین دارایی</b>\n\n{_top_lines(by_b, 'balance', 'تومن')}"
+        f"{ce('wallet', 1, '💰')} <b>بیشترین دارایی</b>\n\n{_top_lines(by_b, 'balance', 'تومن', ids)}"
     )
     rp = ReplyParameters(message_id=update.effective_message.message_id, allow_sending_without_reply=True)
     try:
@@ -2951,6 +2958,47 @@ async def duel_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───────────────────────── پنل پشتیبانی /admin ─────────────────────────
 BOT_ENABLED = True
 KNOWN_CHATS: set = set()
+BANNED: dict[int, float] = {}   # user_id -> زمان پایان محرومیت (timestamp)
+BAN_PERM = 32503680000.0        # محرومیت دائمی (سال ۳۰۰۰)
+_DUR_UNITS = {
+    "ثانیه": 1, "دقیقه": 60, "ساعت": 3600, "روز": 86400, "هفته": 604800, "ماه": 2592000, "سال": 31536000,
+    "s": 1, "min": 60, "m": 60, "h": 3600, "d": 86400, "w": 604800,
+}
+
+
+def parse_duration(text: str):
+    """«30 دقیقه»، «2 ساعت»، «یک روز»، «3d»، «دائمی» → ثانیه (-1 = دائمی، None = نامعتبر)."""
+    t = norm_word(text).translate(_DIG).lower()
+    if t in ("دائمی", "دایمی", "همیشگی", "همیشه", "ابد", "permanent", "perm"):
+        return -1
+    m = re.fullmatch(r"([\d.]+|[^\W\d_]+)\s*([^\W\d_]+)", t)
+    if not m:
+        return None
+    g1, unit = m.groups()
+    try:
+        num = float(g1) if re.fullmatch(r"[\d.]+", g1) else _NUM_WORDS.get(g1)
+    except ValueError:
+        return None
+    mult = _DUR_UNITS.get(unit)
+    if not num or not mult or num <= 0:
+        return None
+    return int(num * mult)
+
+
+def _fmt_left(sec: float) -> str:
+    sec = max(0, int(sec))
+    d, rem = divmod(sec, 86400)
+    h, rem = divmod(rem, 3600)
+    m = rem // 60
+    parts = ([f"{d} روز"] if d else []) + ([f"{h} ساعت"] if h else []) + ([f"{m} دقیقه"] if m or not (d or h) else [])
+    return " و ".join(parts)
+
+
+def _ban_until_txt(until: float) -> str:
+    if until >= BAN_PERM:
+        return "برای همیشه"
+    from zoneinfo import ZoneInfo
+    return "تا " + datetime.fromtimestamp(until, ZoneInfo("Asia/Tehran")).strftime("%Y-%m-%d %H:%M")
 
 
 # ───────────────────────── 🚗 رندر عکس ماشین‌ها ─────────────────────────
@@ -3730,6 +3778,26 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user.username.lower(), user.id)
         except Exception:
             log.warning("username save failed", exc_info=True)
+    if user and not user.is_bot and user.id not in ADMIN_IDS and user.id in BANNED:
+        until = BANNED[user.id]
+        if until <= time.time():  # محرومیت تموم شده
+            BANNED.pop(user.id, None)
+            try:
+                await pool.execute("UPDATE users SET banned_until = 0 WHERE user_id = $1", user.id)
+            except Exception:
+                log.warning("unban save failed", exc_info=True)
+        else:
+            if update.callback_query:
+                try:
+                    await update.callback_query.answer(f"⛔ شما {_ban_until_txt(until)} از ربات محروم هستید.", show_alert=True)
+                except Exception:
+                    pass
+            elif chat and chat.type == "private" and update.effective_message:
+                try:
+                    await update.effective_message.reply_text(f"⛔ شما {_ban_until_txt(until)} از ربات محروم هستید.")
+                except Exception:
+                    pass
+            raise ApplicationHandlerStop
     if chat and chat.type in ("group", "supergroup") and chat.id not in KNOWN_CHATS:
         KNOWN_CHATS.add(chat.id)
         try:
@@ -3752,6 +3820,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("💸 کم کردن پول", "primary", callback_data="ad:money"), btn("➕ افزودن پول", "success", callback_data="ad:money_add")],
         [btn("🤛 کم کردن جق", "primary", callback_data="ad:jagh"), btn("➕ افزودن جق", "success", callback_data="ad:jagh_add")],
+        [btn("🚫 محروم کردن کاربر", "danger", callback_data="ad:ban"), btn("✅ رفع محرومیت", "success", callback_data="ad:unban")],
         [btn("📋 افزودن تسک روزانه", "primary", callback_data="ad:task_daily"), btn("📆 افزودن تسک هفتگی", "primary", callback_data="ad:task_weekly")],
         [btn("🔴 خاموش کردن ربات", "danger", callback_data="ad:toggle") if BOT_ENABLED
          else btn("🟢 روشن کردن ربات", "success", callback_data="ad:toggle")],
@@ -3793,6 +3862,13 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         operation = "اضافه کردن" if act.endswith("_add") else "کم کردن"
         await q.edit_message_text(
             f"{operation} {what}\n\nآیدی عددی یا @یوزرنیم کاربر رو بفرست، یا یه پیام ازش اینجا فوروارد کن.\n(لغو: بنویس «لغو»)",
+            reply_markup=CANCEL_KB,
+        )
+    elif act in ("ban", "unban"):
+        context.user_data["adm"] = {"act": act, "step": "target"}
+        title = "🚫 محروم کردن کاربر" if act == "ban" else "✅ رفع محرومیت"
+        await q.edit_message_text(
+            f"{title}\n\nآیدی عددی یا @یوزرنیم کاربر رو بفرست، یا یه پیام ازش اینجا فوروارد کن.\n(لغو: بنویس «لغو»)",
             reply_markup=CANCEL_KB,
         )
     elif act in ("task_daily", "task_weekly"):
@@ -3885,6 +3961,50 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         await msg.reply_text("لغو شد.", reply_markup=admin_menu_kb())
         return True
     act = st["act"]
+    if act in ("ban", "unban"):
+        if st["step"] == "target":
+            uid = None
+            fo = getattr(msg, "forward_origin", None)
+            if fo is not None and getattr(fo, "sender_user", None):
+                uid = fo.sender_user.id
+            elif msg.text and msg.text.strip().lstrip("-").isdigit():
+                uid = int(msg.text.strip())
+            elif msg.text and re.fullmatch(r"@?[A-Za-z0-9_]{3,32}", msg.text.strip()):
+                uid = await pool.fetchval("SELECT user_id FROM users WHERE username = $1", msg.text.strip().lstrip("@").lower())
+            if uid is None:
+                await msg.reply_text("کاربر پیدا نشد. آیدی عددی یا @یوزرنیم (کسی که بعد از آپدیت با ربات کار کرده) بفرست، یا پیامش رو فوروارد کن.", reply_markup=CANCEL_KB)
+                return True
+            row = await get_user(uid)
+            if not row:
+                await msg.reply_text("این کاربر تو دیتابیس نیست (باید قبلاً با ربات کار کرده باشه).", reply_markup=CANCEL_KB)
+                return True
+            if uid in ADMIN_IDS:
+                await msg.reply_text("نمی‌تونی یه پشتیبان رو محروم کنی.", reply_markup=CANCEL_KB)
+                return True
+            who = f"{row['name'] or uid} ({uid})"
+            if act == "unban":
+                await pool.execute("UPDATE users SET banned_until = 0 WHERE user_id = $1", uid)
+                BANNED.pop(uid, None)
+                context.user_data.pop("adm", None)
+                await msg.reply_text(f"✅ محرومیت {who} برداشته شد.", reply_markup=admin_menu_kb())
+                return True
+            st.update(step="duration", uid=uid, who=who)
+            await msg.reply_text(
+                f"👤 {who}\n\nمدت محرومیت رو بفرست. مثال:\n30 دقیقه\n2 ساعت\n3 روز\n1 هفته\n1 ماه\nدائمی",
+                reply_markup=CANCEL_KB,
+            )
+            return True
+        if st["step"] == "duration":
+            dur = parse_duration(msg.text or "")
+            if dur is None:
+                await msg.reply_text("مدت رو نفهمیدم. مثلا: 30 دقیقه، 2 ساعت، 3 روز، دائمی", reply_markup=CANCEL_KB)
+                return True
+            until = BAN_PERM if dur == -1 else time.time() + dur
+            await pool.execute("UPDATE users SET banned_until = $1::double precision WHERE user_id = $2::bigint", until, st["uid"])
+            BANNED[st["uid"]] = until
+            context.user_data.pop("adm", None)
+            await msg.reply_text(f"🚫 {st['who']} {_ban_until_txt(until)} محروم شد.", reply_markup=admin_menu_kb())
+            return True
     if act in ("money", "jagh", "money_add", "jagh_add"):
         if st["step"] == "target":
             uid = None
