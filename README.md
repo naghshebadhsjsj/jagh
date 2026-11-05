@@ -1,9 +1,12 @@
-# Telegram bot - car garage update
+# نسخه به‌روزشده ربات تلگرام
 
-Deploy with the existing Railway service and PostgreSQL database. Required environment variables already used by the bot must remain configured (at minimum `BOT_TOKEN` and `DATABASE_URL`; preserve the rest of the existing bot variables such as `ADMIN_IDS`).
+- فایل اصلی اجرا: `bot.py`
+- تصاویر خودروها: پوشه `cars/` (هر پنج تصویر باید کنار bot.py باقی بمانند)
+- سیستم خرید خودروها به ترتیب فعال است.
+- پنل ماشین با تصویر واقعی خودرو و کپشن در یک پیام ارسال می‌شود.
+- دکمه ارتقا، چهار قطعه مستقل موتور، بدنه، لاستیک‌ها، شیشه‌ها و رینگ را نشان می‌دهد.
+- تغییر رنگ مشکی، قرمز، آبی و صورتی با تأیید در همان پنل و هزینه ۲۰ میلیون تومان انجام می‌شود.
+- درآمد ساعتی در صندوق خودرو ذخیره می‌شود و فقط با دکمه جمع‌آوری به کیف پول می‌رود.
+- ستون‌های دیتابیس در زمان راه‌اندازی به‌صورت خودکار و بدون حذف اطلاعات قبلی اضافه می‌شوند.
 
-Start command: `python bot.py`
-
-The bot applies backward-compatible PostgreSQL migrations at startup. Put all five car photos in `cars/` exactly as packaged. Do not remove the `cars` directory.
-
-Features: user car shortcut (`ماشین` / `ماشینم`), garage (`گاراژ`), manual earnings withdrawal, paid paint colors (20 million toman per change), and independent upgrades for tires, body, glass, computer, engine, and turbo.
+متغیرهای محیطی فعلی Railway مانند `BOT_TOKEN` و `DATABASE_URL` را حفظ کنید.
