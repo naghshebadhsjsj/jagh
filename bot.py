@@ -1,7 +1,9 @@
+import asyncio
 import html
 import logging
 import os
 import random
+import re
 import time
 
 import asyncpg
@@ -116,36 +118,51 @@ CHARACTERS = {
         ("میلیاردر بی‌خواب", "راکت داره، ربات داره، خواب نداره."),
     ],
     "f": [
-        ("سرباز جقی", "تازه از پادگان اومده، هنوز دستش گرم نشده."),
-        ("دانشجو جقی", "جزوه‌ش خالیه ولی دستش همیشه پره."),
-        ("راننده تاکسی جقی", "کرایه نمی‌گیره، فقط می‌پیچونه."),
-        ("فروشنده جقی", "ساعت ۳ شبه و فقط یه مشتری داره."),
-        ("وکیل جقی", "پرونده‌ها رو ول کرده و خوابیده."),
-        ("فضانورد جقی", "تا مدار زمین رفته ولی دستش هنوز همونجاست."),
-        ("آقای رئیس خسته", "جلسه ۴ ساعته شد و هنوز ساعت یک ظهره."),
-        ("رئیس‌جمهور چرتی", "وسط جلسه خوابید، کسی بیدارش نمی‌کنه."),
-        ("رهبر خواب‌آلود", "از خستگیه یا از حوصله‌سررفتگی؟."),
-        ("میلیاردر بی‌خواب", "راکت داره، ربات داره، خواب نداره."),
+        ("دختر دانشجو جقی", "جزوه‌ها رو باز کرده ولی فقط به یه چیز فکر می‌کنه."),
+        ("دختر بلاگر جقی", "لایو رو زده ولی فالوئرها تو ذهنشن، نه تو دوربین."),
+        ("دختر رقاص جقی", "روی صحنه می‌رقصه، پشت صحنه خسته‌ست."),
+        ("دختر ناخن‌کار جقی", "ناخن مشتری رو می‌کشه، حواسش جای دیگه‌ست."),
+        ("دختر دندان‌پزشک جقی", "ماسکش افتاده و کسی نمی‌پرسه چرا."),
+        ("دختر داروخونه‌ای جقی", "برای همه نسخه می‌پیچه، برای خودش نه."),
+        ("دختر وکیل جقی", "پرونده‌ها رو بسته و دلیلش رو فقط خودش می‌دونه."),
+        ("دختر فضانورد جقی", "تا مدار زمین رفته ولی دلش هنوز همینجاست."),
+        ("دختر رازآلود جقی", "منتظر عکس جدید."),
+        ("دختر میلیاردر جقی", "پول رو دور خودش ریخته و خوابش نمیاد."),
     ],
 }
 
 # ایموجی پرمیومِ هر سطح (کنار اسم کاراکتر تو کپشن میاد)
 CHAR_EMOJIS = {
-    1: ["5253988473349640454"],
-    2: ["6325398374921016616", "5447485932674494985"],
-    3: ["5379668974596302326"],
-    4: ["5947405845162629459"],
-    5: ["5992274629769566150", "5992496323096483934"],
-    6: ["5992127827787388962", "5992470763746105553"],
-    7: ["5947405845162629459"],
-    8: ["5285185006958828732", "5388837552952205051"],
-    9: ["5947405845162629459"],
-    10: ["6316490939166625054", "5343870765781493324", "5071341394199578555"],
+    "m": {
+        1: ["5253988473349640454"],
+        2: ["6325398374921016616", "5447485932674494985"],
+        3: ["5379668974596302326"],
+        4: ["5947405845162629459"],
+        5: ["5992274629769566150", "5992496323096483934"],
+        6: ["5992127827787388962", "5992470763746105553"],
+        7: ["5947405845162629459"],
+        8: ["5285185006958828732", "5388837552952205051"],
+        9: ["5947405845162629459"],
+        10: ["6316490939166625054", "5343870765781493324", "5071341394199578555"],
+    },
+    "f": {
+        1: ["5469905619009951647"],
+        2: ["5379814861750443581"],
+        3: ["5226754369193523447"],
+        4: ["5379814861750443581"],
+        5: ["5379814861750443581"],
+        6: ["5379814861750443581"],
+        7: ["5226703465241133001"],
+        8: ["5379814861750443581"],
+        9: ["5379814861750443581"],
+        10: ["5343870765781493324"],
+    },
 }
 
 
-def char_emojis(lvl: int) -> str:
-    return "".join(f'<tg-emoji emoji-id="{e}">⭐</tg-emoji>' for e in CHAR_EMOJIS.get(lvl, []))
+def char_emojis(gender: str, lvl: int) -> str:
+    return "".join(f'<tg-emoji emoji-id="{e}">⭐</tg-emoji>' for e in CHAR_EMOJIS.get(gender, {}).get(lvl, []))
+
 
 GENDER_WORDS = {
     "m": "m", "مرد": "m", "آقا": "m", "پسر": "m",
@@ -551,7 +568,7 @@ def card_text(name: str, gender: str, balance: int) -> str:
     lines = [
         f"{ce('me', 1, '🎖')} {html.escape(name)}",
         "",
-        f"سطح {lvl} از {len(LEVEL_THRESHOLDS)}: {html.escape(title)} {char_emojis(lvl)}",
+        f"سطح {lvl} از {len(LEVEL_THRESHOLDS)}: {html.escape(title)} {char_emojis(gender, lvl)}",
         html.escape(tagline),
         "",
         f"{ce('wallet', 1, '💰')} موجودی: {balance:,} تومن",
@@ -571,9 +588,9 @@ BASE_DIR = Path(__file__).parent
 _FA_DIGITS = str.maketrans("0123456789,", "۰۱۲۳۴۵۶۷۸۹،")
 
 
-def render_card_image(level: int, balance: int) -> BytesIO | None:
+def render_card_image(gender: str, level: int, balance: int) -> BytesIO | None:
     """عکس آماده‌ی سطح (چاپ‌شده با اسم و لقب) رو برمیدارد و عدد دارایی رو تو کادر پایینش می‌نویسه."""
-    path = BASE_DIR / "chars" / f"char_{level}.png"
+    path = BASE_DIR / "chars" / gender / f"char_{level}.png"
     if not path.exists():
         return None
     im = Image.open(path).convert("RGB")
@@ -581,35 +598,45 @@ def render_card_image(level: int, balance: int) -> BytesIO | None:
     font = ImageFont.truetype(str(BASE_DIR / "fonts" / "DejaVuSans-Bold.ttf"), 52)
     d.text((355, 912), f"{balance:,}".translate(_FA_DIGITS), font=font, fill=(255, 255, 255), anchor="mm")
     out = BytesIO()
-    im.save(out, "PNG")
+    im.save(out, "JPEG", quality=92)
     out.seek(0)
-    out.name = f"char_{level}.png"
+    out.name = f"char_{level}.jpg"
     return out
 
 
 async def send_card(bot, chat_id: int, row, reply_to: int | None = None):
-    """کارت کاراکتر کاربر: عکس (اگه ست شده باشه) + اسم و سطح و موجودی."""
+    """کارت کاراکتر کاربر: عکس + کپشن (اسم، سطح، موجودی). اگه یه مرحله خطا بده میره سراغ مرحله‌ی بعد، ولی تا جایی که بشه عکس همراه کپشن میاد."""
     gender = row["gender"]
-    text = card_text(row["name"] or "", gender, row["balance"])
     lvl = level_for(row["balance"])
-    fid = CHAR_PHOTOS.get((gender, lvl))  # اگه پشتیبان با /setphoto عکس دلخواه گذاشته باشه همون اولویت داره
-    if not fid:
-        try:
-            img = render_card_image(lvl, row["balance"])
-            if img:
-                rp0 = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
-                await bot.send_photo(chat_id, img, caption=text, parse_mode="HTML", reply_parameters=rp0)
-                return
-        except Exception as e:
-            log.warning("render card failed (%s) — sending text only", e)
+    text = card_text(row["name"] or "", gender, row["balance"])
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
-    if fid:
+
+    # کپشن بدون ایموجی پرمیوم (برای وقتی که تلگرام ایموجی رو قبول نکنه)
+    plain_text = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)
+
+    photo = CHAR_PHOTOS.get((gender, lvl))  # عکس دلخواهِ پشتیبان (file_id) اولویت داره
+    if not photo:
         try:
-            await bot.send_photo(chat_id, fid, caption=text, parse_mode="HTML", reply_parameters=rp)
+            photo = await asyncio.to_thread(render_card_image, gender, lvl, row["balance"])
+        except Exception:
+            log.exception("render_card_image failed (level %s)", lvl)
+            photo = None
+
+    if photo:
+        for caption in (text, plain_text):
+            try:
+                if hasattr(photo, "seek"):
+                    photo.seek(0)
+                await bot.send_photo(chat_id, photo, caption=caption, parse_mode="HTML", reply_parameters=rp)
+                return
+            except Exception:
+                log.exception("send_photo failed (level %s)", lvl)
+    for t in (text, plain_text):
+        try:
+            await bot.send_message(chat_id, t, parse_mode="HTML", reply_parameters=rp)
             return
-        except Exception as e:
-            log.warning("send_photo failed (%s) — sending text only", e)
-    await bot.send_message(chat_id, text, parse_mode="HTML", reply_parameters=rp)
+        except Exception:
+            log.exception("send_message failed")
 
 
 def gender_keyboard(uid: int) -> InlineKeyboardMarkup:
