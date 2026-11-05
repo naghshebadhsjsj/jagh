@@ -293,6 +293,21 @@ async def init_db(app: Application):
     log.info("database ready")
 
 
+async def startup(app: Application):
+    """موقع روشن شدن: دیتابیس رو آماده می‌کنه و به پشتیبان‌ها تو تلگرام خبر میده (بدون نیاز به لاگ Railway)."""
+    try:
+        await init_db(app)
+        note = f"✅ ربات روشن شد.\nنسخه: {BOT_VERSION}"
+    except Exception as e:
+        log.exception("startup failed")
+        note = f"❌ ربات روشن شد ولی دیتابیس وصل نشد:\n{type(e).__name__}: {str(e)[:200]}"
+    for aid in ADMIN_IDS:
+        try:
+            await app.bot.send_message(aid, note)
+        except Exception:
+            log.warning("could not notify admin %s", aid)
+
+
 async def close_db(app: Application):
     if pool:
         await pool.close()
@@ -1098,7 +1113,7 @@ def main():
     app = (
         Application.builder()
         .token(BOT_TOKEN)
-        .post_init(init_db)
+        .post_init(startup)
         .post_shutdown(close_db)
         .build()
     )
@@ -1110,15 +1125,3 @@ def main():
     app.add_handler(CommandHandler("setjobs", set_jobs, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("jobsreset", jobs_reset, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("myid", my_id, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("cardcheck", card_check, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("setphoto", photo_help, filters=filters.ChatType.PRIVATE))
-    app.add_handler(
-        MessageHandler(
-            filters.PHOTO & filters.ChatType.PRIVATE & filters.CaptionRegex(r"^/setphoto"), set_photo
-        )
-    )
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("me", show_me))
-    app.add_handler(CommandHandler("jobs", show_jobs))
-    app.add_handler(CommandHandler("gender", ask_gender))
-    ap
