@@ -1,5 +1,6 @@
 import asyncio
 import html
+import json
 import logging
 import os
 import random
@@ -10,7 +11,7 @@ import asyncpg
 from io import BytesIO
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, ReplyParameters, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -277,6 +278,18 @@ async def init_db(app: Application):
         )
         for r in await c.fetch("SELECT section, slot, emoji_id FROM emoji_slots"):
             EMOJI_IDS[(r["section"], r["slot"])] = r["emoji_id"]
+        await c.execute(
+            """CREATE TABLE IF NOT EXISTS bot_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )"""
+        )
+        r = await c.fetchrow("SELECT value FROM bot_settings WHERE key = 'jobs_custom'")
+        if r:
+            try:
+                CUSTOM_JOBS.update(json.loads(r["value"]))
+            except Exception:
+                log.exception("bad jobs_custom in db")
     log.info("database ready")
 
 
@@ -808,6 +821,13 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تو پی‌وی ربات هم «خودم» کار می‌کنه."""
     msg = update.effective_message
+    if msg and msg.text and context.user_data.get("await_jobs") and update.effective_user.id in ADMIN_IDS:
+        if msg.text.strip() == "لغو":
+            context.user_data.pop("await_jobs", None)
+            await msg.reply_text("لغو شد.")
+        else:
+            await save_custom_jobs(update, context)
+        return
     if msg and msg.text and norm_word(msg.text) == ME_WORD:
         await show_me(update, context)
     elif msg and msg.text and norm_word(msg.text).replace(" ", "").lower() in JOBS_WORDS:
@@ -915,6 +935,53 @@ JOB_GLYPHS = {"دانشجو": "🎓", "سرباز": "🪖", "راننده تاک
 JOBS_WORDS = {"شغل", "شغلها", "jobs"}
 
 
+# جدولی که پشتیبان‌ها با /setjobs ساختن: {"text": ..., "entities": [...]}
+CUSTOM_JOBS: dict = {}
+
+SETJOBS_HELP = (
+    "جدول شغل‌ها رو همین‌جا بساز و بفرست؛ همون پیام (با ایموجی پرمیوم، بولد، کادر مونواسپیس و ...) "
+    "عیناً برای همه‌ی کاربرها میاد و زیرش «جق‌های تو» به‌صورت شخصی اضافه میشه.\n\n"
+    "نکته: برای اینکه ستون‌ها مرتب بیفتن، جدول رو تو بلوک مونواسپیس (کد) بنویس.\n"
+    "لغو: بنویس «لغو»\n"
+    "برگشت به جدول خودکار: /jobsreset"
+)
+
+
+async def set_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/setjobs — فقط پشتیبان‌ها، تو پی‌وی: پیام بعدی‌ات میشه جدول شغل‌ها."""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    context.user_data["await_jobs"] = True
+    await update.effective_message.reply_text(SETJOBS_HELP)
+
+
+async def jobs_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/jobsreset — برگشت به جدول خودکار."""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    context.user_data.pop("await_jobs", None)
+    CUSTOM_JOBS.clear()
+    await pool.execute("DELETE FROM bot_settings WHERE key = 'jobs_custom'")
+    await update.effective_message.reply_text("✅ جدول سفارشی پاک شد؛ دوباره جدول خودکار نمایش داده میشه.")
+
+
+async def save_custom_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """پیام بعد از /setjobs رو (متن + همه‌ی entityها از جمله ایموجی پرمیوم) ذخیره می‌کنه."""
+    msg = update.effective_message
+    data = {"text": msg.text, "entities": [e.to_dict() for e in (msg.entities or [])]}
+    await pool.execute(
+        "INSERT INTO bot_settings (key, value) VALUES ('jobs_custom', $1) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        json.dumps(data, ensure_ascii=False),
+    )
+    CUSTOM_JOBS.clear()
+    CUSTOM_JOBS.update(data)
+    context.user_data.pop("await_jobs", None)
+    await msg.reply_text("✅ ذخیره شد. از این به بعد همین جدول برای همه‌ی کاربرها میاد. پیش‌نمایش:")
+    ents = [MessageEntity.de_json(d, context.bot) for d in data["entities"]]
+    await msg.reply_text(data["text"], entities=ents)
+
+
 def _w(t: str) -> int:
     """عرض متن در فونت مونواسپیس (نیم‌فاصله عرض نداره)."""
     return len(t.replace("\u200c", ""))
@@ -983,6 +1050,15 @@ async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_gender(update, context)
         return
     rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    # اگه پشتیبان با /setjobs جدول ساخته باشه، همون برای همه نشون داده میشه
+    if CUSTOM_JOBS.get("text"):
+        ents = [MessageEntity.de_json(d, context.bot) for d in CUSTOM_JOBS.get("entities", [])]
+        footer = f"\n\n🤛 جق‌های تو: {row['jaghs']:,}"
+        try:
+            await msg.reply_text(CUSTOM_JOBS["text"] + footer, entities=ents, reply_parameters=rp)
+            return
+        except Exception:
+            log.exception("custom jobs message failed, falling back to default table")
     # اول جدول واقعی تلگرام (Bot API 10.1)، اگه نشد جدول مونواسپیس
     try:
         await context.bot._post("sendRichMessage", {
@@ -1031,6 +1107,8 @@ def main():
     app.add_handler(CommandHandler("check", debug_channels, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("emojis", show_emojis, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("setemoji", set_emoji, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("setjobs", set_jobs, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("jobsreset", jobs_reset, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("myid", my_id, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("cardcheck", card_check, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("setphoto", photo_help, filters=filters.ChatType.PRIVATE))
@@ -1043,18 +1121,4 @@ def main():
     app.add_handler(CommandHandler("me", show_me))
     app.add_handler(CommandHandler("jobs", show_jobs))
     app.add_handler(CommandHandler("gender", ask_gender))
-    app.add_handler(CallbackQueryHandler(pick_gender, pattern=r"^g:\d+:[mf]$"))
-    app.add_handler(CommandHandler("wallet", wallet))
-    app.add_handler(CommandHandler("top", top))
-    app.add_handler(
-        MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_text)
-    )
-    app.add_handler(
-        MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text)
-    )
-    log.info("bot started")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-if __name__ == "__main__":
-    main()
+    ap
