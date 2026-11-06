@@ -264,7 +264,7 @@ ME_WORD = "خودم"  # تو گروه این کلمه رو بنویسی کارا
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "مینی‌اپ پیام گروه‌ها + عضویت اجباری + پنل ماشین"
+BOT_VERSION = "مینی‌اپ پشتیبانی (گروه‌ها + کاربران) + عضویت اجباری + پنل ماشین"
 
 
 def norm_word(text: str) -> str:
@@ -442,7 +442,7 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")   # آدرس �
 WEBAPP_HTML = r"""<!doctype html>
 <html lang="fa" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>پیام‌های گروه‌ها</title>
+<title>پنل پشتیبانی</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:var(--tg-theme-bg-color,#fff);--fg:var(--tg-theme-text-color,#111);--hint:var(--tg-theme-hint-color,#888);--card:var(--tg-theme-secondary-bg-color,#f1f1f4);--btn:var(--tg-theme-button-color,#2f7cf6);--btnt:var(--tg-theme-button-text-color,#fff);--link:var(--tg-theme-link-color,#2f7cf6)}
@@ -451,14 +451,18 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-appl
 header{position:sticky;top:0;z-index:5;background:var(--bg);padding:12px 14px 8px;border-bottom:1px solid var(--card)}
 h1{margin:0;font-size:17px}
 .sub{color:var(--hint);font-size:12px}
+.tabs{display:flex;gap:6px;margin-top:8px}
+.tabs button{flex:1}
 .bar{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 input{flex:1;min-width:110px;padding:9px 11px;border:1px solid var(--card);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;font-size:14px;outline:none}
 button{padding:9px 13px;border:0;border-radius:10px;background:var(--btn);color:var(--btnt);font:inherit;font-size:14px;cursor:pointer}
 button.ghost{background:var(--card);color:var(--fg)}
 main{padding:10px 12px 24px}
-.card{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--card);border-radius:14px;padding:13px 14px;margin-bottom:9px;cursor:pointer}
+.card{background:var(--card);border-radius:14px;padding:11px 14px;margin-bottom:9px;cursor:pointer}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .card b{font-weight:600}
 .badge{background:var(--btn);color:var(--btnt);border-radius:20px;padding:1px 10px;font-size:12px;white-space:nowrap}
+.badge.red{background:#e5484d;color:#fff}
 .msg{background:var(--card);border-radius:14px;padding:9px 12px;margin-bottom:8px}
 .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;font-size:12px;color:var(--hint)}
 .meta b{color:var(--fg);font-size:13px}
@@ -470,10 +474,15 @@ main{padding:10px 12px 24px}
 label{font-size:13px;color:var(--hint);display:flex;align-items:center;gap:5px}
 </style></head><body>
 <header>
-  <h1 id="title">👁 پیام‌های گروه‌ها</h1>
+  <h1 id="title">🛠 پنل پشتیبانی</h1>
   <div class="sub" id="sub"></div>
+  <div class="tabs" id="tabs"><button data-t="groups">👁 گروه‌ها</button><button class="ghost" data-t="users">👥 کاربران</button></div>
+  <div class="bar" id="ubar" hidden>
+    <input id="uq" placeholder="جست‌وجو: اسم / @یوزرنیم / آیدی" autocomplete="off">
+    <button id="ugo">جست‌وجو</button>
+  </div>
   <div class="bar" id="bar" hidden>
-    <input id="fuser" placeholder="آیدی عددی / @یوزرنیم" inputmode="text" autocomplete="off">
+    <input id="fuser" placeholder="آیدی عددی / @یوزرنیم" autocomplete="off">
     <input id="fq" placeholder="جست‌وجو تو متن" autocomplete="off">
     <button id="go">اعمال</button>
     <button class="ghost" id="reload">🔄</button>
@@ -484,33 +493,61 @@ label{font-size:13px;color:var(--hint);display:flex;align-items:center;gap:5px}
 <script>
 const tg=window.Telegram&&Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 const $=id=>document.getElementById(id);
-let chat=null,timer=null;
+let tab='groups',chat=null,timer=null;
 async function api(path){
   const r=await fetch(path,{headers:{'X-Init-Data':tg?tg.initData:''}});
   if(!r.ok) throw new Error(r.status===403?'دسترسی نداری (این صفحه فقط از داخل تلگرام و برای پشتیبان‌هاست)':'خطا '+r.status);
   return r.json();
 }
-function show(el){el.hidden=false} function hide(el){el.hidden=true}
-function setMain(node){const m=$('main');m.replaceChildren(node)}
+const num=n=>Number(n).toLocaleString('en-US');
+function setMain(node){$('main').replaceChildren(node)}
 function note(cls,t){const d=document.createElement('div');d.className=cls;d.textContent=t;setMain(d)}
 function fmtTime(ts){return new Date(ts*1000).toLocaleString('fa-IR',{timeZone:'Asia/Tehran',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-async function groups(){
-  chat=null;clearInterval(timer);hide($('bar'));$('title').textContent='👁 پیام‌های گروه‌ها';$('sub').textContent='یه گروه رو انتخاب کن';
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
+function showTab(t){
+  tab=t;chat=null;clearInterval(timer);$('live').checked=false;
+  $('bar').hidden=true;$('ubar').hidden=(t!=='users');
+  document.querySelectorAll('.tabs button').forEach(b=>b.className=(b.dataset.t===t?'':'ghost'));
+  $('title').textContent='🛠 پنل پشتیبانی';
   if(tg)tg.BackButton.hide();
+  if(t==='groups')loadGroups(); else loadUsers();
+}
+async function loadGroups(){
+  $('sub').textContent='یه گروه رو انتخاب کن';
   try{
-    const g=await api('/api/groups'); if(!g.length){note('empty','هنوز گروهی ثبت نشده.');return}
+    const g=await api('/api/groups'); if(!g.length){note('empty','هنوز گروهی ثبت نشده. بعد از اولین پیام تو گروه‌ها اینجا میان.');return}
+    $('sub').textContent=g.length+' گروه';
     const f=document.createDocumentFragment();
-    g.forEach(x=>{const c=document.createElement('div');c.className='card';
-      const t=document.createElement('b');t.textContent=x.title||x.chat_id;
-      const b=document.createElement('span');b.className='badge';b.textContent=x.n+' پیام';
-      c.append(t,b);c.onclick=()=>openChat(x);f.append(c)});
+    g.forEach(x=>{const c=el('div','card row');c.append(el('b','',x.title||x.chat_id),el('span','badge',num(x.n)+' پیام'));c.onclick=()=>openChat(x,'');f.append(c)});
     setMain(f);
   }catch(e){note('err',e.message)}
 }
-function openChat(x){
-  chat=x;$('title').textContent=x.title||x.chat_id;$('sub').textContent='';
-  $('fuser').value='';$('fq').value='';show($('bar'));
-  if(tg){tg.BackButton.show();tg.BackButton.onClick(groups)}
+async function loadUsers(){
+  try{
+    const d=await api('/api/users?q='+encodeURIComponent($('uq').value.trim()));
+    $('sub').textContent=num(d.total)+' کاربر • '+num(d.started)+' استارت‌کرده';
+    if(!d.users.length){note('empty','کاربری پیدا نشد.');return}
+    const f=document.createDocumentFragment();
+    d.users.forEach(u=>{
+      const c=el('div','card');
+      const r=el('div','row');r.append(el('b','',u.name||u.user_id));
+      const bs=el('span','');
+      if(u.banned){bs.append(el('span','badge red','محروم'),' ')}
+      bs.append(el('span','badge',u.started?'استارت زده':'استارت نزده'));r.append(bs);
+      const m=el('div','meta');
+      if(u.username)m.append(el('span','','@'+u.username));
+      const id=el('span','id',u.user_id);m.append(id);
+      m.append(el('span','','💰 '+num(u.balance)),el('span','','🤛 '+num(u.jaghs)));
+      c.append(r,m);
+      c.onclick=()=>openChat({chat_id:'all',title:'پیام‌های '+(u.name||u.user_id)},String(u.user_id));
+      f.append(c)});
+    setMain(f);
+  }catch(e){note('err',e.message)}
+}
+function openChat(x,user){
+  chat=x;$('title').textContent=x.title||x.chat_id;$('sub').textContent='';$('ubar').hidden=true;
+  $('fuser').value=user||'';$('fq').value='';$('bar').hidden=false;
+  if(tg)tg.BackButton.show();
   load(true);
 }
 async function load(scroll){
@@ -519,30 +556,31 @@ async function load(scroll){
   try{
     const m=await api('/api/messages?chat='+encodeURIComponent(chat.chat_id)+'&user='+encodeURIComponent(u)+'&q='+encodeURIComponent(q));
     $('sub').textContent=m.length+' پیام'+(u||q?' (فیلتر شده)':'');
-    if(!m.length){note('empty','پیامی پیدا نشد.');return}
+    if(!m.length){note('empty','پیامی پیدا نشد (پیام‌ها فقط ۳ روز اخیر و از زمان فعال شدن این نسخه ثبت میشن).');return}
     const f=document.createDocumentFragment();
     m.slice().reverse().forEach(x=>{
-      const d=document.createElement('div');d.className='msg';
-      const meta=document.createElement('div');meta.className='meta';
-      const n=document.createElement('b');n.textContent=x.name||x.user_id;meta.append(n);
-      if(x.username){const s=document.createElement('span');s.textContent='@'+x.username;meta.append(s)}
-      const id=document.createElement('span');id.className='id';id.textContent=x.user_id;
-      id.title='فیلتر روی این کاربر';id.onclick=()=>{$('fuser').value=String(x.user_id);load(true)};meta.append(id);
-      const t=document.createElement('span');t.textContent=fmtTime(x.ts);meta.append(t);
-      if(x.link){const a=document.createElement('a');a.textContent='↗';a.href=x.link;
-        a.onclick=e=>{if(tg){e.preventDefault();tg.openTelegramLink(x.link)}};meta.append(a)}
-      const tx=document.createElement('div');tx.className='txt';tx.textContent=x.text||'';
-      d.append(meta,tx);f.append(d)});
+      const d=el('div','msg'),meta=el('div','meta');
+      meta.append(el('b','',x.name||x.user_id));
+      if(x.username)meta.append(el('span','','@'+x.username));
+      const id=el('span','id',x.user_id);id.title='فیلتر روی این کاربر';id.onclick=()=>{$('fuser').value=String(x.user_id);load(true)};meta.append(id);
+      meta.append(el('span','',fmtTime(x.ts)));
+      if(chat.chat_id==='all'&&x.title)meta.append(el('span','','• '+x.title));
+      if(x.link){const a=el('a','','↗');a.href=x.link;a.onclick=e=>{if(tg){e.preventDefault();tg.openTelegramLink(x.link)}};meta.append(a)}
+      d.append(meta,el('div','txt',x.text||''));f.append(d)});
     setMain(f);
     if(scroll)window.scrollTo(0,document.body.scrollHeight);
   }catch(e){note('err',e.message)}
 }
-$('go').onclick=()=>load(true);
-$('reload').onclick=()=>load(true);
-['fuser','fq'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key==='Enter')load(true)}));
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+if(tg)tg.BackButton.onClick(()=>showTab(tab));
+$('go').onclick=()=>load(true);$('reload').onclick=()=>load(true);$('ugo').onclick=loadUsers;
+$('fuser').addEventListener('keydown',e=>{if(e.key==='Enter')load(true)});
+$('fq').addEventListener('keydown',e=>{if(e.key==='Enter')load(true)});
+$('uq').addEventListener('keydown',e=>{if(e.key==='Enter')loadUsers()});
 $('live').onchange=e=>{clearInterval(timer);if(e.target.checked)timer=setInterval(()=>load(false),8000)};
-groups();
+showTab('groups');
 </script></body></html>"""
+
 
 
 def _verify_init_data(init: str):
@@ -579,27 +617,46 @@ async def _web_route(path: str, qs: dict, headers: dict):
         return 403, "application/json", b'{"error":"forbidden"}'
     if path == "/api/groups":
         rows = await pool.fetch(
-            "SELECT c.chat_id, c.title, (SELECT count(*) FROM group_msgs g WHERE g.chat_id = c.chat_id) AS n "
-            "FROM chats c ORDER BY n DESC, c.title LIMIT 100")
+            "SELECT c.chat_id, c.title, COALESCE(g.n, 0) AS n FROM chats c "
+            "LEFT JOIN (SELECT chat_id, count(*) AS n FROM group_msgs GROUP BY chat_id) g ON g.chat_id = c.chat_id "
+            "UNION ALL "
+            "SELECT g.chat_id, g.chat_id::text, g.n FROM (SELECT chat_id, count(*) AS n FROM group_msgs GROUP BY chat_id) g "
+            "WHERE g.chat_id NOT IN (SELECT chat_id FROM chats) ORDER BY n DESC LIMIT 100")
         return 200, "application/json", json.dumps([dict(r) for r in rows], ensure_ascii=False).encode()
+    if path == "/api/users":
+        q = (qs.get("q") or "").strip() or None
+        rows = await pool.fetch(
+            "SELECT user_id, name, username, balance, jaghs, started, banned_until FROM users "
+            "WHERE ($1::text IS NULL OR name ILIKE '%' || $1 || '%' OR username ILIKE '%' || $1 || '%' OR user_id::text = $1) "
+            "ORDER BY started DESC, balance DESC LIMIT 100", q)
+        total = await pool.fetchval("SELECT count(*) FROM users")
+        started = await pool.fetchval("SELECT count(*) FROM users WHERE started")
+        now = time.time()
+        users = [{**{k: r[k] for k in ("user_id", "name", "username", "balance", "jaghs", "started")}, "banned": (r["banned_until"] or 0) > now} for r in rows]
+        return 200, "application/json", json.dumps({"total": total, "started": started, "users": users}, ensure_ascii=False).encode()
     if path == "/api/messages":
-        try:
-            cid = int(qs.get("chat", ""))
-        except ValueError:
-            return 400, "application/json", b"[]"
+        c = (qs.get("chat") or "").strip()
+        if c == "all":
+            cid = None
+        else:
+            try:
+                cid = int(c)
+            except ValueError:
+                return 400, "application/json", b"[]"
         u = (qs.get("user") or "").strip()
         uid_f = int(u) if u.lstrip("-").isdigit() else None
         un_f = u.lstrip("@").lower() if (u and uid_f is None) else None
         q = (qs.get("q") or "").strip() or None
         rows = await pool.fetch(
-            "SELECT msg_id, user_id, name, username, text, ts FROM group_msgs WHERE chat_id = $1 "
-            "AND ($2::bigint IS NULL OR user_id = $2) AND ($3::text IS NULL OR lower(username) = $3) "
-            "AND ($4::text IS NULL OR text ILIKE '%' || $4 || '%') ORDER BY ts DESC LIMIT 150",
-            cid, uid_f, un_f, q)
+            "SELECT g.msg_id, g.chat_id, g.user_id, g.name, g.username, g.text, g.ts, "
+            "(SELECT title FROM chats c WHERE c.chat_id = g.chat_id) AS title FROM group_msgs g "
+            "WHERE ($1::bigint IS NULL OR g.chat_id = $1) AND ($2::bigint IS NULL OR g.user_id = $2) "
+            "AND ($3::text IS NULL OR lower(g.username) = $3) AND ($4::text IS NULL OR g.text ILIKE '%' || $4 || '%') "
+            "ORDER BY g.ts DESC LIMIT 150", cid, uid_f, un_f, q)
         out = []
         for r in rows:
             d = dict(r)
-            d["link"] = f"https://t.me/c/{str(cid)[4:]}/{r['msg_id']}" if str(cid).startswith("-100") else None
+            d["link"] = f"https://t.me/c/{str(r['chat_id'])[4:]}/{r['msg_id']}" if str(r["chat_id"]).startswith("-100") else None
             out.append(d)
         return 200, "application/json", json.dumps(out, ensure_ascii=False).encode()
     return 404, "application/json", b"{}"
