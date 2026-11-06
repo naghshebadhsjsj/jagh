@@ -650,7 +650,7 @@ textarea.inp{min-height:130px;resize:vertical}
 'use strict';
 const tg=window.Telegram&&Telegram.WebApp;
 const tgv=v=>!!(tg&&tg.isVersionAtLeast&&tg.isVersionAtLeast(v));
-if(tg){try{tg.ready();tg.expand();if(tgv('7.7'))tg.disableVerticalSwipes();tg.setHeaderColor&&tg.setHeaderColor('secondary_bg_color')}catch(e){}}
+if(tg){try{tg.ready();tg.expand();if(tgv('7.7'))tg.disableVerticalSwipes();tg.setHeaderColor&&tg.setHeaderColor('secondary_bg_color')}catch(e){}} if(!tg||!tg.initData){setTimeout(()=>toast('این مینی‌اپ باید از دکمه «مینی‌اپ پنل پشتیبانی» داخل ربات باز شود.',1),300)}
 const setDark=()=>document.body.classList.toggle('dark',tg?tg.colorScheme==='dark':matchMedia('(prefers-color-scheme:dark)').matches);
 setDark();if(tg)tg.onEvent('themeChanged',setDark);
 if(tgv('6.1'))document.body.classList.add('tgback');
@@ -704,7 +704,7 @@ async function api(path,body){
   const o={headers:HDR()};
   if(body!==undefined){o.method='POST';o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
   const r=await fetch(path,o);let j=null;try{j=await r.json()}catch(e){}
-  if(r.status===403)throw new Error('نشست معتبر نیست یا دسترسی این بخش رو نداری. مینی‌اپ رو از داخل تلگرام دوباره باز کن.');
+  if(r.status===403)throw new Error((j&&j.error)||'نشست معتبر نیست؛ مینی‌اپ را از دکمه داخل ربات باز کن.');
   if(!r.ok)throw new Error((j&&j.error)||('خطای سرور ('+r.status+')'));
   return j;
 }
@@ -1938,8 +1938,10 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     if user is None:
         return _j({"error": "نشست تلگرام معتبر نیست؛ مینی‌اپ را از داخل تلگرام باز کن"}, 403)
     social = path.startswith("/api/social/")
-    if not social and (int(user["id"]) in OWNER_IDS or not has_perm(int(user["id"]), "panel")):
-        return _j({"error": "forbidden"}, 403)
+    # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
+    # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
+    if not social and not has_perm(int(user["id"]), "panel"):
+        return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
     if pool is None:
         return _j({"error": "دیتابیس هنوز آماده نیست"}, 503)
     try:
@@ -6804,8 +6806,8 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
     uid = user_id
-    # دکمه‌ی مینی‌اپ فقط برای پشتیبان‌های عادی است؛ صاحب/پشتیبانی ارشد مدیریت نیروها را از همین پنل انجام می‌دهد.
-    web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") and uid is not None and uid not in OWNER_IDS else []
+    # مینی‌اپ برای صاحب ربات و پشتیبان‌هایی که دسترسی panel دارند؛ کاربران عادی دکمه را نمی‌بینند.
+    web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") and uid is not None and has_perm(uid, "panel") else []
     support_row = [[btn("➕ افزودن پشتیبانی", "success", callback_data="sup:add"),
                     btn("📋 لیست پشتیبان‌ها", "primary", callback_data="sup:list")]] if uid in OWNER_IDS else []
     return InlineKeyboardMarkup(web_row + support_row + [
