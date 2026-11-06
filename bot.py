@@ -284,7 +284,7 @@ ME_WORD = "کاراکتر"  # این کلمه کاراکتر رو نشون می�
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "کازینو سم یا خوراکی + بانک دکمه‌ای + ازدواج و خیانت v5 (دسترسی پشتیبان‌ها)"
+BOT_VERSION = "کازینو سم یا خوراکی + جاسوسی + پشتیبانی v6"
 
 
 def norm_word(text: str) -> str:
@@ -379,6 +379,9 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS rift_log (initiator BIGINT NOT NULL, target BIGINT NOT NULL, day TEXT NOT NULL, cnt INT NOT NULL DEFAULT 0, PRIMARY KEY (initiator, target, day))")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_hug DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spouse_id BIGINT")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_owned BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_day TEXT NOT NULL DEFAULT ''")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_uses INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_affection DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS affection_cooldowns (actor_id BIGINT NOT NULL, target_id BIGINT NOT NULL, last_ts DOUBLE PRECISION NOT NULL, PRIMARY KEY(actor_id,target_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS marriage_proposals (bride_id BIGINT PRIMARY KEY, groom_id BIGINT NOT NULL, chat_id BIGINT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
@@ -2586,6 +2589,18 @@ async def on_transfer_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
+async def notify_primary_support(context, sender_id: int, recipient_id: int, amount: int, source: str):
+    if sender_id not in STAFF:
+        return
+    sender = await pool.fetchval("SELECT name FROM users WHERE user_id=$1", sender_id) or str(sender_id)
+    recipient = await pool.fetchval("SELECT name FROM users WHERE user_id=$1", recipient_id) or str(recipient_id)
+    note = (f"🔔 <b>گزارش انتقال توسط پشتیبان</b>\nپشتیبان: {_ulink(sender_id,sender)}\n"
+            f"مقصد: {_ulink(recipient_id,recipient)}\nمبلغ: <b>{amount:,} تومان</b>\nروش: {html.escape(source)}")
+    for owner_id in OWNER_IDS:
+        try: await context.bot.send_message(owner_id, note, parse_mode="HTML")
+        except Exception: log.warning("could not notify owner %s about support transfer", owner_id)
+
+
 async def transfer_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     _, act, frm, to, amt = q.data.split(":")
@@ -2632,6 +2647,7 @@ async def transfer_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("خطا، دوباره امتحان کن.", show_alert=True)
         return
     await q.answer("انجام شد ✅")
+    await notify_primary_support(context, frm, to, amt, "انتقال پول بین کاربران")
     tname = await pool.fetchval("SELECT name FROM users WHERE user_id = $1", to) or "کاربر"
     await q.edit_message_text(
         f'✅ <b>{amt:,} تومن</b> از <a href="tg://user?id={frm}">{html.escape(q.from_user.full_name)}</a> '
@@ -2716,6 +2732,67 @@ async def show_tasks_from_callback(q, uid):
     await q.edit_message_text("\n".join(lines),parse_mode="HTML",reply_markup=InlineKeyboardMarkup(buttons) if buttons else None)
 
 
+# ───────────────────── جاسوسی ─────────────────────
+SPY_EID = "5805161437466726782"
+SPY_CE = f'<tg-emoji emoji-id="{SPY_EID}">🕵️</tg-emoji>'
+SPY_PRICE = 1_400_000
+SPY_DAILY_LIMIT = 5
+
+def _spy_day_key():
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Tehran")).strftime("%Y-%m-%d")
+
+async def spy_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    key = _word_key(text)
+    if key in ("خریدجاسوسی", "خریدابزارجاسوسی"):
+        await upsert_user(user.id, user.full_name)
+        async with pool.acquire() as c:
+            async with c.transaction():
+                row = await c.fetchrow("SELECT balance, spy_owned FROM users WHERE user_id=$1 FOR UPDATE", user.id)
+                if row["spy_owned"]:
+                    answer = "ابزار جاسوسی رو قبلاً خریدی؛ برای استفاده روی پیام کاربر ریپلای کن و بنویس «جاسوسی»."
+                elif int(row["balance"] or 0) < SPY_PRICE:
+                    answer = f"موجودی کافی نیست. قیمت جاسوسی: {SPY_PRICE:,} تومان؛ موجودی جیب: {int(row['balance'] or 0):,} تومان."
+                else:
+                    await c.execute("UPDATE users SET balance=balance-$1, spy_owned=TRUE, spy_day=$2, spy_uses=0 WHERE user_id=$3", SPY_PRICE, _spy_day_key(), user.id)
+                    answer = f"{SPY_CE} ابزار جاسوسی با موفقیت خریداری شد!\nهزینه: {SPY_PRICE:,} تومان\nروزانه {SPY_DAILY_LIMIT} بار می‌تونی استفاده کنی. برای جاسوسی روی پیام کاربر ریپلای کن و بنویس «جاسوسی»."
+        await msg.reply_text(B(answer), parse_mode="HTML"); return True
+    if key not in ("جاسوسی", "استعلامجاسوسی"):
+        return False
+    target = msg.reply_to_message.from_user if msg.reply_to_message else None
+    if target is None or target.is_bot or target.id == user.id:
+        await msg.reply_text(B("برای جاسوسی باید روی پیام یک کاربر ریپلای کنی؛ روی خودت یا ربات نمی‌شه."), parse_mode="HTML"); return True
+    await upsert_user(user.id, user.full_name)
+    day = _spy_day_key()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            own = await c.fetchrow("SELECT spy_owned, spy_day, spy_uses FROM users WHERE user_id=$1 FOR UPDATE", user.id)
+            if not own or not own["spy_owned"]:
+                await msg.reply_text(B(f"{SPY_CE} اول باید ابزار جاسوسی رو بخری. قیمت: {SPY_PRICE:,} تومان\nبرای خرید بنویس: خرید جاسوسی"), parse_mode="HTML"); return True
+            used = int(own["spy_uses"] or 0) if own["spy_day"] == day else 0
+            if used >= SPY_DAILY_LIMIT:
+                await msg.reply_text(B(f"سهمیه‌ی امروزت تموم شده. روزانه فقط {SPY_DAILY_LIMIT} بار جاسوسی مجازه؛ فردا دوباره شارژ می‌شه."), parse_mode="HTML"); return True
+            await c.execute("UPDATE users SET spy_day=$1, spy_uses=$2 WHERE user_id=$3", day, used+1, user.id)
+            row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,energy FROM users WHERE user_id=$1", target.id)
+            if not row:
+                await c.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
+                row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,energy FROM users WHERE user_id=$1", target.id)
+            spouse = await c.fetchrow("SELECT name FROM users WHERE user_id=$1", row["spouse_id"]) if row["spouse_id"] else None
+            acts = await c.fetchrow("SELECT (SELECT count(*) FROM group_msgs WHERE user_id=$1) AS messages, (SELECT count(*) FROM cars WHERE user_id=$1) AS cars, (SELECT count(*) FROM home_assets WHERE user_id=$1) AS homes, (SELECT count(*) FROM robbery_state WHERE user_id=$1) AS robberies", target.id)
+    job = current_job(row["gender"], int(row["jaghs"] or 0), int(row["work_count"] or 0)) if row["gender"] in JOBS else None
+    job_name = job[1] if job else "بدون شغل"
+    marital = f"متأهل با {html.escape(spouse['name'] or 'همسر') }" if spouse else "مجرد"
+    activity = f"جق ثبت‌شده: {int(row['jaghs'] or 0):,}\nشیفت‌های کاری: {int(row['work_count'] or 0):,}\nپیام‌های ثبت‌شده در گروه‌ها: {int(acts['messages'] or 0):,}\nعملیات خلاف ثبت‌شده: {int(acts['robberies'] or 0):,}\nماشین‌ها: {int(acts['cars'] or 0)}\nخانه‌ها: {int(acts['homes'] or 0)}"
+    remaining = SPY_DAILY_LIMIT-(used+1)
+    report = (f"{SPY_CE} <b>گزارش جاسوسی</b>\nهدف: {_ulink(target.id,target.full_name)}\n\n"
+              f"💵 پول داخل جیب: <b>{int(row['balance'] or 0):,} تومان</b>\n🏦 پول داخل بانک: <b>{int(row['bank_balance'] or 0):,} تومان</b>\n"
+              f"💰 دارایی کل: <b>{int(row['balance'] or 0)+int(row['bank_balance'] or 0):,} تومان</b>\n"
+              f"💍 وضعیت: <b>{marital}</b>\n💼 شغل: <b>{html.escape(job_name)}</b>\n⚡ انرژی: <b>{float(row['energy'] or 0):g}</b>\n\n"
+              f"📋 <b>فعالیت‌ها</b>\n{activity}\n\nاستفاده‌ی باقی‌مانده‌ی امروز: <b>{remaining} از {SPY_DAILY_LIMIT}</b>")
+    await msg.reply_text(report, parse_mode="HTML"); return True
+
+
 async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     user = update.effective_user
@@ -2724,6 +2801,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
     text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
     log.info("group text from %s: %r", user.id, msg.text)
+    if await spy_text(update, context, text):
+        return
     if _word_key(text) in ("تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks"):
         await show_tasks(update, context)
         return
@@ -3191,6 +3270,10 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تو پی‌وی ربات هم «خودم» کار می‌کنه."""
     msg = update.effective_message
+    if await support_add_input(update, context):
+        return
+    if await spy_text(update, context, msg.text or ""):
+        return
     if await admin_input(update, context):
         return
     if await account_transfer_input(update, context):
@@ -4606,13 +4689,21 @@ FOOD_EID = "5201879022421688548"
 POISON_CE = f'<tg-emoji emoji-id="{POISON_EID}">☠️</tg-emoji>'
 FOOD_CE = f'<tg-emoji emoji-id="{FOOD_EID}">🍬</tg-emoji>'
 
-def poison_board(game_id, mode, disabled=False):
+def poison_board(game_id, st, reveal=False):
+    """صفحه‌ی بازی؛ خانه‌های بازشده دیگر قابل انتخاب نیستند."""
     rows=[]
+    opened=st.setdefault("opened", set())
     for base in range(0,24,6):
         row=[]
         for i in range(base,base+6):
-            label="▫️" if not disabled else "·"
-            row.append(btn(label,"primary",callback_data=f"cz:po:{game_id}:{i}"))
+            icon=None
+            if reveal and i in st.get("hidden", {}).values():
+                label="☠️"; icon=POISON_EID
+            elif i in opened:
+                label="🍬"; icon=FOOD_EID
+            else:
+                label="▫️"
+            row.append(btn(label, "primary", icon=icon, callback_data=f"cz:po:{game_id}:{i}"))
         rows.append(row)
     return InlineKeyboardMarkup(rows)
 
@@ -4624,30 +4715,35 @@ async def create_poison_table(bot, context, chat_id, user, bet, reply_to=None):
         row=await get_user(user.id); await send_html(bot,chat_id,B(f"موجودی کافی نیست: {row['balance']:,} تومن")); return
     import uuid
     gid=uuid.uuid4().hex[:9]
-    st={"chat":chat_id,"creator":user.id,"names":{user.id:user.full_name},"bet":bet,"phase":"lobby","created":time.time(),"hidden":{},"turn":None,"tries":0,"message":None}
+    st={"chat":chat_id,"creator":user.id,"names":{user.id:user.full_name},"bet":bet,"phase":"lobby","created":time.time(),"hidden":{},"turn":None,"tries":0,"message":None,"opened":set()}
     context.application.bot_data.setdefault("poison_games",{})[gid]=st
     kb=InlineKeyboardMarkup([[btn("🎮 ورود به بازی", "success", callback_data=f"cz:pjoin:{gid}")]])
-    m=await send_html(bot,chat_id,B(f"☠️ <b>سم یا خوراکی</b>\n\nسازنده: {_ulink(user.id,user.full_name)}\nشرط هر نفر: {bet:,} تومان\nجایزه: {bet*2:,} تومان\n\nنفر دوم وارد بشه!"),reply_markup=kb,reply_parameters=ReplyParameters(message_id=reply_to,allow_sending_without_reply=True) if reply_to else None)
+    m=await send_html(bot,chat_id,B(f"{POISON_CE} <b>سم یا خوراکی</b>\n\nسازنده: {_ulink(user.id,user.full_name)}\nشرط هر نفر: {bet:,} تومان\nجایزه: {bet*2:,} تومان\n\nنفر دوم وارد بشه!"),reply_markup=kb,reply_parameters=ReplyParameters(message_id=reply_to,allow_sending_without_reply=True) if reply_to else None)
     st["message"]=m.message_id
+
+async def _finish_poison(app, st, winner, loser, reason):
+    if st.get("phase")=="done":
+        return
+    st["phase"]="done"
+    if winner:
+        await _give(winner,st["bet"]*2)
+    gid=next((k for k,v in app.bot_data.setdefault("poison_games",{}).items() if v is st), "")
+    kb=poison_board(gid,st,reveal=True) if gid else None
+    try:
+        await app.bot.edit_message_text(
+            f"{POISON_CE} {reason}\n🏆 برنده: {_ulink(winner,st['names'].get(winner,'بازیکن')) if winner else '—'}\nبازنده: {_ulink(loser,st['names'].get(loser,'بازیکن')) if loser else '—'}\n{MONEY_CE} جایزه: {st['bet']*2:,} تومان\nهر دو سم مشخص شدند.",
+            chat_id=st["chat"], message_id=st["message"], parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        log.exception("poison finish edit failed")
 
 async def poison_timeout(app, gid, deadline):
     await asyncio.sleep(max(0, deadline-time.time()))
     st=app.bot_data.setdefault("poison_games",{}).get(gid)
-    if not st or st.get("phase") not in ("hide","guess") or st.get("deadline") != deadline:
-        return
-    if time.time() < deadline:
+    if not st or st.get("phase") not in ("hide","guess") or st.get("deadline") != deadline or time.time()<deadline:
         return
     loser=st.get("hide_turn") if st["phase"]=="hide" else st.get("turn")
     winner=next((x for x in st.get("players",[]) if x!=loser),None)
-    if winner:
-        await _give(winner,st["bet"]*2)
-    st["phase"]="done"
-    try:
-        await app.bot.edit_message_text(
-            f"⌛ مهلت ۶۰ ثانیه‌ای {_ulink(loser,st['names'].get(loser,'بازیکن'))} تمام شد.\n🏆 برنده: {_ulink(winner,st['names'].get(winner,'بازیکن')) if winner else '—'}\nجایزه: {st['bet']*2:,} تومان",
-            chat_id=st["chat"], message_id=st["message"], parse_mode="HTML")
-    except Exception:
-        log.exception("poison game timeout edit failed")
+    await _finish_poison(app,st,winner,loser,"مهلت تمام شد؛ حریف برنده شد.")
 
 async def poison_cb(update,context,parts):
     q=update.callback_query; user=q.from_user; games=context.application.bot_data.setdefault("poison_games",{})
@@ -4660,43 +4756,50 @@ async def poison_cb(update,context,parts):
         st["names"][user.id]=user.full_name; st["players"]=[st["creator"],user.id]; st["phase"]="hide"; st["hide_turn"]=st["creator"]; st["deadline"]=time.time()+60
         context.application.create_task(poison_timeout(context.application,gid,st["deadline"]))
         await q.answer("وارد بازی شدی!")
-        await q.edit_message_text(f"☠️ <b>سم یا خوراکی</b>\n\nهر نفر باید سم خودش رو پشت یکی از ۲۴ خانه مخفی کنه.\nنوبت اول: {_ulink(st['creator'],st['names'][st['creator']])}\n۶۰ ثانیه فرصت داری.",parse_mode="HTML",reply_markup=poison_board(gid,"hide"))
+        await q.edit_message_text(f"{POISON_CE} <b>سم یا خوراکی</b>\n\nهر نفر سم خودش رو پشت یکی از ۲۴ خانه مخفی می‌کنه.\nنوبت اول: {_ulink(st['creator'],st['names'][st['creator']])}\n۶۰ ثانیه فرصت داری.",parse_mode="HTML",reply_markup=poison_board(gid,st))
         return
     if act=="po":
-        gid=parts[2]; cell=int(parts[3]); st=games.get(gid)
+        gid=parts[2]
+        try: cell=int(parts[3])
+        except (ValueError,IndexError): await q.answer("خانه نامعتبره.",show_alert=True); return
+        st=games.get(gid)
         if not st or st.get("phase") not in ("hide","guess"): await q.answer("این بازی تمام شده.",show_alert=True); return
+        if not 0<=cell<24: await q.answer("خانه نامعتبره.",show_alert=True); return
         if time.time()>st["deadline"]:
             loser=st.get("hide_turn") if st["phase"]=="hide" else st.get("turn")
             winner=next((x for x in st["players"] if x!=loser),None)
-            if winner: await _give(winner,st["bet"]*2)
-            st["phase"]="done"; await q.answer("مهلت تمام شد؛ حریف برنده شد.",show_alert=True)
-            await q.edit_message_text(f"⌛ مهلت تمام شد. برنده: {_ulink(winner,st['names'].get(winner,'کاربر')) if winner else '—'}",parse_mode="HTML"); return
-        if user.id not in st["players"]: await q.answer("این میز برای بازیکنانشه.",show_alert=True); return
+            await _finish_poison(context.application,st,winner,loser,"مهلت تمام شد؛ حریف برنده شد.")
+            await q.answer("مهلت تمام شد؛ حریف برنده شد.",show_alert=True); return
+        if user.id not in st.get("players",[]): await q.answer("این میز برای بازیکنانشه.",show_alert=True); return
         if st["phase"]=="hide":
             if user.id!=st["hide_turn"]: await q.answer("هنوز نوبت تو نیست.",show_alert=True); return
+            if cell in st["hidden"].values(): await q.answer("سم دوم باید پشت یک خانه‌ی متفاوت مخفی بشه.",show_alert=True); return
             st["hidden"][user.id]=cell
             if len(st["hidden"])==1:
                 st["hide_turn"]=next(x for x in st["players"] if x!=user.id); st["deadline"]=time.time()+60
                 context.application.create_task(poison_timeout(context.application,gid,st["deadline"]))
                 await q.answer("سمت مخفی شد!")
-                await q.edit_message_text(f"{_ulink(st['hide_turn'],st['names'][st['hide_turn']])} حالا سم خودش رو پشت یک خانه مخفی کنه. ۶۰ ثانیه فرصت!",parse_mode="HTML",reply_markup=poison_board(gid,"hide")); return
-            st["phase"]="guess"; st["turn"]=st["creator"]; st["deadline"]=time.time()+60
+                await q.edit_message_text(f"{_ulink(st['hide_turn'],st['names'][st['hide_turn']])} حالا سم خودش رو پشت یک خانه مخفی کنه. ۶۰ ثانیه فرصت!",parse_mode="HTML",reply_markup=poison_board(gid,st)); return
+            st["phase"]="guess"; st["turn"]=st["creator"]; st["deadline"]=time.time()+60; st["opened"].clear()
             context.application.create_task(poison_timeout(context.application,gid,st["deadline"]))
             await q.answer("هر دو سم مخفی شد!")
-            await q.edit_message_text(f"هر دو سم مخفی شد!\nنوبت {_ulink(st['turn'],st['names'][st['turn']])}: یک خانه رو انتخاب کن؛ اگر سم حریف رو پیدا کنی می‌بازی! ۶۰ ثانیه!",parse_mode="HTML",reply_markup=poison_board(gid,"guess")); return
+            await q.edit_message_text(f"هر دو سم مخفی شد!\nنوبت {_ulink(st['turn'],st['names'][st['turn']])}: خانه‌ای رو انتخاب کن؛ سم خودت رو نمی‌تونی انتخاب کنی. پیدا کردن سم حریف یعنی باخت! ۶۰ ثانیه فرصت.",parse_mode="HTML",reply_markup=poison_board(gid,st)); return
         if user.id!=st["turn"]: await q.answer("نوبت حریفه.",show_alert=True); return
+        if cell in st.setdefault("opened",set()): await q.answer("این خانه قبلاً باز شده؛ یکی دیگه رو انتخاب کن.",show_alert=True); return
+        if cell==st["hidden"].get(user.id):
+            await q.answer("رو سم خودت نمی‌تونی بزنی!",show_alert=True); return
         opponent=next(x for x in st["players"] if x!=user.id)
-        found=cell==st["hidden"][opponent]
-        if found:
-            # پیدا کردن سم یعنی بازیکن انتخاب‌کننده باخته و صاحب سم برنده است.
-            await _give(opponent,st["bet"]*2); st["phase"]="done"
-            await q.answer("سم حریف رو پیدا کردی؛ باختی!",show_alert=True)
-            await q.edit_message_text(f"{POISON_CE} {_ulink(user.id,st['names'][user.id])} سم حریف رو پیدا کرد و باخت!\n🏆 برنده: {_ulink(opponent,st['names'][opponent])}\n{MONEY_CE} جایزه: {st['bet']*2:,} تومان",parse_mode="HTML")
-        else:
-            st["turn"]=opponent; st["deadline"]=time.time()+60; st["tries"]+=1
-            context.application.create_task(poison_timeout(context.application,gid,st["deadline"]))
-            await q.answer("خوراکی بود! زنده موندی؛ نوبت حریف شد.")
-            await q.edit_message_text(f"{FOOD_CE} خوراکی بود! {_ulink(user.id,st['names'][user.id])} نجات پیدا کرد.\nنوبت {_ulink(opponent,st['names'][opponent])} است. ۶۰ ثانیه فرصت داری.",parse_mode="HTML",reply_markup=poison_board(gid,"guess"))
+        if cell==st["hidden"].get(opponent):
+            st["opened"].add(cell)
+            st["phase"]="done"
+            await _give(opponent,st["bet"]*2)
+            await q.answer("سم حریف رو پیدا کردی؛ حریف برنده شد!",show_alert=True)
+            await q.edit_message_text(f"{POISON_CE} {_ulink(user.id,st['names'][user.id])} سم حریف رو پیدا کرد و باخت!\n🏆 برنده: {_ulink(opponent,st['names'][opponent])}\n{MONEY_CE} جایزه: {st['bet']*2:,} تومان\nسم هر دو بازیکن مشخص شد.",parse_mode="HTML",reply_markup=poison_board(gid,st,reveal=True)); return
+        st["opened"].add(cell)
+        st["turn"]=opponent; st["deadline"]=time.time()+60
+        context.application.create_task(poison_timeout(context.application,gid,st["deadline"]))
+        await q.answer("خوراکی بود! نوبت حریف شد.")
+        await q.edit_message_text(f"{FOOD_CE} خوراکی بود! خانه‌ی انتخابی باز شد.\nنوبت {_ulink(opponent,st['names'][opponent])} است؛ ۶۰ ثانیه فرصت داری.",parse_mode="HTML",reply_markup=poison_board(gid,st))
 
 
 async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6462,8 +6565,9 @@ async def _staff_list_view():
     for uid, perms in sorted(STAFF.items()):
         rows.append([InlineKeyboardButton(f"👤 {await _staff_name(uid)} — {len(perms)} دسترسی", callback_data=f"sup:u:{uid}")])
     text = "🛡 پشتیبان‌ها\n\n" + ("روی هر پشتیبان بزن تا دسترسی‌هاش رو عوض کنی." if rows else "هنوز پشتیبانی اضافه نکردی.")
-    text += "\n\nبرای اضافه کردن: /addsupport آیدی_عددی  (یا @یوزرنیم؛ کاربر باید قبلا ربات رو استارت کرده باشه)"
-    return text, InlineKeyboardMarkup(rows) if rows else None
+    rows.append([InlineKeyboardButton("➕ افزودن پشتیبانی", callback_data="sup:add")])
+    text += "\n\nبرای افزودن پشتیبان جدید، دکمه‌ی افزودن پشتیبانی رو بزن."
+    return text, InlineKeyboardMarkup(rows)
 
 
 async def _staff_user_view(uid: int):
@@ -6472,6 +6576,30 @@ async def _staff_user_view(uid: int):
     rows.append([InlineKeyboardButton("حذف از پشتیبانی 🗑", callback_data=f"sup:del:{uid}")])
     rows.append([InlineKeyboardButton("⬅️ برگشت", callback_data="sup:list")])
     return f"🛡 {await _staff_name(uid)}\nآیدی: {uid}\n\nهر دسترسی رو با زدن روش روشن/خاموش کن:", InlineKeyboardMarkup(rows)
+
+
+async def support_add_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    msg=update.effective_message; user=update.effective_user
+    if not msg or not msg.text or not context.user_data.get("support_add_wait"):
+        return False
+    if user.id not in OWNER_IDS:
+        context.user_data.pop("support_add_wait",None); return False
+    value=msg.text.strip()
+    if value=="لغو":
+        context.user_data.pop("support_add_wait",None); await msg.reply_text("افزودن پشتیبان لغو شد."); return True
+    uid=None
+    if value.lstrip("-").isdigit(): uid=int(value)
+    elif re.fullmatch(r"@?[A-Za-z0-9_]{3,32}",value):
+        uid=await pool.fetchval("SELECT user_id FROM users WHERE lower(username)=lower($1)",value.lstrip("@"))
+    if uid is None:
+        await msg.reply_text("کاربر پیدا نشد؛ آیدی عددی یا @یوزرنیم معتبر بفرست."); return True
+    if uid in OWNER_IDS:
+        await msg.reply_text("این کاربر صاحب رباته و از قبل دسترسی کامل داره."); return True
+    STAFF.setdefault(uid,set()); ADMIN_IDS.add(uid); await _save_staff(uid)
+    context.user_data.pop("support_add_wait",None)
+    text,kb=await _staff_user_view(uid)
+    await msg.reply_text("✅ پشتیبان اضافه شد. دسترسی‌هاش رو مشخص کن:\n\n"+text,reply_markup=kb)
+    return True
 
 
 async def support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6519,6 +6647,10 @@ async def support_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = q.data.split(":")
     act = parts[1]
     await q.answer()
+    if act == "add":
+        context.user_data["support_add_wait"] = True
+        await q.message.reply_text("آیدی عددی یا @یوزرنیم پشتیبان جدید رو بفرست. کاربر باید قبلاً ربات رو استارت کرده باشه. برای لغو بنویس «لغو».")
+        return
     if act == "list":
         text, kb = await _staff_list_view()
     else:
@@ -6815,6 +6947,8 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
                 new = await pool.fetchval(f"UPDATE users SET {col} = GREATEST({col} - $1::bigint, 0) WHERE user_id = $2::bigint RETURNING {col}", amt, st["uid"])
                 verb = "کم شد"
             context.user_data.pop("adm", None)
+            if act.startswith("money"):
+                await notify_primary_support(context, user.id, st["uid"], amt if act.endswith("_add") else -amt, "تغییر موجودی از پنل پشتیبانی")
             unit = "تومن" if act.startswith("money") else "جق"
             await msg.reply_text(f"✅ {amt:,} {unit} {verb}. مقدار جدید: {new:,} {unit}", reply_markup=admin_menu_kb())
             return True
