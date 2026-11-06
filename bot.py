@@ -482,6 +482,17 @@ async def init_db(app: Application):
             except Exception:
                 log.exception("bad %s in db", r["key"])
         await c.execute("CREATE TABLE IF NOT EXISTS support_staff (user_id BIGINT PRIMARY KEY, perms TEXT NOT NULL DEFAULT '')")
+        # جقستگرام: پروفایل، رسانه، پست، استوری، ری‌اکشن و چت‌روم عمومی
+        await c.execute("CREATE TABLE IF NOT EXISTS social_profiles (user_id BIGINT PRIMARY KEY, username TEXT UNIQUE, display_name TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', avatar_media_id BIGINT, created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_media (media_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, kind TEXT NOT NULL, data BYTEA NOT NULL, content_type TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, expires_at DOUBLE PRECISION)")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_posts (post_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, caption TEXT NOT NULL DEFAULT '', media_id BIGINT, created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE INDEX IF NOT EXISTS social_posts_created_idx ON social_posts(created_at DESC)")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_stories (story_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, caption TEXT NOT NULL DEFAULT '', media_id BIGINT, created_at DOUBLE PRECISION NOT NULL, expires_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE INDEX IF NOT EXISTS social_stories_exp_idx ON social_stories(expires_at DESC)")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_reactions (post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, emoji TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(post_id,user_id))")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_room_messages (message_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, text TEXT NOT NULL, reply_to BIGINT, premium_emoji_id TEXT, created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE INDEX IF NOT EXISTS social_room_created_idx ON social_room_messages(created_at DESC)")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_room_reactions (message_id BIGINT NOT NULL REFERENCES social_room_messages(message_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, emoji TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(message_id,user_id,emoji))")
         STAFF.clear()
         for r in await c.fetch("SELECT user_id, perms FROM support_staff"):
             STAFF[int(r["user_id"])] = {p for p in r["perms"].split(",") if p in SUPPORT_PERMS}
@@ -538,6 +549,12 @@ textarea.inp{min-height:130px;resize:vertical}
 #tabs i{font-style:normal;font-size:21px}#tabs span{font-size:11.5px}
 #tabs button.on{color:var(--btn);font-weight:600}
 #app.deep #tabs{display:none}
+/* جقستگرام */
+.social-top{background:linear-gradient(135deg,#7b2ff7,#f107a3);color:#fff;padding:14px;border-radius:0 0 20px 20px}
+.social-brand{font-size:23px;font-weight:900;letter-spacing:-.5px}.social-sub{font-size:12px;opacity:.85}
+.snav{display:flex;gap:7px;padding:10px 12px;overflow:auto;flex:none}.snav button{border:1px solid var(--line);background:var(--sec);border-radius:20px;padding:7px 13px;white-space:nowrap}.snav button.on{background:#b12bd5;color:#fff;border-color:#b12bd5}
+.stories{display:flex;gap:12px;padding:12px;overflow:auto;border-bottom:1px solid var(--line)}.story{width:66px;flex:none;text-align:center;font-size:11px;cursor:pointer}.story .av{width:58px;height:58px;margin:0 auto 4px;border:3px solid #c42bcf;outline:2px solid #ff9b42}
+.spost{margin:12px;background:var(--sec);border:1px solid var(--line);border-radius:17px;overflow:hidden}.sphead{display:flex;align-items:center;gap:9px;padding:10px}.spmedia{width:100%;max-height:420px;object-fit:cover;display:block;background:var(--line)}.spcaption{padding:9px 12px;white-space:pre-wrap}.spactions{display:flex;gap:8px;padding:0 12px 10px}.spactions button{border:0;background:transparent;padding:5px 7px;font-size:14px}.scompose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}.scompose .inp{margin:0;min-width:0}.sprofile{display:flex;align-items:center;gap:15px;padding:18px 14px}.sprofile .av{width:82px;height:82px}.sroom{flex:1;overflow:auto;padding:10px;background:var(--sec)}.smsg{max-width:85%;margin:7px 0;padding:9px 11px;border-radius:14px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13)}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
 .av{border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;overflow:hidden;user-select:none}
 .av img{width:100%;height:100%;object-fit:cover;display:block}
 /* گپ‌ها / کاربران */
@@ -625,6 +642,7 @@ textarea.inp{min-height:130px;resize:vertical}
     <button data-k="chats" class="on"><i>💬</i><span>گپ‌ها</span></button>
     <button data-k="users"><i>👥</i><span>کاربران</span></button>
     <button data-k="panel"><i>🛠</i><span>پنل</span></button>
+    <button data-k="social"><i>📸</i><span>جقستگرام</span></button>
   </nav>
 </div>
 <div id="toast"></div>
@@ -686,7 +704,7 @@ async function api(path,body){
   const o={headers:HDR()};
   if(body!==undefined){o.method='POST';o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
   const r=await fetch(path,o);let j=null;try{j=await r.json()}catch(e){}
-  if(r.status===403)throw new Error('دسترسی نداری یا نشست منقضی شده. مینی‌اپ رو ببند و دوباره از /admin باز کن.');
+  if(r.status===403)throw new Error('نشست معتبر نیست یا دسترسی این بخش رو نداری. مینی‌اپ رو از داخل تلگرام دوباره باز کن.');
   if(!r.ok)throw new Error((j&&j.error)||('خطای سرور ('+r.status+')'));
   return j;
 }
@@ -721,6 +739,13 @@ if(tgv('6.1'))tg.BackButton.onClick(back);
 const backBtn=()=>h('button',{class:'ib backib',onclick:back},'→');
 const openChat=(c,flt)=>push(ChatScreen(c,flt));
 const openProfile=uid=>push(ProfileScreen(uid));
+const openGroupProfile=chat=>push(GroupProfileScreen(chat));
+function GroupProfileScreen(chat){
+  const body=h('div',{class:'scroll prof'});
+  const el=h('div',{class:'scr'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'پروفایل گپ'),h('button',{class:'ib',onclick:load},'↻')),body);
+  async function load(){body.replaceChildren(h('div',{class:'empty'},'در حال دریافت اعضا…'));try{const d=await api('/api/group?chat='+encodeURIComponent(chat.chat_id));const hero=h('div',{class:'hero'},avatar('chat',chat.chat_id,d.title||chat.title,92),h('div',{class:'hn'},d.title||chat.title),h('div',{class:'sub'},num(d.known_count)+' عضو ثبت‌شده / مدیر قابل مشاهده'));const note=h('div',{class:'card'},h('div',{class:'sub'},d.note));const list=h('div',{class:'card'},h('h3',{},'اعضای شناخته‌شده'),...(d.members.length?d.members.map(m=>h('div',{class:'urow',onclick:()=>openProfile(m.user_id)},avatar('user',m.user_id,m.name,42),h('div',{class:'cmid'},h('b',{},m.name||m.user_id),h('div',{class:'sub ltr'},(m.username?'@'+m.username+' • ':'')+m.user_id),h('div',{class:'sub'},num(m.messages)+' پیام • '+(m.is_admin?'مدیر گروه':'عضو ثبت‌شده'))),m.is_admin?h('span',{class:'badge ok'},'مدیر'):null)):[h('div',{class:'empty'},'هنوز عضوی در پیام‌های ربات ثبت نشده')]));body.replaceChildren(hero,note,list)}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
+  load();return el;
+}
 
 /* ───── شیت‌ها ───── */
 function sheet(title,build){
@@ -874,7 +899,7 @@ function ChatScreen(chat,flt0){
   const fchip=h('div',{class:'fchip hid'});
   const liveB=h('button',{class:'ib',onclick:()=>toggleLive()},'●');
   const down=h('button',{class:'down hid',onclick:()=>box.scrollTo({top:box.scrollHeight,behavior:'smooth'})},'↓');
-  const head=h('div',{class:'top row'},backBtn(),all?h('div',{class:'av',style:'width:38px;height:38px;background:var(--btn)'},'📚'):avatar('chat',chat.chat_id,chat.title,38),h('div',{class:'grow'},h('b',{class:'ct',style:'display:block'},chat.title||chat.chat_id),sub),h('button',{class:'ib',onclick:()=>reload()},'↻'),h('button',{class:'ib',onclick:()=>{qbar.classList.toggle('hid');if(!qbar.classList.contains('hid'))qin.focus()}},'🔍'),liveB);
+  const head=h('div',{class:'top row'},backBtn(),all?h('div',{class:'av',style:'width:38px;height:38px;background:var(--btn)'},'📚'):h('div',{onclick:()=>openGroupProfile(chat),style:'cursor:pointer'},avatar('chat',chat.chat_id,chat.title,38)),h('div',{class:'grow',onclick:()=>{if(!all)openGroupProfile(chat)}},h('b',{class:'ct',style:'display:block'},chat.title||chat.chat_id),sub),h('button',{class:'ib',onclick:()=>reload()},'↻'),h('button',{class:'ib',onclick:()=>{qbar.classList.toggle('hid');if(!qbar.classList.contains('hid'))qin.focus()}},'🔍'),liveB);
   const wrap=h('div',{style:'flex:1;position:relative;display:flex;flex-direction:column;min-height:0'},box,down);
   const el=h('div',{class:'scr'},head,qbar,fchip,wrap);
   const ctx={filter:u=>{S.flt=u;reload()}};
@@ -1070,14 +1095,76 @@ function LogScreen(){
   return h('div',{class:'scr'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'🧾 گزارش عملیات')),h('div',{class:'scroll'},list));
 }
 
+/* ───── جقستگرام ───── */
+async function imageData(file){
+  if(!file)return null;
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type))throw new Error('فقط عکس JPG، PNG یا WEBP');
+  const src=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file)});
+  const im=await new Promise((res,rej)=>{const x=new Image();x.onload=()=>res(x);x.onerror=rej;x.src=src});
+  const scale=Math.min(1,1000/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+  let out=c.toDataURL('image/jpeg',.72);if(out.length>180000)out=c.toDataURL('image/jpeg',.52);if(out.length>185000)throw new Error('حجم عکس زیاده؛ عکس کم‌حجم‌تری انتخاب کن');return out;
+}
+function SocialScreen(){
+  let me=null,section='feed',profile=null,guest=false,roomTimer=null,roomAfter=0,reply=null,roomBusy=false;
+  const root=h('div',{class:'scr'}),body=h('div',{class:'scroll'});
+  const head=h('div',{class:'social-top'},h('div',{class:'social-brand'},'📸 جقستگرام'),h('div',{class:'social-sub'},'لحظه‌هات رو به اشتراک بذار')); 
+  const nav=h('div',{class:'snav'});const tabs=[['feed','🏠 خانه'],['explore','🔎 اکسپلور'],['room','💬 چت‌روم'],['profile','👤 پروفایل']];
+  function drawNav(){nav.replaceChildren(...tabs.map(([k,l])=>h('button',{class:section===k?'on':'',onclick:()=>{section=k;drawNav();renderSection()}},l)))}
+  root.append(head,nav,body);
+  const mediaImg=(id,cls)=>{const im=h('img',{class:cls||'spmedia',alt:'رسانه'});if(id)blob('social'+id,'/api/social/media?id='+id).then(u=>{if(u)im.src=u});return im};
+  function fileInput(){return h('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'sfile'})}
+  function profileSheet(){
+    sheet(profile?'ویرایش پیج':'ساخت پیج جقستگرام',close=>{
+      const un=h('input',{class:'inp',placeholder:'نام کاربری انگلیسی (مثلاً murad_1)',value:profile?.username||''});
+      const nm=h('input',{class:'inp',placeholder:'نام نمایشی',value:profile?.display_name||me.name||''});
+      const bio=h('textarea',{class:'inp',placeholder:'بیوگرافی کوتاه',value:profile?.bio||''});const fi=fileInput();const prev=h('div',{class:'snotice'},'عکس پروفایل: اختیاری • حداکثر ۱۳۵ کیلوبایت پس از فشرده‌سازی');fi.onchange=()=>{prev.textContent=fi.files[0]?.name||'عکس انتخاب شد'};
+      const save=h('button',{class:'btn',onclick:async()=>{save.disabled=true;try{const media=fi.files[0]?await imageData(fi.files[0]):null;await api('/api/social/profile/save',{username:un.value,display_name:nm.value,bio:bio.value,media_data:media});profile=(await api('/api/social/me')).profile;guest=false;close();toast('پیجت آماده شد ✨');renderSection()}catch(e){toast(e.message,1);save.disabled=false}}},'ذخیره پیج');
+      return h('div',{},h('div',{class:'snotice'},'با ساخت پیج، نام کاربری اختصاصی می‌گیری و می‌تونی پست و استوری منتشر کنی.'),un,nm,bio,fi,prev,save);
+    });
+  }
+  function compose(kind){
+    if(!profile)return toast('برای انتشار محتوا اول پیج بساز',1);
+    sheet(kind==='story'?'استوری جدید':'پست جدید',close=>{
+      const txt=h('textarea',{class:'inp',placeholder:kind==='story'?'متن استوری…':'کپشن پست…',maxlength:kind==='story'?'500':'1500'});const fi=fileInput();const prev=h('div',{class:'snotice'},'می‌تونی عکس هم اضافه کنی (اختیاری)');fi.onchange=()=>{prev.textContent=fi.files[0]?.name||'عکس انتخاب شد'};
+      const go=h('button',{class:'btn',onclick:async()=>{go.disabled=true;try{const media=fi.files[0]?await imageData(fi.files[0]):null;await api(kind==='story'?'/api/social/story':'/api/social/post',{caption:txt.value,media_data:media});close();toast(kind==='story'?'استوری منتشر شد':'پست منتشر شد');renderSection()}catch(e){toast(e.message,1);go.disabled=false}}},'انتشار');return h('div',{},txt,fi,prev,go);
+    });
+  }
+  function storyViewer(st){sheet('استوری • '+(st.display_name||st.username||st.user_id),close=>h('div',{},st.media_id?mediaImg(st.media_id):null,h('div',{class:'spcaption'},st.caption||''),h('div',{class:'sub'},'استوری پس از ۲۴ ساعت حذف می‌شود')))}
+  async function drawStories(container){try{const rows=await api('/api/social/stories');const strip=h('div',{class:'stories'});strip.append(h('div',{class:'story',onclick:()=>compose('story')},h('div',{class:'av',style:'background:var(--btn);font-size:28px'},'+'), 'استوری شما'));rows.forEach(st=>{const a=h('div',{class:'story',onclick:()=>storyViewer(st)},h('div',{class:'av',style:'background:linear-gradient(135deg,#b12bd5,#ff9b42)'},ini(st.display_name||st.username)),oneLine(st.display_name||st.username||st.user_id,12));strip.append(a)});container.append(strip)}catch(e){}}
+  async function drawPosts(container){const rows=await api('/api/social/feed?limit=40');if(!rows.length){container.append(h('div',{class:'empty'},'هنوز پستی منتشر نشده؛ اولین پست رو تو بذار!'));return}
+    rows.forEach(p=>{const name=p.display_name||p.username||String(p.user_id);const card=h('div',{class:'spost'});const av=avatar('user',p.user_id,name,38);if(p.avatar_media_id)blob('social'+p.avatar_media_id,'/api/social/media?id='+p.avatar_media_id).then(u=>{if(u){av.replaceChildren(h('img',{src:u}));av.style.background='none'}});card.append(h('div',{class:'sphead'},av,h('div',{class:'grow'},h('b',{},name),h('div',{class:'sub'},p.username?'@'+p.username:'')),h('span',{class:'sub'},whenShort(p.created_at))));if(p.media_id)card.append(mediaImg(p.media_id));if(p.caption)card.append(h('div',{class:'spcaption'},p.caption));const actions=h('div',{class:'spactions'},h('button',{onclick:async()=>{try{await api('/api/social/react',{post_id:p.post_id,emoji:'❤️'});toast('❤️ ثبت شد')}catch(e){toast(e.message,1)}}},'❤️ '+num(p.likes)),h('button',{onclick:()=>sheet('واکنش',close=>h('div',{class:'chips'},['❤️','🔥','😂','😍','👏','💯','😮'].map(em=>h('button',{class:'chip',onclick:async()=>{try{await api('/api/social/react',{post_id:p.post_id,emoji:em});close();toast('واکنش ثبت شد')}catch(e){toast(e.message,1)}}},em))))},'😊 واکنش'));card.append(actions);container.append(card)});
+  }
+  function renderProfile(){if(!profile&&!guest){body.replaceChildren(h('div',{class:'empty'},h('div',{style:'font-size:46px'},'📸'),'برای ورود به جقستگرام پیج بساز یا به‌عنوان میهمان وارد شو.'),h('div',{class:'card'},h('button',{class:'btn',onclick:profileSheet},'✨ ساخت پیج'),h('button',{class:'btn gh',onclick:()=>{guest=true;toast('به‌عنوان میهمان وارد شدی');renderSection()}},'👀 ورود به‌عنوان میهمان')));return}
+    if(guest&&!profile){body.replaceChildren(h('div',{class:'hero'},h('div',{class:'hn'},'👤 میهمان'),h('div',{class:'sub'},'در حالت میهمان می‌تونی اکسپلور و چت‌روم رو ببینی و پیام بدی.')),h('div',{class:'card'},h('button',{class:'btn',onclick:profileSheet},'ساخت پیج و انتشار محتوا')));return}
+    const box=h('div',{}),av=avatar('user',me.id,profile.display_name,82);if(profile.avatar_media_id)blob('social'+profile.avatar_media_id,'/api/social/media?id='+profile.avatar_media_id).then(u=>{if(u){av.replaceChildren(h('img',{src:u}));av.style.background='none'}});box.append(h('div',{class:'sprofile'},av,h('div',{class:'grow'},h('b',{},profile.display_name),h('div',{class:'sub'},'@'+profile.username),h('div',{class:'sub'},profile.bio||'بدون بیو')),h('button',{class:'btn s gh',onclick:profileSheet},'ویرایش')));box.append(h('div',{class:'grid'},h('button',{class:'act',onclick:()=>compose('post')},'＋ پست'),h('button',{class:'act',onclick:()=>compose('story')},'＋ استوری')));body.replaceChildren(box);drawPosts(body).catch(e=>toast(e.message,1));
+  }
+  async function renderRoom(){clearInterval(roomTimer);roomTimer=null;roomAfter=0;body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری چت‌روم…'));const msgs=h('div',{class:'sroom'}),composer=h('div',{class:'scomposer'}),inp=h('input',{class:'inp',placeholder:'پیامت رو بنویس…'}),send=h('button',{class:'btn s',style:'background:#b12bd5',onclick:sendMsg},'ارسال');let replyBar=h('div',{class:'snotice hid'});const premium=h('button',{class:'ib',title:'ایموجی پرمیوم',onclick:()=>{const id=prompt('شناسه عددی ایموجی پرمیوم را وارد کن');if(id&&/^\d+$/.test(id)){premium.dataset.id=id;toast('ایموجی برای پیام بعدی انتخاب شد')}}},'💎');if(!me.premium_emoji)premium.classList.add('hid');composer.append(premium,inp,send);
+    function renderMessage(m){const name=m.display_name||m.username||String(m.user_id);const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});node.append(h('div',{class:'sub'},name+' • '+whenShort(m.created_at)));if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text||'پاسخ به پیام')));if(m.text)node.append(h('div',{class:'tx',dir:'auto'},m.text));if(m.premium_emoji_id){const tag=h('tg-emoji',{'emoji-id':m.premium_emoji_id},'⭐');tag.className='prem';node.append(tag)}const rs=h('div',{class:'sreacts'},...(m.reactions||[]).map(r=>h('button',{onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));rs.append(h('button',{onclick:()=>reactSheet(m)},'＋'));node.append(rs);let x=null;node.ontouchstart=e=>{x=e.touches[0].clientX};node.ontouchend=e=>{if(x!==null&&x-e.changedTouches[0].clientX>55){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(m.text,60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}x=null};return node}
+    async function loadRoom(){if(roomBusy)return;roomBusy=true;try{const arr=await api('/api/social/room?after='+roomAfter);if(arr.length){arr.forEach(m=>{msgs.append(renderMessage(m));roomAfter=Math.max(roomAfter,m.message_id)});msgs.scrollTop=msgs.scrollHeight}}catch(e){}roomBusy=false}
+    async function react(mid,em){try{await api('/api/social/room/react',{message_id:mid,emoji:em});loadRoom()}catch(e){toast(e.message,1)}}
+    function reactSheet(m){sheet('ری‌اکشن پیام',close=>h('div',{class:'chips'},['❤️','😂','😍','🔥','👏','👍','👎','😮'].map(em=>h('button',{class:'chip',onclick:()=>{close();react(m.message_id,em)}},em))))}
+    async function sendMsg(){const text=inp.value.trim(),pe=premium.dataset.id||null;if(!text&&!pe)return;send.disabled=true;try{await api('/api/social/room/send',{text,reply_to:reply?.message_id||null,premium_emoji_id:pe});inp.value='';premium.dataset.id='';reply=null;replyBar.classList.add('hid');await loadRoom()}catch(e){toast(e.message,1)}send.disabled=false}
+    body.replaceChildren(msgs,replyBar,composer);await loadRoom();roomTimer=setInterval(loadRoom,3500);el._destroy=()=>{clearInterval(roomTimer);roomTimer=null};
+  }
+  async function renderSection(){if(!me){body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری…'));return}if(section==='profile'){renderProfile();return}if(section==='room'){await renderRoom();return}body.replaceChildren();if(section==='feed')await drawStories(body);const title=h('div',{class:'row2',style:'padding:12px'},h('b',{},section==='explore'?'اکسپلور':'پست‌های تازه'),profile?h('button',{class:'btn s',onclick:()=>compose('post')},'＋ پست'):h('span',{class:'sub'},guest?'حالت میهمان':''));body.append(title);await drawPosts(body)}
+  async function init(){try{me=await api('/api/social/me');profile=me.profile;guest=!profile;drawNav();await renderSection()}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
+  root._show=()=>{if(!me)init()};root._destroy=()=>{clearInterval(roomTimer)};init();return root;
+}
+
 /* ───── شروع ───── */
-const TABS={chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
+const TABS={chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen,social:SocialScreen},tabEls={};
 function openTab(k){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
   if(!tabEls[k])tabEls[k]=TABS[k]();push(tabEls[k],true);
 }
+async function bootTabs(){
+  try{const m=await api('/api/social/me');const isSupport=m.is_support;
+    if(!isSupport){document.querySelectorAll('#tabs button').forEach(b=>{if(b.dataset.k!=='social')b.remove()});openTab('social')}
+    else openTab('social');
+  }catch(e){document.querySelectorAll('#tabs button').forEach(b=>{if(b.dataset.k!=='social')b.remove()});openTab('social')}
+}
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>openTab(b.dataset.k));
-openTab('chats');
+bootTabs();
 </script></body></html>
 """
 
@@ -1655,8 +1742,180 @@ async def _p_bc_start(b, user):
     return _j({"ok": True, "id": job["id"]})
 
 
+
+async def _g_group(qs, user):
+    cid = _int(qs.get("chat"))
+    if cid is None:
+        raise _ApiError("گروه نامعتبره")
+    chat = await pool.fetchrow("SELECT chat_id,title FROM chats WHERE chat_id=$1", cid)
+    members = await pool.fetch(
+        "SELECT user_id, max(name) AS name, max(username) AS username, count(*) AS messages, max(ts) AS last_ts "
+        "FROM group_msgs WHERE chat_id=$1 GROUP BY user_id ORDER BY max(ts) DESC LIMIT 500", cid)
+    admins = []
+    try:
+        if BOT_REF:
+            admins = await _tg_call(BOT_REF.get_chat_administrators, cid)
+    except Exception:
+        admins = []
+    admin_ids = {int(x.user.id) for x in admins}
+    out = []
+    seen = set()
+    for r in members:
+        uid = int(r["user_id"]); seen.add(uid)
+        out.append({**dict(r), "is_admin": uid in admin_ids})
+    for a in admins:
+        uid = int(a.user.id)
+        if uid not in seen:
+            out.append({"user_id":uid,"name":a.user.full_name,"username":a.user.username,"messages":0,"last_ts":None,"is_admin":True})
+    return _j({"chat_id":cid,"title":chat["title"] if chat else str(cid),"members":out,"known_count":len(out),"note":"تلگرام فهرست کامل همه اعضای گروه را از طریق Bot API در اختیار ربات نمی‌گذارد؛ این فهرست شامل اعضای ثبت‌شده در پیام‌ها و مدیرانی است که ربات می‌تواند ببیند."})
+
+
+def _social_staff(user):
+    uid = int(user["id"])
+    return uid in OWNER_IDS or "panel" in STAFF.get(uid, set())
+
+def _social_emoji_staff(user):
+    uid = int(user["id"])
+    return uid in OWNER_IDS or "emoji" in STAFF.get(uid, set())
+
+def _social_media_input(b, uid, kind):
+    raw = b.get("media_data")
+    if not raw:
+        return None
+    if not isinstance(raw, str) or "," not in raw:
+        raise _ApiError("فایل تصویر معتبر نیست")
+    head, payload = raw.split(",", 1)
+    m = re.match(r"data:(image/(?:jpeg|png|webp));base64$", head)
+    if not m:
+        raise _ApiError("فقط تصویر JPG، PNG یا WEBP پشتیبانی می‌شود")
+    import base64, binascii
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error):
+        raise _ApiError("تصویر خراب است")
+    if not data or len(data) > 135_000:
+        raise _ApiError("حجم تصویر باید کمتر از ۱۳۵ کیلوبایت باشد")
+    ctype = m.group(1)
+    if not _sniff_image(data):
+        raise _ApiError("محتوای فایل تصویر معتبر نیست")
+    return data, ctype
+
+async def _social_me(qs, user):
+    uid = int(user["id"])
+    p = await pool.fetchrow("SELECT username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
+    return _j({"id":uid,"name":user.get("first_name") or "کاربر","is_support":_social_staff(user),"premium_emoji":_social_emoji_staff(user),"profile":dict(p) if p else None})
+
+async def _social_feed(qs, user):
+    limit = _int(qs.get("limit"), 30, 1, 60)
+    rows = await pool.fetch(
+        "SELECT p.post_id,p.user_id,p.caption,p.media_id,p.created_at,sp.username,sp.display_name,sp.avatar_media_id, "
+        "(SELECT count(*) FROM social_reactions r WHERE r.post_id=p.post_id) AS likes, "
+        "(SELECT emoji FROM social_reactions r WHERE r.post_id=p.post_id AND r.user_id=$2) AS my_reaction "
+        "FROM social_posts p LEFT JOIN social_profiles sp ON sp.user_id=p.user_id ORDER BY p.created_at DESC LIMIT $1", limit, int(user["id"]))
+    return _j([dict(r) for r in rows])
+
+async def _social_stories(qs, user):
+    rows = await pool.fetch(
+        "SELECT s.story_id,s.user_id,s.caption,s.media_id,s.created_at,s.expires_at,sp.username,sp.display_name "
+        "FROM social_stories s LEFT JOIN social_profiles sp ON sp.user_id=s.user_id "
+        "WHERE s.expires_at>$1 ORDER BY s.created_at DESC LIMIT 80", time.time())
+    return _j([dict(r) for r in rows])
+
+async def _social_profile(qs, user):
+    uid = _int(qs.get("uid"), int(user["id"]))
+    p = await pool.fetchrow("SELECT user_id,username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
+    if not p:
+        return _j({"profile":None,"posts":[]})
+    posts = await pool.fetch("SELECT post_id,caption,media_id,created_at FROM social_posts WHERE user_id=$1 ORDER BY created_at DESC LIMIT 40", uid)
+    return _j({"profile":dict(p),"posts":[dict(x) for x in posts]})
+
+async def _social_room(qs, user):
+    after = _int(qs.get("after"), 0, 0)
+    rows = await pool.fetch(
+        "SELECT m.message_id,m.user_id,m.text,m.reply_to,m.premium_emoji_id,m.created_at,sp.username,sp.display_name, "
+        "(SELECT json_agg(json_build_object('emoji',r.emoji,'n',r.n,'mine',r.mine)) FROM (SELECT emoji,count(*)::int n,bool_or(user_id=$2) mine FROM social_room_reactions WHERE message_id=m.message_id GROUP BY emoji) r) reactions, "
+        "(SELECT text FROM social_room_messages x WHERE x.message_id=m.reply_to) reply_text, "
+        "(SELECT COALESCE(sp2.display_name,sp2.username,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name "
+        "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id "
+        "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]))
+    return _j([dict(r) for r in reversed(rows)])
+
+async def _social_media_get(qs, user):
+    mid = _int(qs.get("id"))
+    if mid is None: raise _ApiError("رسانه نامعتبره")
+    r = await pool.fetchrow("SELECT data,content_type,expires_at FROM social_media WHERE media_id=$1", mid)
+    if not r or (r["expires_at"] and r["expires_at"] < time.time()):
+        return 404,"text/plain",b"not found",{}
+    return 200,r["content_type"],bytes(r["data"]),{"Cache-Control":"private, max-age=300"}
+
+async def _social_profile_save(b, user):
+    uid=int(user["id"]); username=(b.get("username") or "").strip().lower().lstrip("@"); name=(b.get("display_name") or user.get("first_name") or "کاربر").strip()[:60]; bio=(b.get("bio") or "").strip()[:300]
+    if not re.fullmatch(r"[a-z0-9_]{3,24}",username): raise _ApiError("نام کاربری باید ۳ تا ۲۴ حرف انگلیسی، عدد یا _ باشد")
+    if not name: raise _ApiError("نام نمایشی خالیه")
+    media=_social_media_input(b,uid,"avatar")
+    try:
+        async with pool.acquire() as c:
+            async with c.transaction():
+                mid=None
+                if media:
+                    mid=await c.fetchval("INSERT INTO social_media(user_id,kind,data,content_type,created_at) VALUES($1,'avatar',$2,$3,$4) RETURNING media_id",uid,media[0],media[1],time.time())
+                await c.execute("INSERT INTO social_profiles(user_id,username,display_name,bio,avatar_media_id,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id) DO UPDATE SET username=EXCLUDED.username,display_name=EXCLUDED.display_name,bio=EXCLUDED.bio,avatar_media_id=COALESCE(EXCLUDED.avatar_media_id,social_profiles.avatar_media_id)",uid,username,name,bio,mid,time.time())
+    except asyncpg.UniqueViolationError: raise _ApiError("این نام کاربری قبلاً گرفته شده")
+    return _j({"ok":True})
+
+async def _social_post_create(b,user):
+    uid=int(user["id"])
+    if not await pool.fetchval("SELECT 1 FROM social_profiles WHERE user_id=$1", uid): raise _ApiError("برای انتشار پست اول پیج بساز")
+    caption=(b.get("caption") or "").strip()[:1500]; media=_social_media_input(b,uid,"post")
+    if not caption and not media: raise _ApiError("متن یا عکس پست رو وارد کن")
+    mid=None
+    async with pool.acquire() as c:
+        async with c.transaction():
+            if media: mid=await c.fetchval("INSERT INTO social_media(user_id,kind,data,content_type,created_at) VALUES($1,'post',$2,$3,$4) RETURNING media_id",uid,media[0],media[1],time.time())
+            pid=await c.fetchval("INSERT INTO social_posts(user_id,caption,media_id,created_at) VALUES($1,$2,$3,$4) RETURNING post_id",uid,caption,mid,time.time())
+    return _j({"ok":True,"post_id":pid})
+
+async def _social_story_create(b,user):
+    uid=int(user["id"])
+    if not await pool.fetchval("SELECT 1 FROM social_profiles WHERE user_id=$1", uid): raise _ApiError("برای انتشار استوری اول پیج بساز")
+    caption=(b.get("caption") or "").strip()[:500]; media=_social_media_input(b,uid,"story")
+    if not caption and not media: raise _ApiError("متن یا عکس استوری رو وارد کن")
+    now=time.time(); mid=None
+    async with pool.acquire() as c:
+        async with c.transaction():
+            if media: mid=await c.fetchval("INSERT INTO social_media(user_id,kind,data,content_type,created_at,expires_at) VALUES($1,'story',$2,$3,$4,$5) RETURNING media_id",uid,media[0],media[1],now,now+86400)
+            sid=await c.fetchval("INSERT INTO social_stories(user_id,caption,media_id,created_at,expires_at) VALUES($1,$2,$3,$4,$5) RETURNING story_id",uid,caption,mid,now,now+86400)
+    return _j({"ok":True,"story_id":sid})
+
+async def _social_react(b,user):
+    pid=_int(b.get("post_id")); emoji=(b.get("emoji") or "❤️").strip()
+    if pid is None or emoji not in ("❤️","🔥","😂","😍","👏","💯","😮"): raise _ApiError("واکنش نامعتبره")
+    uid=int(user["id"])
+    old=await pool.fetchval("SELECT emoji FROM social_reactions WHERE post_id=$1 AND user_id=$2",pid,uid)
+    if old==emoji: await pool.execute("DELETE FROM social_reactions WHERE post_id=$1 AND user_id=$2",pid,uid)
+    else: await pool.execute("INSERT INTO social_reactions(post_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(post_id,user_id) DO UPDATE SET emoji=EXCLUDED.emoji,created_at=EXCLUDED.created_at",pid,uid,emoji,time.time())
+    return _j({"ok":True})
+
+async def _social_room_send(b,user):
+    uid=int(user["id"]); txt=(b.get("text") or "").strip()[:1200]; reply=_int(b.get("reply_to")); pe=(str(b.get("premium_emoji_id") or "").strip() or None)
+    if not txt and not pe: raise _ApiError("پیام خالیه")
+    if pe and (not _social_emoji_staff(user) or not pe.isdigit()): raise _ApiError("ایموجی پرمیوم فقط برای پشتیبانی فعاله")
+    if reply and not await pool.fetchval("SELECT 1 FROM social_room_messages WHERE message_id=$1",reply): reply=None
+    mid=await pool.fetchval("INSERT INTO social_room_messages(user_id,text,reply_to,premium_emoji_id,created_at) VALUES($1,$2,$3,$4,$5) RETURNING message_id",uid,txt,reply,pe,time.time())
+    return _j({"ok":True,"message_id":mid})
+
+async def _social_room_react(b,user):
+    mid=_int(b.get("message_id")); emoji=(b.get("emoji") or "❤️").strip()
+    if mid is None or emoji not in ("❤️","😂","😍","🔥","👏","👍","👎","😮"): raise _ApiError("ری‌اکشن نامعتبره")
+    uid=int(user["id"])
+    await pool.execute("INSERT INTO social_room_reactions(message_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,user_id,emoji) DO NOTHING",mid,uid,emoji,time.time())
+    return _j({"ok":True})
+
+_SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get}
+_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/react":_social_react,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
+
 _GET = {
-    "/api/me": _g_me, "/api/stats": _g_stats, "/api/groups": _g_groups, "/api/messages": _g_messages,
+    "/api/me": _g_me, "/api/stats": _g_stats, "/api/groups": _g_groups, "/api/group": _g_group, "/api/messages": _g_messages,
     "/api/users": _g_users, "/api/user": _g_user, "/api/avatar": _g_avatar, "/api/media": _g_media,
     "/api/tasks": _g_tasks, "/api/log": _g_log, "/api/bc/status": _g_bc_status,
 }
@@ -1676,17 +1935,20 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     if not path.startswith("/api/"):
         return 404, "text/plain", b"not found", {}
     user = _verify_init_data(headers.get("x-init-data", ""))
-    if user is None or int(user["id"]) in OWNER_IDS or not has_perm(int(user["id"]), "panel"):
+    if user is None:
+        return _j({"error": "نشست تلگرام معتبر نیست؛ مینی‌اپ را از داخل تلگرام باز کن"}, 403)
+    social = path.startswith("/api/social/")
+    if not social and (int(user["id"]) in OWNER_IDS or not has_perm(int(user["id"]), "panel")):
         return _j({"error": "forbidden"}, 403)
     if pool is None:
         return _j({"error": "دیتابیس هنوز آماده نیست"}, 503)
     try:
         if method in ("GET", "HEAD"):
-            fn = _GET.get(path)
+            fn = (_SOCIAL_GET if social else _GET).get(path)
             if fn:
                 return await fn(qs, user)
         elif method == "POST":
-            fn = _POST.get(path)
+            fn = (_SOCIAL_POST if social else _POST).get(path)
             if fn:
                 try:
                     data = json.loads(body.decode("utf-8") or "{}")
