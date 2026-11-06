@@ -264,7 +264,7 @@ ME_WORD = "خودم"  # تو گروه این کلمه رو بنویسی کارا
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "گاراژ جدید + کازینو بسته + محرومیت کاربر + آیدی تو لیدربرد"
+BOT_VERSION = "پنل ماشین با جدول واقعی + خرید ماشین بعدی از پنل + محرومیت + کازینو بسته"
 
 
 def norm_word(text: str) -> str:
@@ -414,6 +414,10 @@ async def init_db(app: Application):
         if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'car_white_migr_1'"):
             await c.execute("UPDATE cars SET color = color + 1 WHERE color >= 1")
             await c.execute("INSERT INTO bot_settings (key, value) VALUES ('car_white_migr_1', '1') ON CONFLICT (key) DO NOTHING")
+        # یک‌بار: ماشین همه‌ی کاربرها گرفته میشه (سیستم جدید پنل ماشین). با ری‌استارت‌های بعدی دوباره اجرا نمیشه.
+        if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'cars_wipe_2026_11_06'"):
+            await c.execute("DELETE FROM cars")
+            await c.execute("INSERT INTO bot_settings (key, value) VALUES ('cars_wipe_2026_11_06', '1') ON CONFLICT (key) DO NOTHING")
         BANNED.clear()
         for r in await c.fetch("SELECT user_id, banned_until FROM users WHERE banned_until > $1", time.time()):
             BANNED[r["user_id"]] = r["banned_until"]
@@ -3544,47 +3548,147 @@ def garage_car(uid: int, idx: int, color: int, owned_row, balance: int):
     return text, kb
 
 
-async def _edit_cap(q, text: str, kb):
-    """کپشن عکس رو ادیت می‌کنه؛ اگه پیام عکس نبود متنش رو ادیت می‌کنه."""
-    try:
-        await q.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=kb)
-    except BadRequest as e:
-        if "not modified" in str(e).lower():
-            return
+PANEL_COMP: dict[tuple[int, int], list[int]] = {}   # (chat, پیام دکمه‌ها) -> پیام‌های همراه (عکس/جدول) که باید با اون پاک بشن
+
+
+async def _drop_panel(bot, msg):
+    """پیام پنل + عکس و جدول همراهش رو پاک می‌کنه."""
+    for mid in PANEL_COMP.pop((msg.chat_id, msg.message_id), []):
         try:
-            await q.edit_message_text(text=text, parse_mode="HTML", reply_markup=kb)
-        except BadRequest as e2:
-            if "not modified" not in str(e2).lower():
-                raise
+            await bot.delete_message(msg.chat_id, mid)
+        except Exception:
+            pass
+    try:
+        await bot.delete_message(msg.chat_id, msg.message_id)
+    except Exception:
+        pass
+
+
+async def _edit_cap(q, text: str, kb):
+    """کپشن/متن رو ادیت می‌کنه؛ اگه پیام جدول واقعی بود (ادیت‌پذیر نیست) پنل رو پاک و پیام جدید می‌فرسته."""
+    for fn, kw in ((q.edit_message_caption, {"caption": text}), (q.edit_message_text, {"text": text})):
+        try:
+            await fn(parse_mode="HTML", reply_markup=kb, **kw)
+            return
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                return
+    bot = q.message.get_bot()
+    await _drop_panel(bot, q.message)
+    await send_html(bot, q.message.chat_id, text, reply_markup=kb)
+
+
+def _next_car_idx(owned: dict) -> int:
+    return next((i for i in range(len(CARS)) if i not in owned), len(CARS))
+
+
+def car_panel_rows(idx: int, owned: dict, balance: int):
+    """سطرهای جدول پنل ماشین: [(عنوان، مقدار)]"""
+    car = owned[idx]
+    total_income = sum(car_profit(i, r) for i, r in owned.items())
+    total_vault = sum(int(r["pending_profit"] or 0) for r in owned.values())
+    rows = [
+        ("⏱ درآمد ساعتی", f"{fmt_short(total_income)} تومن"),
+        ("💰 توی صندوق", f"{total_vault:,} تومن"),
+    ]
+    for _k, (label, icon, col) in CAR_PARTS.items():
+        lv = int(car[col] or 0)
+        rows.append((f"{icon} {label}", f"{_bar(lv)} {lv}/{CAR_MAX_LEVEL}"))
+    nxt = _next_car_idx(owned)
+    if nxt < len(CARS):
+        n = CARS[nxt]
+        rows.append(("⬆️ ماشین بعدی", f"{n[2]} {n[0]} · {fmt_short(n[3])}"))
+    else:
+        rows.append(("🏆 ماشین بعدی", "همه‌ی ماشین‌ها رو داری"))
+    rows.append(("👛 کیف پول", f"{balance:,} تومن"))
+    return rows
+
+
+def car_panel_rich_html(idx: int, owned: dict, balance: int) -> str:
+    name, _en, emo, _price, _base = CARS[idx]
+    cname = CAR_COLORS[int(owned[idx]["color"])][0]
+    out = [f"<p>🔑 ماشین شما: {emo} {html.escape(name)} · 🎨 {html.escape(cname)}</p><table>"]
+    for k, v in car_panel_rows(idx, owned, balance):
+        out.append(f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>")
+    out.append("</table>")
+    return "".join(out)
+
+
+def car_panel_pre(idx: int, owned: dict, balance: int) -> str:
+    name, _en, emo, _price, _base = CARS[idx]
+    cname = CAR_COLORS[int(owned[idx]["color"])][0]
+    head = B(f"🔑 ماشین شما: {emo} {html.escape(name)} · 🎨 {html.escape(cname)}")
+    return head + "\n" + mono_table(("مشخصات", "مقدار"), car_panel_rows(idx, owned, balance))
+
+
+def _panel_keyboard(uid: int, idx: int, owned: dict):
+    rows = [
+        [btn("💰 جمع کن", "success", callback_data=f"car:collect:{uid}:{idx}:0"),
+         btn("🚗 گاراژ", "danger", callback_data=f"car:garage:{uid}:{idx}:0")],
+        [btn("⬆️ ارتقای ماشین", "success", callback_data=f"car:upmenu:{uid}:{idx}:0"),
+         btn("🎨 رنگ", "primary", callback_data=f"car:colors:{uid}:{idx}:0")],
+    ]
+    nxt = _next_car_idx(owned)
+    if nxt < len(CARS):
+        n = CARS[nxt]
+        rows.append([btn(f"⬆️ ماشین بعدی: {n[2]} {n[0]} · {fmt_short(n[3])}", "primary", callback_data=f"car:buy:{uid}:{nxt}:0")])
+    return InlineKeyboardMarkup(rows)
+
 
 async def _send_car_panel(chat, context, uid: int, idx: int, reply_to: int | None = None):
-    """پنل ماشین را با عکس واقعی + کپشن در یک پیام می‌فرستد؛ در خطا، خطا لاگ می‌شود."""
+    """پنل ماشین: عکس ماشین + جدول واقعی تلگرام (مثل جدول شغل‌ها) با دکمه‌ها؛ ماشین بعدی رو از همین‌جا میشه خرید."""
+    bot = context.bot
     owned = await _owned_cars(uid)
     row_user = await get_user(uid)
-    car = owned.get(idx)
-    color = int(car["color"]) if car else 0
-    caption, kb = garage_car(uid, idx, color, car, row_user["balance"])
+    bal = row_user["balance"] if row_user else 0
+    if idx not in owned:
+        await send_garage_list(bot, chat, uid, reply_to)
+        return
+    car = owned[idx]
+    color = int(car["color"])
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    kb = _panel_keyboard(uid, idx, owned)
+    comp: list[int] = []
     photo = await _car_photo(idx, color)
     if photo is not None:
         try:
             photo.seek(0)
-            rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
-            await context.bot.send_photo(chat_id=chat, photo=photo, caption=caption, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
-            return
+            m = await bot.send_photo(chat_id=chat, photo=photo, reply_parameters=rp)
+            comp.append(m.message_id)
+            rp = None
         except Exception:
-            log.exception("car photo send failed for car_idx=%s; retrying without premium HTML", idx)
-            try:
-                photo.seek(0)
-                plain_caption = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", caption)
-                rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
-                await context.bot.send_photo(chat_id=chat, photo=photo, caption=plain_caption, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
-                return
-            except Exception:
-                log.exception("car photo plain-caption send failed")
-    # فقط در صورت خطای واقعی ارسال عکس، متن جایگزین ارسال می‌شود.
-    plain = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", caption)
-    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
-    await context.bot.send_message(chat_id=chat, text=plain, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            log.exception("car photo send failed for car_idx=%s", idx)
+    key_id = None
+    try:
+        payload = {"chat_id": chat, "rich_message": {"html": car_panel_rich_html(idx, owned, bal)}, "reply_markup": kb.to_dict()}
+        if rp:
+            payload["reply_parameters"] = rp.to_dict()
+        res = await bot._post("sendRichMessage", payload)
+        rich_id = res.get("message_id") if isinstance(res, dict) else None
+        if isinstance(res, dict) and not res.get("reply_markup"):
+            # این نسخه‌ی تلگرام دکمه رو به جدول نچسبوند → دکمه‌ها تو یه پیام جدا زیرش
+            m2 = await send_html(bot, chat, B("👇 گزینه‌ها"), reply_markup=kb)
+            key_id = m2.message_id
+            if rich_id:
+                comp.append(rich_id)
+        else:
+            key_id = rich_id
+    except Exception:
+        log.warning("car sendRichMessage failed, using <pre> table", exc_info=True)
+    if key_id is None:
+        m = await send_html(bot, chat, car_panel_pre(idx, owned, bal), reply_markup=kb, reply_parameters=rp)
+        key_id = m.message_id
+    if key_id and comp:
+        if len(PANEL_COMP) > 3000:
+            PANEL_COMP.clear()
+        PANEL_COMP[(chat, key_id)] = comp
+
+
+async def _repanel(q, context, uid: int, idx: int):
+    """پنل قدیمی رو پاک می‌کنه و پنل تازه می‌فرسته."""
+    chat = q.message.chat_id
+    await _drop_panel(context.bot, q.message)
+    await _send_car_panel(chat, context, uid, idx)
 
 async def show_garage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """«ماشین/ماشینم» ماشین خریداری‌شده را با عکس نشان می‌دهد؛ «گاراژ» فهرست خرید را."""
@@ -3594,7 +3698,7 @@ async def show_garage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_key = _word_key(msg.text or "") if msg and msg.text else ""
     if owned and text_key in {_word_key("ماشین"), _word_key("ماشینم"), _word_key("ماشینمن")}:
         idx = max(owned.keys())
-        await _send_car_panel(msg.chat_id, context, user.id, idx)
+        await _send_car_panel(msg.chat_id, context, user.id, idx, msg.message_id)
         return
     await send_garage_list(context.bot, msg.chat_id, user.id, msg.message_id)
 
@@ -3653,7 +3757,10 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if act in ("view", "refresh"):
         await q.answer()
-        await _garage_show_car(q, context, uid, idx)
+        if idx in await _owned_cars(uid):
+            await _repanel(q, context, uid, idx)
+        else:
+            await _garage_show_car(q, context, uid, idx)
     elif act == "garage":
         await q.answer()
         try: await q.message.delete()
@@ -3674,7 +3781,7 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except _CarRollback:
             await q.answer(f"موجودی کافی نیست. قیمت: {fmt_toman(price)}", show_alert=True); return
         await q.answer("ماشین با موفقیت خریداری شد!", show_alert=True)
-        await _garage_show_car(q, context, uid, idx)
+        await _repanel(q, context, uid, idx)
     elif act == "upmenu":
         await q.answer(); await _show_upgrade_menu(q, uid, idx)
     elif act == "upgrade":
@@ -3732,19 +3839,20 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except _CarRollback:
             await q.answer("موجودی کافی نیست؛ برای تغییر رنگ ۲۰ میلیون لازم است.", show_alert=True); return
         await q.answer(f"رنگ {CAR_COLORS[color][0]} خریداری و اعمال شد!", show_alert=True)
-        await _garage_show_car(q, context, uid, idx)
+        await _repanel(q, context, uid, idx)
     elif act == "collect":
         async with pool.acquire() as c:
             async with c.transaction():
-                # ابتدا مقدار واقعی صندوق قفل می‌شود، سپس صفر و به کیف پول منتقل می‌شود.
-                amount = await c.fetchval("SELECT pending_profit FROM cars WHERE user_id=$1 AND car_idx=$2 FOR UPDATE", uid, idx)
-                if amount and int(amount) > 0:
-                    await c.execute("UPDATE cars SET pending_profit=0 WHERE user_id=$1 AND car_idx=$2", uid, idx)
-                    await c.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", int(amount), uid)
+                # صندوق همه‌ی ماشین‌ها قفل میشه، صفر میشه و به کیف پول میره
+                vrows = await c.fetch("SELECT pending_profit FROM cars WHERE user_id=$1 FOR UPDATE", uid)
+                amount = sum(int(r["pending_profit"] or 0) for r in vrows)
+                if amount > 0:
+                    await c.execute("UPDATE cars SET pending_profit=0 WHERE user_id=$1", uid)
+                    await c.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", amount, uid)
         if not amount:
             await q.answer("فعلاً درآمدی در صندوق جمع نشده است.", show_alert=True); return
         await q.answer(f"{fmt_toman(amount)} به کیف پولت واریز شد!", show_alert=True)
-        await _garage_show_car(q, context, uid, idx)
+        await _repanel(q, context, uid, idx)
     else:
         await q.answer()
 
