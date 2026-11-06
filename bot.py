@@ -1676,7 +1676,7 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     if not path.startswith("/api/"):
         return 404, "text/plain", b"not found", {}
     user = _verify_init_data(headers.get("x-init-data", ""))
-    if user is None or not has_perm(int(user["id"]), "panel"):
+    if user is None or int(user["id"]) in OWNER_IDS or not has_perm(int(user["id"]), "panel"):
         return _j({"error": "forbidden"}, 403)
     if pool is None:
         return _j({"error": "دیتابیس هنوز آماده نیست"}, 503)
@@ -5427,11 +5427,11 @@ CAR_MAX_LEVEL = 5
 CAR_PAY_EVERY = 3600
 CAR_COLOR_PRICE = 20_000_000
 CARS = [
-    ("پراید ۱۳۱", "Pride 131", "🚗", 800_000_000, 2_000_000),
-    ("Toyota Supra MK5", "Toyota Supra MK5", "🏎️", 1_400_000_000, 3_800_000),
-    ("BMW M4 Competition", "BMW M4 Competition", "🚘", 2_000_000_000, 5_800_000),
-    ("Lamborghini Huracán", "Lamborghini Huracán", "🏎️", 3_500_000_000, 10_500_000),
-    ("Bugatti Chiron", "Bugatti Chiron", "👑", 5_000_000_000, 16_000_000),
+    ("پراید ۱۳۱", "Pride 131", "🚗", 800_000_000, 500_000),
+    ("Toyota Supra MK5", "Toyota Supra MK5", "🏎️", 1_400_000_000, 1_000_000),
+    ("BMW M4 Competition", "BMW M4 Competition", "🚘", 2_000_000_000, 1_200_000),
+    ("Lamborghini Huracán", "Lamborghini Huracán", "🏎️", 3_500_000_000, 1_500_000),
+    ("Bugatti Chiron", "Bugatti Chiron", "👑", 5_000_000_000, 2_000_000),
 ]
 # ترتیب: سفید (پیش‌فرض)، مشکی، قرمز، آبی، صورتی
 CAR_COLORS = [
@@ -6008,9 +6008,11 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif act == "buy":
         price = CARS[idx][3]
         owned = await _owned_cars(uid)
+        if idx in owned:
+            await q.answer("این ماشین رو قبلاً خریدی؛ امکان خرید دوباره‌اش وجود نداره.", show_alert=True); return
         next_idx = next((i for i in range(len(CARS)) if i not in owned), len(CARS))
         if idx != next_idx:
-            await q.answer("ماشین‌ها باید به ترتیب خریداری شوند؛ اول ماشین قبلی را بخر.", show_alert=True); return
+            await q.answer("ماشین‌ها باید به ترتیب خریداری بشن؛ فقط ماشین بعدی قابل خریده.", show_alert=True); return
         try:
             async with pool.acquire() as c:
                 async with c.transaction():
@@ -6417,6 +6419,30 @@ def _join_text() -> str:
     channels = "\n".join(FORCE_CHANNELS)
     return B(f'<tg-emoji emoji-id="{FORCE_CHANNEL_EID}">📢</tg-emoji> برای استفاده از ربات باید در هر دو کانال زیر عضو باشی:\n{channels}\n\nبعد از عضویت دکمه‌ی «عضو شدم» رو بزن.')
 
+def _is_bot_text_command(text: str) -> bool:
+    """تشخیص کلمه‌ها/عبارت‌هایی که واقعاً یکی از قابلیت‌های ربات را اجرا می‌کنند."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if raw.startswith("/"):
+        return True
+    key = _word_key(raw)
+    exact = {
+        TRIGGER_WORD, ME_WORD, "تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks",
+        "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
+        "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده",
+        "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلجقی", "دوئلجق",
+        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "کازینو", "casino",
+        "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
+    }
+    if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS:
+        return True
+    if key.startswith(("واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی")):
+        return True
+    t = norm_word(raw).translate(_DIG)
+    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
+
+
 async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """قبل از همه‌ی هندلرها: ثبت گروه‌ها + اگه ربات خاموش باشه فقط پشتیبان‌ها کار می‌کنن."""
     user, chat = update.effective_user, update.effective_chat
@@ -6456,9 +6482,12 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     pass
             raise ApplicationHandlerStop
-    # عضویت اجباری: تا عضو کانال نشده، ربات هیچ کاری برای کاربر نمی‌کنه (پشتیبان‌ها معافن)
+    # عضویت اجباری فقط هنگام اجرای دستورهای اسلش یا فشردن دکمه‌های ربات بررسی می‌شود؛
+    # پیام‌های عادی کاربران در گروه/پی‌وی نباید پیام عضویت تولید کنند.
+    _msg_for_join = update.effective_message
+    _is_bot_command = bool(_msg_for_join and _msg_for_join.text and _is_bot_text_command(_msg_for_join.text))
     if (user and not user.is_bot and user.id not in ADMIN_IDS and chat and chat.type != "channel"
-            and (update.callback_query or update.effective_message)):
+            and (update.callback_query or _is_bot_command)):
         cq = update.callback_query
         if cq and cq.data == "fj:check":
             ok = await is_channel_member(context.bot, user.id)
@@ -6511,9 +6540,13 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raise ApplicationHandlerStop
 
 
-def admin_menu_kb() -> InlineKeyboardMarkup:
-    web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") else []
-    return InlineKeyboardMarkup(web_row + [
+def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
+    uid = user_id
+    # دکمه‌ی مینی‌اپ فقط برای پشتیبان‌های عادی است؛ صاحب/پشتیبانی ارشد مدیریت نیروها را از همین پنل انجام می‌دهد.
+    web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") and uid is not None and uid not in OWNER_IDS else []
+    support_row = [[btn("➕ افزودن پشتیبانی", "success", callback_data="sup:add"),
+                    btn("📋 لیست پشتیبان‌ها", "primary", callback_data="sup:list")]] if uid in OWNER_IDS else []
+    return InlineKeyboardMarkup(web_row + support_row + [
         [btn("💸 کم کردن پول", "primary", callback_data="ad:money"), btn("➕ افزودن پول", "success", callback_data="ad:money_add")],
         [btn("🤛 کم کردن جق", "primary", callback_data="ad:jagh"), btn("➕ افزودن جق", "success", callback_data="ad:jagh_add")],
         [btn("🚫 محروم کردن کاربر", "danger", callback_data="ad:ban"), btn("✅ رفع محرومیت", "success", callback_data="ad:unban")],
@@ -6538,7 +6571,7 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     context.user_data.pop("adm", None)
     context.user_data.pop("await_jobs", None)
-    await update.effective_message.reply_text(admin_menu_text(), reply_markup=admin_menu_kb())
+    await update.effective_message.reply_text(admin_menu_text(), reply_markup=admin_menu_kb(update.effective_user.id))
 
 
 
@@ -6687,7 +6720,7 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     if act in ("menu", "cancel"):
         context.user_data.pop("adm", None)
-        await q.edit_message_text(admin_menu_text(), reply_markup=admin_menu_kb())
+        await q.edit_message_text(admin_menu_text(), reply_markup=admin_menu_kb(q.from_user.id))
     elif act in ("money", "jagh", "money_add", "jagh_add"):
         context.user_data["adm"] = {"act": act, "step": "target"}
         what = "پول" if act.startswith("money") else "جق"
@@ -6748,7 +6781,7 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "INSERT INTO bot_settings (key, value) VALUES ('bot_enabled', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
             "1" if BOT_ENABLED else "0",
         )
-        await q.edit_message_text(admin_menu_text(), reply_markup=admin_menu_kb())
+        await q.edit_message_text(admin_menu_text(), reply_markup=admin_menu_kb(q.from_user.id))
     elif act == "stats":
         n_users = await pool.fetchval("SELECT count(*) FROM users")
         n_started = await pool.fetchval("SELECT count(*) FROM users WHERE started")
@@ -7236,18 +7269,20 @@ async def marriage_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
     target=msg.reply_to_message.from_user if msg.reply_to_message else None
     if not target or target.is_bot or target.id==user.id:
         await msg.reply_text("برای خواستگاری، روی پیام فرد موردنظرت ریپلای کن و «ازدواج» بنویس."); return True
+    if user.id in ADMIN_IDS or target.id in ADMIN_IDS:
+        await msg.reply_text("🛡 حساب‌های پشتیبانی امکان ازدواج ندارن."); return True
     await upsert_user(user.id,user.full_name)
     await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING",target.id,target.full_name)
     a,b=await pool.fetch("SELECT user_id,gender,spouse_id FROM users WHERE user_id=ANY($1::bigint[])",[user.id,target.id])
     by={int(x['user_id']):x for x in (a,b)}; me=by[user.id]; other=by[target.id]
     if not me['gender'] or not other['gender']:
         await msg.reply_text("هر دو نفر باید اول جنسیتشون رو از تنظیمات انتخاب کنن."); return True
-    if me['gender']==other['gender']:
-        await msg.reply_text("برای ازدواج باید جنسیت دو نفر متفاوت باشه."); return True
+    if me['gender'] != 'm' or other['gender'] != 'f':
+        await msg.reply_text("💍 خواستگاری فقط از طرف مرد به زن امکان‌پذیره؛ مرد باید روی پیام زن ریپلای کنه و «ازدواج» بنویسه."); return True
     if me['spouse_id'] or other['spouse_id']:
         await msg.reply_text("یکی از شما در حال حاضر متأهله."); return True
-    bride=user if me['gender']=='f' else target
-    groom=target if me['gender']=='f' else user
+    bride=target
+    groom=user
     await pool.execute("INSERT INTO marriage_proposals(bride_id,groom_id,chat_id,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(bride_id) DO UPDATE SET groom_id=EXCLUDED.groom_id,chat_id=EXCLUDED.chat_id,created_at=EXCLUDED.created_at",bride.id,groom.id,msg.chat_id,time.time())
     kb=InlineKeyboardMarkup([[btn("💍 قبول می‌کنم", "success", callback_data=f"mar:yes:{bride.id}:{groom.id}"),btn("رد می‌کنم", "danger", callback_data=f"mar:no:{bride.id}:{groom.id}")]])
     await msg.reply_text(f"💍 {html.escape(bride.full_name)}، {html.escape(groom.full_name)} ازت خواستگاری کرده! عروس باید جواب بده.",reply_markup=kb); return True
@@ -7257,13 +7292,21 @@ async def marriage_cb(update,context):
     if q.from_user.id!=bride: await q.answer("فقط عروس می‌تونه جواب بده.",show_alert=True); return
     prop=await pool.fetchrow("SELECT groom_id,chat_id FROM marriage_proposals WHERE bride_id=$1",bride)
     if not prop or int(prop['groom_id'])!=groom: await q.answer("درخواست منقضی شده.",show_alert=True); return
-    await pool.execute("DELETE FROM marriage_proposals WHERE bride_id=$1",bride)
-    if act=="no": await q.answer("درخواست رد شد."); await q.edit_message_text("💔 درخواست ازدواج رد شد."); return
+    if bride in ADMIN_IDS or groom in ADMIN_IDS:
+        await pool.execute("DELETE FROM marriage_proposals WHERE bride_id=$1",bride)
+        await q.answer("حساب‌های پشتیبانی امکان ازدواج ندارن.",show_alert=True); return
+    if act=="no":
+        await pool.execute("DELETE FROM marriage_proposals WHERE bride_id=$1",bride)
+        await q.answer("درخواست رد شد."); await q.edit_message_text("💔 درخواست ازدواج رد شد."); return
     async with pool.acquire() as c:
         async with c.transaction():
-            rows=await c.fetch("SELECT user_id,spouse_id FROM users WHERE user_id=ANY($1::bigint[]) FOR UPDATE",[bride,groom])
-            if len(rows)!=2 or any(r['spouse_id'] for r in rows):
+            rows=await c.fetch("SELECT user_id,gender,spouse_id FROM users WHERE user_id=ANY($1::bigint[]) FOR UPDATE",[bride,groom])
+            by={int(r['user_id']):r for r in rows}
+            if len(rows)!=2 or by[bride]['gender']!='f' or by[groom]['gender']!='m':
+                await q.answer("ازدواج فقط بین مردِ خواستگار و زنِ پاسخ‌دهنده ممکنه.",show_alert=True); return
+            if any(r['spouse_id'] for r in rows):
                 await q.answer("یکی از شما قبلاً ازدواج کرده.",show_alert=True); return
+            await c.execute("DELETE FROM marriage_proposals WHERE bride_id=$1",bride)
             await c.execute("UPDATE users SET spouse_id=CASE WHEN user_id=$1 THEN $2 ELSE $1 END WHERE user_id IN ($1,$2)",bride,groom)
     await q.answer("مبارکه! 💍"); await q.edit_message_text("💍 ازدواجتون ثبت شد! از این به بعد با نوشتن «همسرم» می‌تونید خانواده و انرژی همسرتون رو ببینید.")
 
