@@ -76,7 +76,7 @@ import math
 from io import BytesIO
 from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, MessageEntity, ReplyParameters, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, MessageEntity, ReplyParameters, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -264,7 +264,7 @@ ME_WORD = "خودم"  # تو گروه این کلمه رو بنویسی کارا
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "عضویت اجباری کانال + پنل ماشین + محرومیت + کازینو بسته"
+BOT_VERSION = "مینی‌اپ پیام گروه‌ها + عضویت اجباری + پنل ماشین"
 
 
 def norm_word(text: str) -> str:
@@ -355,6 +355,8 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS task_completions (task_id BIGINT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, period_key TEXT NOT NULL, completed BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(task_id, user_id, period_key))")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_duel DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS chats (chat_id BIGINT PRIMARY KEY, title TEXT)")
+        await c.execute("CREATE TABLE IF NOT EXISTS group_msgs (chat_id BIGINT NOT NULL, msg_id BIGINT NOT NULL, user_id BIGINT NOT NULL, name TEXT, username TEXT, text TEXT, ts DOUBLE PRECISION NOT NULL, PRIMARY KEY (chat_id, msg_id))")
+        await c.execute("CREATE INDEX IF NOT EXISTS group_msgs_user_idx ON group_msgs (chat_id, user_id, ts DESC)")
         await c.execute(
             """CREATE TABLE IF NOT EXISTS cars (
                 user_id  BIGINT NOT NULL,
@@ -434,11 +436,221 @@ async def init_db(app: Application):
     log.info("database ready")
 
 
+# ═════════════════ مینی‌اپ پیام‌های گروه‌ها (فقط پشتیبان‌ها) ═════════════════
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")   # آدرس عمومی Railway، مثلاً https://xxx.up.railway.app
+
+WEBAPP_HTML = r"""<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>پیام‌های گروه‌ها</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:var(--tg-theme-bg-color,#fff);--fg:var(--tg-theme-text-color,#111);--hint:var(--tg-theme-hint-color,#888);--card:var(--tg-theme-secondary-bg-color,#f1f1f4);--btn:var(--tg-theme-button-color,#2f7cf6);--btnt:var(--tg-theme-button-text-color,#fff);--link:var(--tg-theme-link-color,#2f7cf6)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;padding-bottom:env(safe-area-inset-bottom)}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:12px 14px 8px;border-bottom:1px solid var(--card)}
+h1{margin:0;font-size:17px}
+.sub{color:var(--hint);font-size:12px}
+.bar{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+input{flex:1;min-width:110px;padding:9px 11px;border:1px solid var(--card);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;font-size:14px;outline:none}
+button{padding:9px 13px;border:0;border-radius:10px;background:var(--btn);color:var(--btnt);font:inherit;font-size:14px;cursor:pointer}
+button.ghost{background:var(--card);color:var(--fg)}
+main{padding:10px 12px 24px}
+.card{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--card);border-radius:14px;padding:13px 14px;margin-bottom:9px;cursor:pointer}
+.card b{font-weight:600}
+.badge{background:var(--btn);color:var(--btnt);border-radius:20px;padding:1px 10px;font-size:12px;white-space:nowrap}
+.msg{background:var(--card);border-radius:14px;padding:9px 12px;margin-bottom:8px}
+.meta{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;font-size:12px;color:var(--hint)}
+.meta b{color:var(--fg);font-size:13px}
+.meta .id{cursor:pointer;direction:ltr;unicode-bidi:embed;text-decoration:underline dotted}
+.txt{white-space:pre-wrap;word-break:break-word;margin-top:3px}
+.msg a{color:var(--link);text-decoration:none;margin-right:auto}
+.empty,.err{text-align:center;color:var(--hint);padding:36px 10px}
+.err{color:#e5484d}
+label{font-size:13px;color:var(--hint);display:flex;align-items:center;gap:5px}
+</style></head><body>
+<header>
+  <h1 id="title">👁 پیام‌های گروه‌ها</h1>
+  <div class="sub" id="sub"></div>
+  <div class="bar" id="bar" hidden>
+    <input id="fuser" placeholder="آیدی عددی / @یوزرنیم" inputmode="text" autocomplete="off">
+    <input id="fq" placeholder="جست‌وجو تو متن" autocomplete="off">
+    <button id="go">اعمال</button>
+    <button class="ghost" id="reload">🔄</button>
+    <label><input type="checkbox" id="live" style="flex:none;min-width:0"> زنده</label>
+  </div>
+</header>
+<main id="main"></main>
+<script>
+const tg=window.Telegram&&Telegram.WebApp; if(tg){tg.ready();tg.expand();}
+const $=id=>document.getElementById(id);
+let chat=null,timer=null;
+async function api(path){
+  const r=await fetch(path,{headers:{'X-Init-Data':tg?tg.initData:''}});
+  if(!r.ok) throw new Error(r.status===403?'دسترسی نداری (این صفحه فقط از داخل تلگرام و برای پشتیبان‌هاست)':'خطا '+r.status);
+  return r.json();
+}
+function show(el){el.hidden=false} function hide(el){el.hidden=true}
+function setMain(node){const m=$('main');m.replaceChildren(node)}
+function note(cls,t){const d=document.createElement('div');d.className=cls;d.textContent=t;setMain(d)}
+function fmtTime(ts){return new Date(ts*1000).toLocaleString('fa-IR',{timeZone:'Asia/Tehran',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+async function groups(){
+  chat=null;clearInterval(timer);hide($('bar'));$('title').textContent='👁 پیام‌های گروه‌ها';$('sub').textContent='یه گروه رو انتخاب کن';
+  if(tg)tg.BackButton.hide();
+  try{
+    const g=await api('/api/groups'); if(!g.length){note('empty','هنوز گروهی ثبت نشده.');return}
+    const f=document.createDocumentFragment();
+    g.forEach(x=>{const c=document.createElement('div');c.className='card';
+      const t=document.createElement('b');t.textContent=x.title||x.chat_id;
+      const b=document.createElement('span');b.className='badge';b.textContent=x.n+' پیام';
+      c.append(t,b);c.onclick=()=>openChat(x);f.append(c)});
+    setMain(f);
+  }catch(e){note('err',e.message)}
+}
+function openChat(x){
+  chat=x;$('title').textContent=x.title||x.chat_id;$('sub').textContent='';
+  $('fuser').value='';$('fq').value='';show($('bar'));
+  if(tg){tg.BackButton.show();tg.BackButton.onClick(groups)}
+  load(true);
+}
+async function load(scroll){
+  if(!chat)return;
+  const u=$('fuser').value.trim(),q=$('fq').value.trim();
+  try{
+    const m=await api('/api/messages?chat='+encodeURIComponent(chat.chat_id)+'&user='+encodeURIComponent(u)+'&q='+encodeURIComponent(q));
+    $('sub').textContent=m.length+' پیام'+(u||q?' (فیلتر شده)':'');
+    if(!m.length){note('empty','پیامی پیدا نشد.');return}
+    const f=document.createDocumentFragment();
+    m.slice().reverse().forEach(x=>{
+      const d=document.createElement('div');d.className='msg';
+      const meta=document.createElement('div');meta.className='meta';
+      const n=document.createElement('b');n.textContent=x.name||x.user_id;meta.append(n);
+      if(x.username){const s=document.createElement('span');s.textContent='@'+x.username;meta.append(s)}
+      const id=document.createElement('span');id.className='id';id.textContent=x.user_id;
+      id.title='فیلتر روی این کاربر';id.onclick=()=>{$('fuser').value=String(x.user_id);load(true)};meta.append(id);
+      const t=document.createElement('span');t.textContent=fmtTime(x.ts);meta.append(t);
+      if(x.link){const a=document.createElement('a');a.textContent='↗';a.href=x.link;
+        a.onclick=e=>{if(tg){e.preventDefault();tg.openTelegramLink(x.link)}};meta.append(a)}
+      const tx=document.createElement('div');tx.className='txt';tx.textContent=x.text||'';
+      d.append(meta,tx);f.append(d)});
+    setMain(f);
+    if(scroll)window.scrollTo(0,document.body.scrollHeight);
+  }catch(e){note('err',e.message)}
+}
+$('go').onclick=()=>load(true);
+$('reload').onclick=()=>load(true);
+['fuser','fq'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key==='Enter')load(true)}));
+$('live').onchange=e=>{clearInterval(timer);if(e.target.checked)timer=setInterval(()=>load(false),8000)};
+groups();
+</script></body></html>"""
+
+
+def _verify_init_data(init: str):
+    """initData مینی‌اپ تلگرام رو با توکن ربات چک می‌کنه؛ آیدی کاربر یا None."""
+    import hashlib
+    import hmac
+    import urllib.parse
+    try:
+        d = dict(urllib.parse.parse_qsl(init or "", keep_blank_values=True))
+        h = d.pop("hash", None)
+        if not h:
+            return None
+        check = "\n".join(f"{k}={v}" for k, v in sorted(d.items()))
+        secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(hmac.new(secret, check.encode(), hashlib.sha256).hexdigest(), h):
+            return None
+        if time.time() - int(d.get("auth_date", "0")) > 86400:
+            return None
+        return int(json.loads(d["user"])["id"])
+    except Exception:
+        return None
+
+
+async def _web_route(path: str, qs: dict, headers: dict):
+    """(status, content-type, body bytes)"""
+    if path in ("/", "/index.html"):
+        return 200, "text/html; charset=utf-8", WEBAPP_HTML.encode()
+    if path == "/health":
+        return 200, "text/plain", b"ok"
+    if not path.startswith("/api/"):
+        return 404, "text/plain", b"not found"
+    uid = _verify_init_data(headers.get("x-init-data", ""))
+    if uid is None or uid not in ADMIN_IDS:
+        return 403, "application/json", b'{"error":"forbidden"}'
+    if path == "/api/groups":
+        rows = await pool.fetch(
+            "SELECT c.chat_id, c.title, (SELECT count(*) FROM group_msgs g WHERE g.chat_id = c.chat_id) AS n "
+            "FROM chats c ORDER BY n DESC, c.title LIMIT 100")
+        return 200, "application/json", json.dumps([dict(r) for r in rows], ensure_ascii=False).encode()
+    if path == "/api/messages":
+        try:
+            cid = int(qs.get("chat", ""))
+        except ValueError:
+            return 400, "application/json", b"[]"
+        u = (qs.get("user") or "").strip()
+        uid_f = int(u) if u.lstrip("-").isdigit() else None
+        un_f = u.lstrip("@").lower() if (u and uid_f is None) else None
+        q = (qs.get("q") or "").strip() or None
+        rows = await pool.fetch(
+            "SELECT msg_id, user_id, name, username, text, ts FROM group_msgs WHERE chat_id = $1 "
+            "AND ($2::bigint IS NULL OR user_id = $2) AND ($3::text IS NULL OR lower(username) = $3) "
+            "AND ($4::text IS NULL OR text ILIKE '%' || $4 || '%') ORDER BY ts DESC LIMIT 150",
+            cid, uid_f, un_f, q)
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["link"] = f"https://t.me/c/{str(cid)[4:]}/{r['msg_id']}" if str(cid).startswith("-100") else None
+            out.append(d)
+        return 200, "application/json", json.dumps(out, ensure_ascii=False).encode()
+    return 404, "application/json", b"{}"
+
+
+async def _http_conn(reader, writer):
+    import urllib.parse
+    status, ctype, body = 500, "text/plain", b"error"
+    try:
+        head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
+        lines = head.decode("latin1").split("\r\n")
+        method, target, _v = lines[0].split(" ", 2)
+        headers = {k.strip().lower(): v.strip() for k, v in (l.split(":", 1) for l in lines[1:] if ":" in l)}
+        if method not in ("GET", "HEAD"):
+            status, ctype, body = 405, "text/plain", b"method not allowed"
+        else:
+            url = urllib.parse.urlsplit(target)
+            status, ctype, body = await _web_route(url.path, dict(urllib.parse.parse_qsl(url.query)), headers)
+    except Exception:
+        log.warning("webapp request failed", exc_info=True)
+    try:
+        reason = {200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed"}.get(status, "Error")
+        writer.write((f"HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\n"
+                      "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n").encode() + body)
+        await writer.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
+
+async def start_webapp():
+    """سرور کوچک مینی‌اپ (بدون نیاز به پکیج جدید). Railway پورتش رو تو PORT میده."""
+    port = int(os.environ.get("PORT", "8080"))
+    srv = await asyncio.start_server(_http_conn, "0.0.0.0", port)
+    log.info("webapp listening on :%s (WEBAPP_URL=%s)", port, WEBAPP_URL or "—")
+    return srv
+
+
 async def startup(app: Application):
     """موقع روشن شدن: دیتابیس رو آماده می‌کنه و به پشتیبان‌ها تو تلگرام خبر میده (بدون نیاز به لاگ Railway)."""
     try:
         await init_db(app)
         app.bot_data["car_task"] = asyncio.create_task(car_profit_loop())
+        try:
+            app.bot_data["web"] = await start_webapp()
+        except Exception:
+            log.exception("webapp start failed")
         note = f"✅ ربات روشن شد.\nنسخه: {BOT_VERSION}"
     except Exception as e:
         log.exception("startup failed")
@@ -3880,6 +4092,56 @@ async def car_profit_loop():
         await asyncio.sleep(60)
 
 
+MSG_LOG_DAYS = 3          # پیام‌های گروه فقط این‌قدر روز نگه داشته میشن
+_MSG_LOG_N = 0
+_BG_TASKS: set = set()
+
+
+def _msg_label(msg) -> str:
+    """متن پیام (یا برچسب نوع رسانه) برای نمایش به پشتیبان."""
+    text = (msg.text or msg.caption or "").strip()
+    kinds = (("photo", "📷 عکس"), ("video", "🎞 ویدیو"), ("voice", "🎤 ویس"), ("video_note", "⭕ ویدیو‌مسیج"),
+             ("sticker", "🎭 استیکر"), ("animation", "GIF"), ("audio", "🎵 آهنگ"), ("document", "📎 فایل"),
+             ("poll", "📊 نظرسنجی"), ("contact", "👤 مخاطب"), ("location", "📍 لوکیشن"), ("dice", "🎲 تاس"))
+    tag = next((lab for attr, lab in kinds if getattr(msg, attr, None)), "")
+    return (f"{tag} {text}".strip() if tag else text)[:700]
+
+
+async def _log_group_msg(chat_id: int, user, msg):
+    global _MSG_LOG_N
+    try:
+        label = _msg_label(msg)
+        if not label:
+            return
+        await pool.execute(
+            "INSERT INTO group_msgs (chat_id, msg_id, user_id, name, username, text, ts) VALUES ($1,$2,$3,$4,$5,$6,$7) "
+            "ON CONFLICT (chat_id, msg_id) DO NOTHING",
+            chat_id, msg.message_id, user.id, user.full_name, user.username, label, time.time())
+        _MSG_LOG_N += 1
+        if _MSG_LOG_N % 300 == 0:
+            await pool.execute("DELETE FROM group_msgs WHERE ts < $1", time.time() - MSG_LOG_DAYS * 86400)
+    except Exception:
+        log.warning("group msg log failed", exc_info=True)
+
+
+def _gm_fmt(rows, chat_id: int, budget: int = 3600) -> str:
+    """پیام‌ها (جدیدترین اول ورودی) → متن مرتب قدیمی→جدید که تو یه پیام تلگرام جا بشه."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Tehran")
+    out, used = [], 0
+    for r in rows:
+        t = datetime.fromtimestamp(r["ts"], tz).strftime("%m/%d %H:%M")
+        un = f" @{html.escape(r['username'])}" if r["username"] else ""
+        link = f' <a href="https://t.me/c/{str(chat_id)[4:]}/{r["msg_id"]}">↗</a>' if str(chat_id).startswith("-100") else ""
+        block = (f"🕒 {t} • <b>{html.escape(r['name'] or str(r['user_id']))}</b>{un} • <code>{r['user_id']}</code>{link}\n"
+                 f"{html.escape((r['text'] or '')[:400])}")
+        if used + len(block) + 2 > budget:
+            break
+        out.append(block)
+        used += len(block) + 2
+    return "\n\n".join(reversed(out)) if out else "پیامی ثبت نشده."
+
+
 async def is_channel_member(bot, uid: int):
     """True = عضوه، False = عضو نیست، None = چک نشد (مثلاً ربات تو کانال ادمین نیست)."""
     if _MEMBER_OK.get(uid, 0) > time.time():
@@ -3919,6 +4181,10 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user.username.lower(), user.id)
         except Exception:
             log.warning("username save failed", exc_info=True)
+    if user and not user.is_bot and chat and chat.type in ("group", "supergroup") and update.effective_message:
+        _t = asyncio.create_task(_log_group_msg(chat.id, user, update.effective_message))
+        _BG_TASKS.add(_t)
+        _t.add_done_callback(_BG_TASKS.discard)
     if user and not user.is_bot and user.id not in ADMIN_IDS and user.id in BANNED:
         until = BANNED[user.id]
         if until <= time.time():  # محرومیت تموم شده
@@ -3995,7 +4261,8 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    web_row = [[btn("📱 مینی‌اپ پیام‌ها", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") else []
+    return InlineKeyboardMarkup(web_row + [
         [btn("💸 کم کردن پول", "primary", callback_data="ad:money"), btn("➕ افزودن پول", "success", callback_data="ad:money_add")],
         [btn("🤛 کم کردن جق", "primary", callback_data="ad:jagh"), btn("➕ افزودن جق", "success", callback_data="ad:jagh_add")],
         [btn("🚫 محروم کردن کاربر", "danger", callback_data="ad:ban"), btn("✅ رفع محرومیت", "success", callback_data="ad:unban")],
@@ -4003,6 +4270,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [btn("🔴 خاموش کردن ربات", "danger", callback_data="ad:toggle") if BOT_ENABLED
          else btn("🟢 روشن کردن ربات", "success", callback_data="ad:toggle")],
         [btn("📢 پیام همگانی", "primary", callback_data="ad:bc"), btn("📊 آمار", "primary", callback_data="ad:stats")],
+        [btn("👁 پیام‌های گروه‌ها", "primary", callback_data="ad:gm")],
     ])
 
 
@@ -4042,6 +4310,41 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{operation} {what}\n\nآیدی عددی یا @یوزرنیم کاربر رو بفرست، یا یه پیام ازش اینجا فوروارد کن.\n(لغو: بنویس «لغو»)",
             reply_markup=CANCEL_KB,
         )
+    elif act == "gm":   # لیست گروه‌هایی که ربات توشونه
+        context.user_data.pop("adm", None)
+        rows = await pool.fetch(
+            "SELECT c.chat_id, c.title, (SELECT count(*) FROM group_msgs g WHERE g.chat_id = c.chat_id) AS n "
+            "FROM chats c ORDER BY n DESC, c.title LIMIT 30")
+        kb = [[btn(f"{(r['title'] or str(r['chat_id']))[:30]} • {r['n']}", "primary", callback_data=f"ad:gl:{r['chat_id']}")] for r in rows]
+        kb.append([btn("🔙 پنل", callback_data="ad:menu")])
+        await q.edit_message_text(
+            f"👁 پیام‌های گروه‌ها (ثبت‌شده تو {MSG_LOG_DAYS} روز اخیر)\nیه گروه رو انتخاب کن:" if rows else "هنوز گروهی ثبت نشده.",
+            reply_markup=InlineKeyboardMarkup(kb))
+    elif act in ("gl", "gu0"):  # آخرین پیام‌های یه گروه
+        try:
+            cid = int(parts[2])
+        except (IndexError, ValueError):
+            return
+        rows = await pool.fetch("SELECT msg_id, user_id, name, username, text, ts FROM group_msgs WHERE chat_id = $1 ORDER BY ts DESC LIMIT 40", cid)
+        title = await pool.fetchval("SELECT title FROM chats WHERE chat_id = $1", cid) or cid
+        kb = InlineKeyboardMarkup([
+            [btn("👤 پیام‌های یه کاربر", "primary", callback_data=f"ad:gu:{cid}"), btn("🔄 تازه‌سازی", "success", callback_data=f"ad:gl:{cid}")],
+            [btn("🔙 گروه‌ها", callback_data="ad:gm")],
+        ])
+        try:
+            await q.edit_message_text(f"👁 <b>{html.escape(str(title))}</b>\n\n{_gm_fmt(rows, cid)}", parse_mode="HTML", reply_markup=kb)
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                raise
+    elif act == "gu":   # پیام‌های یه کاربر تو یه گروه
+        try:
+            cid = int(parts[2])
+        except (IndexError, ValueError):
+            return
+        context.user_data["adm"] = {"act": "gmu", "step": "target", "cid": cid}
+        await q.edit_message_text(
+            "👤 آیدی عددی یا @یوزرنیم کاربر رو بفرست، یا یه پیام ازش اینجا فوروارد کن.\n(لغو: بنویس «لغو»)",
+            reply_markup=CANCEL_KB)
     elif act in ("ban", "unban"):
         context.user_data["adm"] = {"act": act, "step": "target"}
         title = "🚫 محروم کردن کاربر" if act == "ban" else "✅ رفع محرومیت"
@@ -4139,6 +4442,27 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         await msg.reply_text("لغو شد.", reply_markup=admin_menu_kb())
         return True
     act = st["act"]
+    if act == "gmu":
+        uid = None
+        fo = getattr(msg, "forward_origin", None)
+        if fo is not None and getattr(fo, "sender_user", None):
+            uid = fo.sender_user.id
+        elif msg.text and msg.text.strip().lstrip("-").isdigit():
+            uid = int(msg.text.strip())
+        elif msg.text and re.fullmatch(r"@?[A-Za-z0-9_]{3,32}", msg.text.strip()):
+            uid = await pool.fetchval("SELECT user_id FROM users WHERE username = $1", msg.text.strip().lstrip("@").lower())
+        if uid is None:
+            await msg.reply_text("کاربر پیدا نشد. آیدی عددی یا @یوزرنیم بفرست، یا پیامش رو فوروارد کن.", reply_markup=CANCEL_KB)
+            return True
+        cid = st["cid"]
+        rows = await pool.fetch(
+            "SELECT msg_id, user_id, name, username, text, ts FROM group_msgs WHERE chat_id = $1 AND user_id = $2 ORDER BY ts DESC LIMIT 40",
+            cid, uid)
+        context.user_data.pop("adm", None)
+        await msg.reply_text(
+            f"👁 پیام‌های کاربر <code>{uid}</code>\n\n{_gm_fmt(rows, cid)}", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[btn("🔙 گروه", callback_data=f"ad:gl:{cid}")]]))
+        return True
     if act in ("ban", "unban"):
         if st["step"] == "target":
             uid = None
