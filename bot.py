@@ -264,7 +264,7 @@ ME_WORD = "خودم"  # تو گروه این کلمه رو بنویسی کارا
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "پنل ماشین با جدول واقعی + خرید ماشین بعدی از پنل + محرومیت + کازینو بسته"
+BOT_VERSION = "عضویت اجباری کانال + پنل ماشین + محرومیت + کازینو بسته"
 
 
 def norm_word(text: str) -> str:
@@ -2962,6 +2962,10 @@ async def duel_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───────────────────────── پنل پشتیبانی /admin ─────────────────────────
 BOT_ENABLED = True
 KNOWN_CHATS: set = set()
+FORCE_CHANNEL = "@jagh_game"                 # کانال عضویت اجباری
+FORCE_CHANNEL_EID = "5861505966666695398"    # ایموجی پرمیوم پیام عضویت
+_MEMBER_OK: dict[int, float] = {}            # user_id -> تا کی نیازی به چک دوباره نیست
+_JOIN_PROMPTED: dict[tuple[int, int], float] = {}
 BANNED: dict[int, float] = {}   # user_id -> زمان پایان محرومیت (timestamp)
 BAN_PERM = 32503680000.0        # محرومیت دائمی (سال ۳۰۰۰)
 _DUR_UNITS = {
@@ -3876,6 +3880,35 @@ async def car_profit_loop():
         await asyncio.sleep(60)
 
 
+async def is_channel_member(bot, uid: int):
+    """True = عضوه، False = عضو نیست، None = چک نشد (مثلاً ربات تو کانال ادمین نیست)."""
+    if _MEMBER_OK.get(uid, 0) > time.time():
+        return True
+    try:
+        m = await bot.get_chat_member(FORCE_CHANNEL, uid)
+    except Exception:
+        log.warning("force-join check failed (ربات باید تو کانال ادمین باشه)", exc_info=True)
+        return None
+    st = getattr(m, "status", "")
+    ok = str(st) in ("creator", "administrator", "member") or (str(st) == "restricted" and getattr(m, "is_member", False))
+    if ok:
+        _MEMBER_OK[uid] = time.time() + 600
+        if len(_MEMBER_OK) > 20000:
+            _MEMBER_OK.clear()
+    return ok
+
+
+def _join_kb():
+    return InlineKeyboardMarkup([
+        [btn("📢 عضویت در کانال", "primary", url=f"https://t.me/{FORCE_CHANNEL.lstrip('@')}")],
+        [btn("✅ عضو شدم", "success", callback_data="fj:check")],
+    ])
+
+
+def _join_text() -> str:
+    return B(f'<tg-emoji emoji-id="{FORCE_CHANNEL_EID}">📢</tg-emoji> برای استفاده از ربات اول باید تو کانال اطلاع‌رسانی ربات عضو بشی:\n{FORCE_CHANNEL}\n\nبعد از عضویت دکمه‌ی «عضو شدم» رو بزن.')
+
+
 async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """قبل از همه‌ی هندلرها: ثبت گروه‌ها + اگه ربات خاموش باشه فقط پشتیبان‌ها کار می‌کنن."""
     user, chat = update.effective_user, update.effective_chat
@@ -3905,6 +3938,43 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.effective_message.reply_text(f"⛔ شما {_ban_until_txt(until)} از ربات محروم هستید.")
                 except Exception:
                     pass
+            raise ApplicationHandlerStop
+    # عضویت اجباری: تا عضو کانال نشده، ربات هیچ کاری برای کاربر نمی‌کنه (پشتیبان‌ها معافن)
+    if (user and not user.is_bot and user.id not in ADMIN_IDS and chat and chat.type != "channel"
+            and (update.callback_query or update.effective_message)):
+        cq = update.callback_query
+        if cq and cq.data == "fj:check":
+            ok = await is_channel_member(context.bot, user.id)
+            if ok is False:
+                await cq.answer("❌ هنوز عضو کانال نشدی! اول عضو شو بعد دکمه رو بزن.", show_alert=True)
+            else:
+                await cq.answer("✅ عضویتت تایید شد، حالا می‌تونی از ربات استفاده کنی.", show_alert=True)
+                try:
+                    await cq.message.delete()
+                except Exception:
+                    pass
+            raise ApplicationHandlerStop
+        ok = await is_channel_member(context.bot, user.id)
+        if ok is False:  # None (چک نشد) = بدون محدودیت ادامه می‌دیم تا ربات از کار نیفته
+            if cq:
+                try:
+                    await cq.answer(f"📢 اول تو کانال {FORCE_CHANNEL} عضو شو.", show_alert=True)
+                except Exception:
+                    pass
+            else:
+                now = time.time()
+                k = (chat.id, user.id)
+                gap = 3 if chat.type == "private" else 120   # تو گروه هر ۲ دقیقه یه بار پیام عضویت (اسپم نشه)
+                if now - _JOIN_PROMPTED.get(k, 0) >= gap:
+                    _JOIN_PROMPTED[k] = now
+                    if len(_JOIN_PROMPTED) > 20000:
+                        _JOIN_PROMPTED.clear()
+                    msg = update.effective_message
+                    try:
+                        await send_html(context.bot, chat.id, _join_text(), reply_markup=_join_kb(),
+                                        reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+                    except Exception:
+                        log.warning("join prompt failed", exc_info=True)
             raise ApplicationHandlerStop
     if chat and chat.type in ("group", "supergroup") and chat.id not in KNOWN_CHATS:
         KNOWN_CHATS.add(chat.id)
