@@ -420,6 +420,16 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_profile (user_id BIGINT PRIMARY KEY, trace INTEGER NOT NULL DEFAULT 0, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, arrest_until DOUBLE PRECISION NOT NULL DEFAULT 0, trace_until DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE TABLE IF NOT EXISTS tasks (task_id BIGSERIAL PRIMARY KEY, period TEXT NOT NULL CHECK(period IN ('daily', 'weekly')), title TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
         await c.execute("CREATE TABLE IF NOT EXISTS task_completions (task_id BIGINT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, period_key TEXT NOT NULL, completed BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(task_id, user_id, period_key))")
+        await c.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS metric TEXT")
+        await c.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target BIGINT NOT NULL DEFAULT 1")
+        await c.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reward BIGINT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE task_completions ADD COLUMN IF NOT EXISTS progress BIGINT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE task_completions ADD COLUMN IF NOT EXISTS rewarded BIGINT NOT NULL DEFAULT 0")
+        if not await c.fetchval("SELECT 1 FROM tasks WHERE is_default = TRUE LIMIT 1"):   # فقط بار اول
+            for _per, _met, _tg, _rw in TASK_DEFAULTS:
+                await c.execute("INSERT INTO tasks(period,title,metric,target,reward,is_default) VALUES($1,$2,$3,$4,$5,TRUE)",
+                                _per, task_auto_title(_met, _tg), _met, _tg, _rw)
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_duel DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS chats (chat_id BIGINT PRIMARY KEY, title TEXT)")
         await c.execute("CREATE TABLE IF NOT EXISTS group_msgs (chat_id BIGINT NOT NULL, msg_id BIGINT NOT NULL, user_id BIGINT NOT NULL, name TEXT, username TEXT, text TEXT, ts DOUBLE PRECISION NOT NULL, PRIMARY KEY (chat_id, msg_id))")
@@ -1130,18 +1140,25 @@ function BroadcastScreen(){
 }
 
 function TasksScreen(){
-  const list=h('div',{class:'card'});let period='daily';
-  const inp=h('input',{class:'inp',placeholder:'متن تسک جدید…',maxlength:'300'});
+  const list=h('div',{class:'card'});let period='daily';let metrics=[];
+  const inp=h('input',{class:'inp',placeholder:'عنوان دلخواه (اختیاری برای تسک خودکار)…',maxlength:'300'});
+  const sel=h('select',{class:'inp'});
+  const tg=h('input',{class:'inp',placeholder:'تعداد هدف (برای واریز بانک: مبلغ)',inputmode:'numeric'});
+  const rw=h('input',{class:'inp',placeholder:'جایزه به تومن (مثلا 300000)',inputmode:'numeric'});
   const seg=h('div',{class:'seg'});
   const drawSeg=()=>seg.replaceChildren(h('button',{class:period==='daily'?'on':'',onclick:()=>{period='daily';drawSeg()}},'روزانه'),h('button',{class:period==='weekly'?'on':'',onclick:()=>{period='weekly';drawSeg()}},'هفتگی'));drawSeg();
+  const fill=()=>sel.replaceChildren(h('option',{value:''},'تسک متنی (بدون جایزه)'),...metrics.map(m=>h('option',{value:m.key},m.label)));
   async function load(){
-    try{const d=await api('/api/tasks');
-      list.replaceChildren(h('h3',{},'تسک‌های فعال'),...(d.tasks.length?d.tasks.map(t=>h('div',{class:'tk'},h('span',{class:'badge '+(t.period==='daily'?'':'gr')},t.period==='daily'?'روزانه':'هفتگی'),h('div',{class:'grow'},t.title,h('div',{class:'sub'},num(t.done)+' نفر انجام داده')),h('button',{class:'ib',onclick:async()=>{if(!await ask('این تسک حذف بشه؟'))return;try{await api('/api/task/delete',{task_id:t.task_id});toast('حذف شد');load()}catch(e){toast(e.message,1)}}},'🗑'))):[h('div',{class:'sub',style:'padding:10px 0'},'تسکی نیست')]));
+    try{const d=await api('/api/tasks');metrics=d.metrics||[];fill();
+      list.replaceChildren(h('h3',{},'تسک‌های فعال'),...(d.tasks.length?d.tasks.map(t=>h('div',{class:'tk'},h('span',{class:'badge '+(t.period==='daily'?'':'gr')},t.period==='daily'?'روزانه':'هفتگی'),h('div',{class:'grow'},t.title,h('div',{class:'sub'},(t.metric?('💰 '+num(t.reward)+' تومن • '):'')+num(t.done)+' نفر انجام داده')),h('button',{class:'ib',onclick:async()=>{if(!await ask('این تسک حذف بشه؟'))return;try{await api('/api/task/delete',{task_id:t.task_id});toast('حذف شد');load()}catch(e){toast(e.message,1)}}},'🗑'))):[h('div',{class:'sub',style:'padding:10px 0'},'تسکی نیست')]));
     }catch(e){list.replaceChildren(h('div',{class:'empty err'},e.message))}
   }
-  const add=h('button',{class:'btn',onclick:async()=>{const t=inp.value.trim();if(!t)return toast('متن تسک خالیه',1);try{await api('/api/task/add',{period,title:t});inp.value='';toast('✅ تسک اضافه شد');load()}catch(e){toast(e.message,1)}}},'➕ افزودن تسک');
+  const add=h('button',{class:'btn',onclick:async()=>{const t=inp.value.trim();const m=sel.value;
+    if(!m&&!t)return toast('متن تسک خالیه',1);
+    if(m&&(!tg.value||!rw.value))return toast('هدف و جایزه رو وارد کن',1);
+    try{await api('/api/task/add',{period,title:t,metric:m,target:tg.value,reward:rw.value});inp.value='';tg.value='';rw.value='';toast('✅ تسک اضافه شد');load()}catch(e){toast(e.message,1)}}},'➕ افزودن تسک');
   load();
-  return h('div',{class:'scr'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'📋 تسک‌ها')),h('div',{class:'scroll'},list,h('div',{class:'card',style:'padding-bottom:14px'},h('h3',{},'تسک جدید'),seg,inp,add)));
+  return h('div',{class:'scr'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'📋 تسک‌ها')),h('div',{class:'scroll'},list,h('div',{class:'card',style:'padding-bottom:14px'},h('h3',{},'تسک جدید'),seg,sel,tg,rw,inp,add)));
 }
 
 function LogScreen(){
@@ -1660,10 +1677,12 @@ async def _g_media(qs, user):
 async def _g_tasks(qs, user):
     dk, wk = task_period_key("daily"), task_period_key("weekly")
     rows = await pool.fetch(
-        "SELECT t.task_id, t.period, t.title, (SELECT count(*) FROM task_completions tc WHERE tc.task_id = t.task_id AND tc.completed "
+        "SELECT t.task_id, t.period, t.title, t.metric, t.target, t.reward, (SELECT count(*) FROM task_completions tc WHERE tc.task_id = t.task_id AND tc.completed "
         "AND tc.period_key = CASE t.period WHEN 'daily' THEN $1 ELSE $2 END) AS done "
         "FROM tasks t WHERE t.active = TRUE ORDER BY CASE t.period WHEN 'daily' THEN 0 ELSE 1 END, t.task_id", dk, wk)
-    return _j({"tasks": [dict(r) for r in rows]})
+    return _j({"tasks": [dict(r) for r in rows],
+               "metrics": [{"key": k, "label": v[0], "kind": v[1]} for k, v in TASK_METRICS.items()],
+               "caps": TASK_MAX_REWARD})
 
 
 async def _g_log(qs, user):
@@ -1749,11 +1768,27 @@ async def _p_unban(b, user):
 
 async def _p_task_add(b, user):
     period, title = b.get("period"), str(b.get("title") or "").strip()[:300]
-    if period not in ("daily", "weekly") or not title:
-        raise _ApiError("متن تسک خالیه")
+    if period not in ("daily", "weekly"):
+        raise _ApiError("دوره نامعتبره")
     _need(user, "task_daily" if period == "daily" else "task_weekly")
-    await pool.execute("INSERT INTO tasks (period, title) VALUES ($1, $2)", period, title)
-    await _audit(user, "task_add", None, f"{'روزانه' if period == 'daily' else 'هفتگی'}: {title}")
+    metric = b.get("metric") or None
+    target, reward = 1, 0
+    if metric:
+        if metric not in TASK_METRICS:
+            raise _ApiError("معیار نامعتبره")
+        target, reward = _int(b.get("target")), _int(b.get("reward"))
+        if not target or target < 1 or target > 100_000_000_000:
+            raise _ApiError("تعداد/مبلغ هدف نامعتبره")
+        if reward is None or reward < 1 or reward > TASK_MAX_REWARD[period]:
+            raise _ApiError(f"جایزه باید بین ۱ تا {TASK_MAX_REWARD[period]:,} تومن باشه")
+        if not title:
+            title = task_auto_title(metric, target)
+    elif not title:
+        raise _ApiError("متن تسک خالیه")
+    await pool.execute("INSERT INTO tasks (period, title, metric, target, reward) VALUES ($1, $2, $3, $4, $5)",
+                       period, title, metric, target, reward)
+    task_cache_clear()
+    await _audit(user, "task_add", None, f"{'روزانه' if period == 'daily' else 'هفتگی'}: {title}" + (f" (جایزه {reward:,})" if metric else ""))
     return _j({"ok": True})
 
 
@@ -1765,6 +1800,7 @@ async def _p_task_del(b, user):
     if per:
         _need(user, "task_daily" if per == "daily" else "task_weekly")
     title = await pool.fetchval("UPDATE tasks SET active = FALSE WHERE task_id = $1 RETURNING title", tid)
+    task_cache_clear()
     await _audit(user, "task_del", None, title or str(tid))
     return _j({"ok": True})
 
@@ -2542,6 +2578,8 @@ async def handle_bank_transfer(update: Update, context: ContextTypes.DEFAULT_TYP
                     pocket+=amount; bank-=amount; ok=True
                     result=f"{BANK_CE} <b>برداشت با موفقیت انجام شد!</b>\nمبلغ برداشت: <b>{amount:,} تومان</b>\nکارمزد: <b>۰ تومان</b>\nموجودی جیب: <b>{pocket:,}</b>\nموجودی بانک: <b>{bank:,}</b>"
     await update.effective_message.reply_text(B(result),parse_mode="HTML")
+    if ok and action in ("واریز", "واريز"):
+        await task_event(context.bot, update.effective_chat.id, user.id, "bank", int(amount), name=user.full_name)
     return True
 
 async def show_homes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3225,11 +3263,53 @@ async def transfer_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ───────────────────────── تسک‌های روزانه و هفتگی ─────────────────────────
+# ───────────────────────── تسک‌های روزانه و هفتگی (خودکار + جایزه‌ی پول) ─────────────────────────
+# هر تسک یه «معیار» داره (جق، شیفت، بوس و بغل، ...) + تعداد هدف + جایزه. ربات خودش پیشرفت رو حساب می‌کنه؛
+# تا کاربر تموم کنه جایزه یه‌جا میره تو حسابش و تو همون گپ پیام «تسک انجام شد» میاد.
+# پشتیبان از /admin → افزودن تسک روزانه/هفتگی می‌تونه تسک جدید با جایزه‌ی دلخواه بسازه.
 TASK_EMOJI_ID = "5221951509129872023"
 TASK_DONE_EMOJI_ID = "5256156224948284902"
 TASK_ICON = f'<tg-emoji emoji-id="{TASK_EMOJI_ID}">📋</tg-emoji>'
 TASK_DONE_ICON = f'<tg-emoji emoji-id="{TASK_DONE_EMOJI_ID}">✅</tg-emoji>'
+
+TASK_MAX_REWARD = {"daily": 1_000_000, "weekly": 5_000_000}   # سقف جایزه (تومن) — اینجا راحت عوضش کن
+
+# معیار: (اسم فارسی, نوع (count/money), قالب عنوان, ایموجی پرمیوم)
+TASK_METRICS = {
+    "jagh":        ("جق زدن",             "count", "{n} بار «جق» بزن",                    lambda: HAND_CE),
+    "work":        ("شیفت کاری",          "count", "{n} شیفت کاری انجام بده",             lambda: MAX_LEVEL_CE),
+    "hug":         ("بوس و بغل",          "count", "{n} بار کسی رو بوس یا بغل کن",       lambda: ce("energy", 1, "⚡")),
+    "gift":        ("هدیه فرستادن",       "count", "{n} هدیه برای بقیه بفرست",           lambda: GIFT_MONEY_CE),
+    "duel_win":    ("بردن دوئل",          "count", "{n} دوئل جقی رو ببر",                lambda: SWORDS_CE),
+    "casino":      ("بازی کازینو",        "count", "{n} بار تو کازینو بازی کن",          lambda: DICE_CE),
+    "bank":        ("واریز به بانک",      "money", "{n} تومن به حساب بانکی واریز کن",   lambda: BANK_CE),
+    "robbery":     ("خلاف موفق",          "count", "{n} خلاف موفق انجام بده",            lambda: SPY_CE),
+    "car_up":      ("ارتقای ماشین",       "count", "{n} بار قطعه‌ی ماشین ارتقا بده",     lambda: MINES_GEM_CE),
+    "car_collect": ("برداشت درآمد ماشین", "count", "{n} بار درآمد ماشین رو برداشت کن",   lambda: MONEY_CE),
+    "msg":         ("پیام تو گروه",       "count", "{n} پیام تو گروه بفرست",             lambda: REF_CE),
+}
+
+# تسک‌های پیش‌فرض: (دوره, معیار, تعداد هدف, جایزه به تومن) — روزانه‌ها ۳۰۰ هزار تا ۱ میلیون، هفتگی‌ها سخت‌تر تا ۵ میلیون
+TASK_DEFAULTS = [
+    ("daily", "jagh", 10, 300_000),
+    ("daily", "msg", 30, 300_000),
+    ("daily", "work", 2, 400_000),
+    ("daily", "hug", 3, 500_000),
+    ("daily", "duel_win", 1, 700_000),
+    ("daily", "robbery", 1, 1_000_000),
+    ("weekly", "jagh", 150, 1_500_000),
+    ("weekly", "work", 12, 2_000_000),
+    ("weekly", "gift", 5, 2_500_000),
+    ("weekly", "car_up", 3, 2_500_000),
+    ("weekly", "duel_win", 5, 3_000_000),
+    ("weekly", "bank", 10_000_000, 3_500_000),
+    ("weekly", "robbery", 7, 5_000_000),
+]
+
+
+def task_auto_title(metric: str, target: int) -> str:
+    m = TASK_METRICS.get(metric)
+    return m[2].format(n=f"{int(target):,}") if m else "تسک"
 
 
 def task_period_key(period: str) -> str:
@@ -3250,38 +3330,167 @@ def task_countdown() -> tuple[str, str]:
     return fmt(end_day-now), fmt(end_week-now)
 
 
+_TASK_CACHE = {"ts": 0.0, "by_metric": {}}
+_TASK_MSG_TS: dict[int, float] = {}
+
+
+def task_cache_clear():
+    _TASK_CACHE["ts"] = 0.0
+
+
+async def _task_defs(metric: str):
+    now = time.time()
+    if now - _TASK_CACHE["ts"] > 20:
+        rows = await pool.fetch("SELECT task_id, period, title, target, reward, metric FROM tasks WHERE active = TRUE AND metric IS NOT NULL")
+        by: dict = {}
+        for r in rows:
+            by.setdefault(r["metric"], []).append(r)
+        _TASK_CACHE["by_metric"] = by
+        _TASK_CACHE["ts"] = now
+    return _TASK_CACHE["by_metric"].get(metric, [])
+
+
+async def task_event(bot, chat_id: int, uid: int, metric: str, n: int = 1, name: str | None = None):
+    """پیشرفت تسک‌های این معیار رو برای کاربر ثبت می‌کنه. اگه تسکی کامل شد: جایزه رو میده و تو همون گپ خبر میده."""
+    try:
+        if pool is None or not uid or n <= 0:
+            return
+        defs = await _task_defs(metric)
+        if not defs:
+            return
+        done = []
+        for r in defs:
+            key = task_period_key(r["period"])
+            target = max(1, int(r["target"] or 1))
+            reward = max(0, int(r["reward"] or 0))
+            async with pool.acquire() as c:
+                async with c.transaction():
+                    prog = await c.fetchval(
+                        "INSERT INTO task_completions(task_id,user_id,period_key,completed,progress) "
+                        "VALUES($1,$2,$3,FALSE,LEAST($4::bigint,$5::bigint)) "
+                        "ON CONFLICT(task_id,user_id,period_key) DO UPDATE "
+                        "SET progress = LEAST(task_completions.progress + $4::bigint, $5::bigint) "
+                        "WHERE task_completions.completed = FALSE RETURNING progress",
+                        r["task_id"], uid, key, int(n), target)
+                    if prog is None or int(prog) < target:
+                        continue
+                    ok = await c.fetchval(   # فقط یه‌بار جایزه (حتی اگه دو رویداد همزمان برسن)
+                        "UPDATE task_completions SET completed = TRUE, rewarded = $4::bigint "
+                        "WHERE task_id=$1 AND user_id=$2 AND period_key=$3 AND completed = FALSE RETURNING 1",
+                        r["task_id"], uid, key, reward)
+                    if not ok:
+                        continue
+                    if reward > 0:
+                        await c.execute("INSERT INTO users(user_id,name) VALUES($1,'') ON CONFLICT(user_id) DO NOTHING", uid)
+                        await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", reward, uid)
+                    done.append((r["period"], r["title"], reward))
+        if not done:
+            return
+        if name is None:
+            name = await pool.fetchval("SELECT name FROM users WHERE user_id=$1", uid)
+        who = _ulink(uid, name or "کاربر")
+        total = sum(d[2] for d in done)
+        parts = [f"{TROPHY_CE} <b>{who}</b> تبریک!"]
+        for period, title, reward in done:
+            lab = "روزانه" if period == "daily" else "هفتگی"
+            line = f"{TASK_DONE_ICON} تسک {lab} «{html.escape(title)}» انجام شد!"
+            if reward > 0:
+                line += f"\n{MONEY_CE} <b>{reward:,} تومن</b> جایزه گرفتی {EVENT_CE}"
+            parts.append(line)
+        if len(done) > 1 and total > 0:
+            parts.append(f"{MONEY_CE} مجموع جایزه: <b>{total:,} تومن</b>")
+        await send_html(bot, chat_id, B("\n\n".join(parts)))
+    except Exception:
+        log.warning("task_event failed (%s)", metric, exc_info=True)
+
+
+def _task_bar(p: int, t: int, width: int = 8) -> str:
+    filled = max(0, min(width, int(width * p / max(1, t))))
+    return "▰" * filled + "▱" * (width - filled)
+
+
+def _task_emoji(metric) -> str:
+    m = TASK_METRICS.get(metric)
+    try:
+        return m[3]() if m else TASK_ICON
+    except Exception:
+        return TASK_ICON
+
+
+async def build_tasks_view(uid: int):
+    rows = await pool.fetch("SELECT task_id,period,title,metric,target,reward FROM tasks WHERE active=TRUE "
+                            "ORDER BY CASE period WHEN 'daily' THEN 0 ELSE 1 END, task_id")
+    dk, wk = task_period_key("daily"), task_period_key("weekly")
+    prog = await pool.fetch("SELECT task_id, period_key, progress, completed FROM task_completions "
+                            "WHERE user_id=$1 AND period_key = ANY($2::text[])", uid, [dk, wk])
+    pm = {(int(r["task_id"]), r["period_key"]): r for r in prog}
+    daily_left, weekly_left = task_countdown()
+    head = [f"{TASK_ICON} <b>تسک‌های روزانه و هفتگی</b>",
+            f"{HG_CE} تا پایان روز: {daily_left}",
+            f"{HG_CE} تا پایان هفته: {weekly_left}"]
+    lines, buttons, size, hidden = [], [], sum(len(x) for x in head), 0
+    last_period = None
+    for r in rows:
+        period = r["period"]; key = dk if period == "daily" else wk
+        p = pm.get((int(r["task_id"]), key))
+        done = bool(p and p["completed"])
+        block = []
+        if period != last_period:
+            block.append("")
+            block.append(f"{TASK_ICON} <b>{'تسک‌های روزانه' if period == 'daily' else 'تسک‌های هفتگی'}</b>")
+        title, reward = html.escape(r["title"]), int(r["reward"] or 0)
+        if r["metric"]:
+            tgt = max(1, int(r["target"] or 1)); cur = min(int(p["progress"]), tgt) if p else 0
+            kind = TASK_METRICS.get(r["metric"], ("", "count"))[1]
+            fmt = (lambda v: f"{v:,}")
+            if done:
+                block.append(f"{TASK_DONE_ICON} <s>{title}</s>\n{MONEY_CE} {reward:,} تومن دریافت شد")
+            else:
+                block.append(f"{_task_emoji(r['metric'])} {title}\n{_task_bar(cur, tgt)} {fmt(cur)}/{fmt(tgt)}"
+                             + (f" • {MONEY_CE} جایزه: {reward:,} تومن" if reward else ""))
+        else:   # تسک متنی قدیمی: کاربر خودش تیک می‌زنه (بدون جایزه)
+            block.append(f"{TASK_DONE_ICON if done else TASK_ICON} {title}")
+            buttons.append([btn(("☑️ " if done else "⬜ ") + r["title"][:45], "success" if done else "primary",
+                                callback_data=f"tk:{uid}:{r['task_id']}:{key}")])
+        chunk = "\n".join(block)
+        if size + len(chunk) > 3300:
+            hidden += 1; continue
+        last_period = period
+        size += len(chunk) + 1
+        lines.append(chunk)
+    if not rows:
+        lines.append("\nهنوز تسکی اضافه نشده.")
+    if hidden:
+        lines.append(f"\n… و {hidden} تسک دیگه")
+    buttons.append([btn("بروزرسانی", "primary", icon=TASK_EMOJI_ID, callback_data=f"tk:{uid}:0:r")])
+    return B("\n".join(head) + "\n" + "\n".join(lines)), InlineKeyboardMarkup(buttons)
+
+
 async def show_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg, user = update.effective_message, update.effective_user
     await upsert_user(user.id, user.full_name)
-    rows = await pool.fetch("SELECT task_id,period,title FROM tasks WHERE active=TRUE ORDER BY CASE period WHEN 'daily' THEN 0 ELSE 1 END, task_id")
-    daily_left, weekly_left = task_countdown()
-    lines = [f"{TASK_ICON} <b>تسک‌های روزانه و هفتگی</b>", f"⏳ تا پایان روز: {daily_left}", f"⏳ تا پایان هفته: {weekly_left}", ""]
-    buttons = []
-    for r in rows:
-        period = r["period"]
-        key = task_period_key(period)
-        done = await pool.fetchval("SELECT completed FROM task_completions WHERE task_id=$1 AND user_id=$2 AND period_key=$3", r["task_id"], user.id, key)
-        mark = TASK_DONE_ICON if done else TASK_ICON
-        label = ("روزانه" if period == "daily" else "هفتگی")
-        lines.append(f"{mark} <b>{label}:</b> {html.escape(r['title'])}")
-        buttons.append([btn(("☑️ " if done else "⬜ ") + (r["title"][:45]), "success" if done else "primary", callback_data=f"tk:{user.id}:{r['task_id']}:{key}")])
-    if not rows:
-        lines.append("هنوز پشتیبانی تسکی اضافه نکرده.")
-    if buttons:
-        await msg.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
-    else:
-        await msg.reply_text("\n".join(lines), parse_mode="HTML")
+    text, kb = await build_tasks_view(user.id)
+    try:
+        await msg.reply_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        log.exception("tasks view failed, retrying without premium emojis")
+        await msg.reply_text(_strip_te(text), parse_mode="HTML", reply_markup=kb)
 
 
 async def task_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    _, uid_s, task_s, key = q.data.split(":")
+    _, uid_s, task_s, key = q.data.split(":", 3)
     uid, task_id = int(uid_s), int(task_s)
     if q.from_user.id != uid:
         await q.answer("این تسک‌ها برای صاحب پیام هستند.", show_alert=True); return
-    period = await pool.fetchval("SELECT period FROM tasks WHERE task_id=$1 AND active=TRUE", task_id)
-    if not period or key != task_period_key(period):
+    if task_id == 0:   # بروزرسانی
+        await q.answer("بروز شد ✅")
+        await show_tasks_from_callback(q, uid); return
+    row = await pool.fetchrow("SELECT period, metric FROM tasks WHERE task_id=$1 AND active=TRUE", task_id)
+    if not row or key != task_period_key(row["period"]):
         await q.answer("مهلت این تسک تموم شده یا تسک غیرفعاله.", show_alert=True); return
+    if row["metric"]:
+        await q.answer("این تسک خودکار حساب میشه؛ فقط کارش رو انجام بده تا جایزه بیاد.", show_alert=True); return
     await pool.execute("""INSERT INTO task_completions(task_id,user_id,period_key,completed) VALUES($1,$2,$3,TRUE)
         ON CONFLICT(task_id,user_id,period_key) DO UPDATE SET completed=NOT task_completions.completed""", task_id, uid, key)
     await q.answer("وضعیت تسک تغییر کرد.")
@@ -3289,16 +3498,8 @@ async def task_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_tasks_from_callback(q, uid):
-    rows = await pool.fetch("SELECT task_id,period,title FROM tasks WHERE active=TRUE ORDER BY CASE period WHEN 'daily' THEN 0 ELSE 1 END, task_id")
-    daily_left, weekly_left = task_countdown()
-    lines = [f"{TASK_ICON} <b>تسک‌های روزانه و هفتگی</b>", f"⏳ تا پایان روز: {daily_left}", f"⏳ تا پایان هفته: {weekly_left}", ""]
-    buttons=[]
-    for r in rows:
-        key=task_period_key(r['period'])
-        done=await pool.fetchval("SELECT completed FROM task_completions WHERE task_id=$1 AND user_id=$2 AND period_key=$3",r['task_id'],uid,key)
-        lines.append(f"{TASK_DONE_ICON if done else TASK_ICON} <b>{'روزانه' if r['period']=='daily' else 'هفتگی'}:</b> {html.escape(r['title'])}")
-        buttons.append([btn(("☑️ " if done else "⬜ ")+r['title'][:45],"success" if done else "primary",callback_data=f"tk:{uid}:{r['task_id']}:{key}")])
-    await q.edit_message_text("\n".join(lines),parse_mode="HTML",reply_markup=InlineKeyboardMarkup(buttons) if buttons else None)
+    text, kb = await build_tasks_view(uid)
+    await edit_html(q, text, kb)
 
 
 # ───────────────────── جاسوسی ─────────────────────
@@ -3370,6 +3571,10 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
     text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
     log.info("group text from %s: %r", user.id, msg.text)
+    _tm = time.time()
+    if len(text) >= 2 and _tm - _TASK_MSG_TS.get(user.id, 0) >= 15:
+        _TASK_MSG_TS[user.id] = _tm
+        await task_event(context.bot, msg.chat_id, user.id, "msg", name=user.full_name)
     if await event_text(update, context, text):
         return
     if await spy_text(update, context, text):
@@ -3486,6 +3691,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = html.escape(CHARACTERS[gender][level_for(new_jaghs) - 1][0])
         text += f"\n\n{ce('me', 1, '🎖')} ارتقا گرفتی! حالا «{title}» هستی. برای دیدنش بنویس «{ME_WORD}»"
     await msg.reply_text(B(text), parse_mode="HTML")
+    await task_event(context.bot, msg.chat_id, user.id, "jagh", name=user.full_name)
 
 
 async def debug_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4789,6 +4995,7 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(_strip_te(text), parse_mode="HTML")
         except Exception:
             log.exception("shift result edit failed again")
+    await task_event(context.bot, q.message.chat_id, q.from_user.id, "work", name=q.from_user.full_name)
 
 
 async def card_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5116,6 +5323,7 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
         row = await get_user(user.id)
         await say(B(text + ("\n" + record_line if record_line else "") + f"\n{ce('wallet', 1, '💰')} دارایی: {row['balance']:,}"))
         delete_later(bot, chat_id, [m.message_id])
+        await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
     finally:
         busy.discard(user.id)
 
@@ -5576,6 +5784,8 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
         result = f"{TROPHY_CE} برنده: {win_link}\n{MONEY_CE} {bet * 2:,} تومن به حسابش رفت!" + (f"\n{record_line}" if record_line else "")
     await edit_html(q, f"<b>{GAME_FA[game]} — نتیجه\n\n{a}: {r1}\n{b}: {r2}\n\n{result}</b>")
     delete_later(bot, chat_id, [m1.message_id, m2.message_id])
+    await task_event(bot, chat_id, creator, "casino")
+    await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
 
 
 async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
@@ -5782,6 +5992,7 @@ async def duel_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("duel result edit failed")
         await context.bot.send_message(q.message.chat_id, f"{TROPHY_CE} برنده‌ی دوئل: {win_link} (+{DUEL_PRIZE:,} تومن)", parse_mode="HTML")
+    await task_event(context.bot, q.message.chat_id, win_id, "duel_win")
 
 
 # ───────────────────────── پنل پشتیبانی /admin ─────────────────────────
@@ -6737,6 +6948,7 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except _CarRollback:
             await q.answer(f"پول کافی نیست؛ هزینه: {fmt_toman(cost)}", show_alert=True); return
         await q.answer(f"ارتقای {label} انجام شد!")
+        await task_event(context.bot, q.message.chat_id, uid, "car_up")
         await _show_upgrade_menu(q, uid, idx)
     elif act == "colors":
         await q.answer()
@@ -6793,6 +7005,7 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not amount:
             await q.answer("فعلاً درآمدی در صندوق جمع نشده است.", show_alert=True); return
         await q.answer(f"{fmt_toman(amount)} به کیف پولت واریز شد!", show_alert=True)
+        await task_event(context.bot, q.message.chat_id, uid, "car_collect")
         await _repanel(q, context, uid, idx)
     else:
         await q.answer()
@@ -7139,6 +7352,7 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result += f"\n\n{f'<tg-emoji emoji-id="{CASINO_CLOSED_EID}">🔒</tg-emoji>'} ردت به ۱۰۰٪ رسید؛ ۲ ساعت محرومی یا ردگم‌کن ۱٫۳ میلیونی بخر و ۱۲٪ از رد رو پاک کن."
         await q.answer("عملیات موفق بود؛ جایزه به حسابت نشست.")
         await edit_html(q, B(result), robbery_keyboard(owner, new_trace >= ROBBERY_TRACE_LIMIT))
+        await task_event(context.bot, q.message.chat_id, owner, "robbery")
     else:
         result = (f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji> <b>عملیات {html.escape(cfg['op'])} لو رفت؛ دستگیر شدی!</b>\n\n<blockquote>{html.escape(cfg['fail'])}</blockquote>\n\n"
                   f"جریمه: <b>{cfg['penalty']}٪</b> موجودی ({penalty:,} تومان)\nموجودی باقی‌مانده: <b>{new_balance:,} تومان</b>\n"
@@ -7708,8 +7922,30 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif act in ("task_daily", "task_weekly"):
         period = "daily" if act == "task_daily" else "weekly"
-        context.user_data["adm"] = {"act": "task_add", "period": period, "step": "title"}
-        await q.edit_message_text("متن تسک را بفرست تا برای همه کاربران اضافه شود.\nبرای لغو بنویس «لغو»." , reply_markup=CANCEL_KB)
+        context.user_data["adm"] = {"act": "task_add", "period": period, "step": "metric"}
+        _mk = list(TASK_METRICS.items())
+        _rows = [[btn(v[0], "primary", callback_data=f"ad:tm:{k}") for k, v in _mk[i:i + 2]] for i in range(0, len(_mk), 2)]
+        _rows.append([btn("✍️ تسک متنی (بدون جایزه)", callback_data="ad:tm:_text")])
+        _rows.append([btn("❌ لغو", "danger", callback_data="ad:cancel")])
+        await q.edit_message_text(
+            f"{'📋 تسک روزانه' if period == 'daily' else '📆 تسک هفتگی'} جدید\n\nمعیار تسک رو انتخاب کن؛ ربات خودش پیشرفت رو حساب می‌کنه و تو همون گپ جایزه می‌ده.\nسقف جایزه: {TASK_MAX_REWARD[period]:,} تومن",
+            reply_markup=InlineKeyboardMarkup(_rows))
+    elif act == "tm":   # انتخاب معیار تسک
+        st = context.user_data.get("adm") or {}
+        if st.get("act") != "task_add" or st.get("step") != "metric":
+            await q.edit_message_text("این مرحله منقضی شده؛ دوباره از پنل شروع کن.", reply_markup=admin_menu_kb(q.from_user.id)); return
+        if not has_perm(q.from_user.id, "task_daily" if st.get("period") == "daily" else "task_weekly"):
+            await q.edit_message_text("این دسترسی برات فعال نیست.", reply_markup=admin_menu_kb(q.from_user.id)); return
+        metric = parts[2] if len(parts) > 2 else ""
+        if metric == "_text":
+            st["step"] = "title"
+            await q.edit_message_text("متن تسک را بفرست تا برای همه کاربران اضافه شود (بدون جایزه؛ کاربر خودش تیک می‌زنه).\nبرای لغو بنویس «لغو».", reply_markup=CANCEL_KB); return
+        if metric not in TASK_METRICS:
+            return
+        st.update(step="target", metric=metric)
+        _label, _kind = TASK_METRICS[metric][0], TASK_METRICS[metric][1]
+        _ask = "مبلغ هدف به تومن (مثلا 5m یا 10 میلیون)" if _kind == "money" else "تعداد هدف (مثلا 10)"
+        await q.edit_message_text(f"معیار: {_label}\n\n{_ask} رو بفرست.\nبرای لغو بنویس «لغو».", reply_markup=CANCEL_KB)
     elif act == "toggle":
         BOT_ENABLED = not BOT_ENABLED
         await pool.execute(
@@ -7925,6 +8161,26 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
             unit = "تومن" if act.startswith("money") else "جق"
             await msg.reply_text(f"✅ {amt:,} {unit} {verb}. مقدار جدید: {new:,} {unit}", reply_markup=admin_menu_kb(user.id))
             return True
+    if act == 'task_add' and st['step'] == 'target':
+        n = parse_amount(msg.text or '')
+        _kind = TASK_METRICS.get(st.get('metric'), ('', 'count'))[1]
+        if n <= 0 or n > (100_000_000_000 if _kind == 'money' else 100_000):
+            await msg.reply_text('عدد معتبر بفرست.', reply_markup=CANCEL_KB); return True
+        st.update(step='reward', target=n)
+        await msg.reply_text(f"🎯 هدف: {n:,}\n\nجایزه چقدر باشه؟ (به تومن؛ مثلا 300 هزار یا 1m)\nسقف: {TASK_MAX_REWARD[st['period']]:,} تومن", reply_markup=CANCEL_KB)
+        return True
+    if act == 'task_add' and st['step'] == 'reward':
+        r = parse_amount(msg.text or '')
+        cap = TASK_MAX_REWARD[st['period']]
+        if r <= 0 or r > cap:
+            await msg.reply_text(f'جایزه باید بین ۱ تا {cap:,} تومن باشه.', reply_markup=CANCEL_KB); return True
+        title = task_auto_title(st['metric'], st['target'])
+        await pool.execute('INSERT INTO tasks(period,title,metric,target,reward) VALUES($1,$2,$3,$4,$5)', st['period'], title, st['metric'], st['target'], r)
+        task_cache_clear()
+        context.user_data.pop('adm', None)
+        period_label = 'روزانه' if st['period'] == 'daily' else 'هفتگی'
+        await msg.reply_text(f'✅ تسک {period_label} اضافه شد:\n«{title}»\n💰 جایزه: {r:,} تومن', reply_markup=admin_menu_kb(user.id))
+        return True
     if act == 'task_add' and st['step'] == 'title':
         title = (msg.text or '').strip()[:300]
         if not title:
@@ -8207,6 +8463,7 @@ async def gift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{energy_bar(new_en)} {_fmt_en(float(new_en) / ENERGY_MAX * 100)}٪</b>",
         parse_mode="HTML",
     )
+    await task_event(context.bot, q.message.chat_id, frm, "gift", name=q.from_user.full_name)
 
 
 async def marriage_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
@@ -8312,6 +8569,7 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     mn=RLM+random.choice(HUG_MONEY_LINES).format(m=f"{GIFT_MONEY_CE}{GIFT_MONEY_CE}",n=f"{money:,}")
     text=f"<b>{line}\n\n{en}\n\n{mn}</b>"
     await msg.reply_text(text,parse_mode="HTML")
+    await task_event(context.bot, msg.chat_id, user.id, "hug", name=user.full_name)
     if poach:
         await pool.execute("UPDATE users SET energy=GREATEST(energy-$1::double precision,0) WHERE user_id=$2",AFFAIR_ENERGY_PENALTY,user.id)
         await msg.reply_text(B(f"{html.escape(user.full_name)} تو حواست هست؟ {html.escape(target.full_name)} همسر داره؛ {_fmt_en(AFFAIR_ENERGY_PENALTY)} انرژی منفی می‌گیری تا دیگه رو زوجین لاو ندی 😤"),parse_mode="HTML")
