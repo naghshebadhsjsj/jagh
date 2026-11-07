@@ -6070,7 +6070,7 @@ def garage_car(uid: int, idx: int, color: int, owned_row, balance: int):
             ("رنگ اولیه", cname),
         ])
         text = f"{head}\n{tbl}\n" + B(f"👛 موجودی شما: {balance:,} تومن")
-        kb = InlineKeyboardMarkup([[btn(f"🛒 خرید ماشین ({fmt_toman(price)})", "success", callback_data=f"car:buy:{uid}:{idx}:0")], [btn("🔙 برگشت به گاراژ", callback_data=f"car:garage:{uid}:{idx}:0")]])
+        kb = InlineKeyboardMarkup([[btn(f"🛒 بخرش به {fmt_toman(price)}", "success", callback_data=f"car:buy:{uid}:{idx}:0")], [btn("🔙 برگشت به گاراژ", callback_data=f"car:garage:{uid}:{idx}:0")]])
     return text, kb
 
 
@@ -6157,7 +6157,7 @@ def _panel_keyboard(uid: int, idx: int, owned: dict):
     nxt = _next_car_idx(owned)
     if nxt < len(CARS):
         n = CARS[nxt]
-        rows.append([btn(f"⬆️ ماشین بعدی: {n[2]} {n[0]} · {fmt_short(n[3])}", "primary", callback_data=f"car:buy:{uid}:{nxt}:0")])
+        rows.append([btn(f"⬆️ ماشین بعدی: {n[2]} {n[0]} · {fmt_short(n[3])}", "primary", callback_data=f"car:view:{uid}:{nxt}:0")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -6176,6 +6176,16 @@ async def _send_car_panel(chat, context, uid: int, idx: int, reply_to: int | Non
     kb = _panel_keyboard(uid, idx, owned)
     comp: list[int] = []
     photo = await _car_photo(idx, color)
+    cap = car_panel_pre(idx, owned, bal)
+    if photo is not None and len(re.sub(r"<[^>]+>", "", cap)) <= 1000:
+        # همه‌چیز تو یه پیام: عکس + جدول (کپشن) + دکمه‌ها زیرش
+        try:
+            photo.seek(0)
+            await bot.send_photo(chat_id=chat, photo=photo, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            return
+        except Exception:
+            log.warning("car single-message panel failed, falling back", exc_info=True)
+            photo = await _car_photo(idx, color)
     if photo is not None:
         try:
             photo.seek(0)
@@ -6253,6 +6263,38 @@ async def _garage_show_car(q, context, uid: int, idx: int, color: int = 0):
                 await context.bot.send_photo(q.message.chat_id, photo=photo, caption=text, parse_mode="HTML", reply_markup=kb)
             else:
                 await context.bot.send_message(q.message.chat_id, text=text, parse_mode="HTML", reply_markup=kb)
+
+async def _swap_photo(q, context, idx: int, color: int, text: str, kb):
+    """عکس ماشین (با رنگ داده‌شده) و کپشن پیام فعلی رو عوض می‌کنه؛ اگه نشد پیام جدید می‌فرسته."""
+    photo = await _car_photo(idx, color)
+    if photo is not None:
+        try:
+            await q.edit_message_media(InputMediaPhoto(photo, caption=text, parse_mode="HTML"), reply_markup=kb)
+            return
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                return
+            log.warning("swap photo failed, resending", exc_info=True)
+        photo = await _car_photo(idx, color)
+    try:
+        await q.message.delete()
+    except Exception:
+        pass
+    if photo is not None:
+        await context.bot.send_photo(q.message.chat_id, photo=photo, caption=text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await send_html(context.bot, q.message.chat_id, text, reply_markup=kb)
+
+
+def _color_list_kb(uid: int, idx: int):
+    colors = [[btn(f"{ico} {name}", "primary", callback_data=f"car:colorask:{uid}:{idx}:{c}")] for c, (name, ico, _rgb) in enumerate(CAR_COLORS)]
+    colors.append([btn("🔙 برگشت", callback_data=f"car:refresh:{uid}:{idx}:0")])
+    return InlineKeyboardMarkup(colors)
+
+
+def _color_list_text() -> str:
+    return B(f"🎨 انتخاب رنگ ماشین\nهزینه هر رنگ: {fmt_toman(CAR_COLOR_PRICE)}\nرنگ موردنظر را انتخاب کن تا اول ببینی:")
+
 
 async def _show_upgrade_menu(q, uid: int, idx: int):
     owned = await _owned_cars(uid)
@@ -6334,10 +6376,17 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer(f"ارتقای {label} انجام شد!")
         await _show_upgrade_menu(q, uid, idx)
     elif act == "colors":
-        colors = [[btn(f"{ico} {name}", "primary", callback_data=f"car:colorask:{uid}:{idx}:{c}")] for c, (name, ico, _rgb) in enumerate(CAR_COLORS)]
-        colors.append([btn("🔙 برگشت", callback_data=f"car:refresh:{uid}:{idx}:0")])
         await q.answer()
-        await _edit_cap(q, B(f"🎨 انتخاب رنگ ماشین\nهزینه هر رنگ: {fmt_toman(CAR_COLOR_PRICE)}\nرنگ موردنظر را انتخاب کن:"), InlineKeyboardMarkup(colors))
+        cur = (await _owned_cars(uid)).get(idx)
+        if cur:
+            await _swap_photo(q, context, idx, int(cur["color"]), _color_list_text(), _color_list_kb(uid, idx))
+        else:
+            await _edit_cap(q, _color_list_text(), _color_list_kb(uid, idx))
+    elif act == "colorcancel":
+        await q.answer("برگشت به رنگ قبلی")
+        cur = (await _owned_cars(uid)).get(idx)
+        if cur:
+            await _swap_photo(q, context, idx, int(cur["color"]), _color_list_text(), _color_list_kb(uid, idx))
     elif act == "colorask":
         try: color = int(p[4])
         except (IndexError, ValueError): await q.answer(); return
@@ -6346,9 +6395,10 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur = (await _owned_cars(uid)).get(idx)
         if cur and int(cur["color"]) == color:
             await q.answer(f"ماشینت همین الان {name} هست.", show_alert=True); return
-        kb = InlineKeyboardMarkup([[btn("✅ تأیید و پرداخت ۲۰ میلیون", "success", callback_data=f"car:colorbuy:{uid}:{idx}:{color}")], [btn("❌ انصراف", "danger", callback_data=f"car:colors:{uid}:{idx}:0")]])
+        kb = InlineKeyboardMarkup([[btn("✅ تأیید و پرداخت ۲۰ میلیون", "success", callback_data=f"car:colorbuy:{uid}:{idx}:{color}")], [btn("❌ انصراف (برگشت به رنگ قبلی)", "danger", callback_data=f"car:colorcancel:{uid}:{idx}:0")]])
         await q.answer()
-        await _edit_cap(q, B(f"🎨 تغییر رنگ به {name}\n💰 هزینه: {fmt_toman(CAR_COLOR_PRICE)}\nآیا خرید این رنگ را تأیید می‌کنی؟"), kb)
+        # اول رنگ جدید روی ماشین اعمال و نشون داده میشه؛ تا تایید نکنه چیزی ذخیره/پرداخت نمیشه
+        await _swap_photo(q, context, idx, color, B(f"👀 پیش‌نمایش رنگ {name}\n💰 هزینه: {fmt_toman(CAR_COLOR_PRICE)}\nاگه خوشت اومد تأیید کن، وگرنه انصراف بزن تا رنگ قبلی برگرده."), kb)
     elif act == "colorbuy":
         try: color = int(p[4])
         except (IndexError, ValueError): await q.answer(); return
@@ -6529,6 +6579,59 @@ ROBBERIES = {
     "shop": {"name": "سوپری", "cooldown": 45*60, "payout": (850_000, 1_000_000), "chance": 0.36, "penalty": 10, "lock": 90*60, "bail": 1_500_000, "fail": "در سوپری در حال جق زدن بودی که صاحب مغازه پلیس رو خبر کرد و گیر افتادی!"},
     "bank": {"name": "بانک مرکزی", "cooldown": 60*60, "payout": (1_000_000, 1_500_000), "chance": 0.18, "penalty": 15, "lock": 120*60, "bail": 2_000_000, "fail": "آژیرهای بانک مرکزی فعال شد؛ نیروهای ویژه محاصره‌ات کردن و دستگیرت کردن!"},
 }
+# سه سطح ریسک برای هر سرقت: کم‌ریسک (درآمد کم)، متوسط، پرریسک (درآمد بالا)
+# chance: "low" = شانس موفقیت پایه + نصفِ فاصله تا ۱۰۰٪ (ولی هیچ‌وقت صددرصد نیست!)، "high" = ۶۰٪ شانس پایه
+ROB_TIERS = {
+    "low":  {"label": "کم‌ریسک", "dot": "🟢", "style": "success", "pay": 0.55, "penalty": 0.6, "lock": 0.6, "bail": 0.6, "cd": 0.7, "trace": 8,  "hint": "شانس موفقیت بالا، غنیمت کم"},
+    "mid":  {"label": "متوسط",   "dot": "🟡", "style": "primary", "pay": 1.0,  "penalty": 1.0, "lock": 1.0, "bail": 1.0, "cd": 1.0, "trace": 12, "hint": "ریسک و درآمد معمولی"},
+    "high": {"label": "پرریسک",  "dot": "🔴", "style": "danger",  "pay": 1.8,  "penalty": 1.5, "lock": 1.5, "bail": 1.5, "cd": 1.3, "trace": 18, "hint": "غنیمت خفن، ولی خیلی راحت گیر میفتی"},
+}
+
+# متن هر عملیات: (اسم عملیات، متن موفقیت، متن شکست)
+ROB_TEXTS = {
+    "club": {
+        "low":  ("کیف‌قاپی از پیست رقص", "وسط شلوغیِ پیست رقص، ماهرانه یه کیف رو قاپیدی و قبل از اینکه DJ بیس رو بندازه، تو تاریکی گم شدی! 🕺", "وسط کیف‌قاپی، یکی از بادیگاردها مچ دستتو گرفت و بین موزیک و نور قرمز، صدای دستبند اومد! 🚨"),
+        "mid":  ("خالی‌کردن صندوق بار", "با لباس گارسون رفتی پشت بار، صندوق رو خالی کردی و با یه لبخند از در پشتی رفتی بیرون! 🍸", "وسط شمردن اسکناس‌ها، چراغ‌ها روشن شد و پلیس‌های لباس‌شخصی دورتو گرفتن!"),
+        "high": ("سرقت از گاوصندوق VIP", "گاوصندوق اتاق VIP رو با دست خالی باز کردی و قبل از اینکه آژیر کلاب بخونه، با کیسه‌ی پول ناپدید شدی! 💎🔥", "گاوصندوق VIP دوربین مخفی داشت! آژیر کلاب بلند شد، درها قفل شد و تیم ویژه دستگیرت کرد!"),
+    },
+    "cinema": {
+        "low":  ("ترکوندن گیشه‌ی بلیط", "وقتی همه محو سکانس آخر فیلم بودن، آروم پولای گیشه رو جمع کردی و قبل از پایان فیلم رفتی بیرون! 🍿", "فروشنده‌ی گیشه یهو برگشت و جیب پر از پولت رو دید؛ دقیقاً وسط صحنه‌ی هیجانی فیلم گیر افتادی!"),
+        "mid":  ("دزدی از بوفه و صندوق", "تو تاریکی سالن، بوفه و صندوق رو جارو کردی و فقط یه بسته پاپ‌کورن جا گذاشتی! 🎬", "نور پروژکتور افتاد روی صورتت؛ تمام سالن برگشتن سمتت و نگهبان‌ها دستگیرت کردن!"),
+        "high": ("سرقت از اتاق پروژکتور و گاوصندوق مدیر", "از راهروی پشتی رفتی بالا، گاوصندوق مدیر رو خالی کردی و قبل از تیتراژ پایانی غیبت زد! 🎞️💰", "آژیر سالن وسط اکران فعال شد؛ سالن پر از نور شد و صدای پلیس‌ها از بلندگوها پیچید!"),
+    },
+    "shop": {
+        "low":  ("کش‌رفتن از پیشخون", "تا فروشنده برگرده، چند تا اسکناس از پیشخون ناپدید شد و تو با یه آدامس تو دهنت از مغازه رفتی بیرون! 🍬", "فروشنده‌ی پیر چشم‌غره رفت، مچتو گرفت و تا پلیس برسه جلوی در مغازه نگهت داشت!"),
+        "mid":  ("تخلیه‌ی صندوق مغازه", "حواس صاحب مغازه رو با یه سوال الکی پرت کردی و صندوق رو خالی کردی! 🛒", "صاحب مغازه با چماق از پشت اومد و پلیس رو خبر کرد؛ گیر افتادی!"),
+        "high": ("سرقت مسلحانه‌ی سوپری", "کلاه‌کپ رو کشیدی روی صورتت، با یه نگاه سرد صاحب مغازه رو ساکت کردی و صندوق و گاوصندوق رو جارو کردی! 😎🔫", "دوربین مداربسته همه‌چیز رو ضبط کرد و دو دقیقه بعد ماشین پلیس جلوی در بود!"),
+    },
+    "bank": {
+        "low":  ("حمله به باجه‌ی خودپرداز", "با یه دستگاه کوچیک، خودپرداز کنار بانک رو خالی کردی و قبل از اینکه امنیت بفهمه، محو شدی! 🏧", "خودپرداز آژیر کشید و دوربین‌های بانک مرکزی صورتت رو ثبت کردن؛ پلیس تا چند دقیقه بعد رسید!"),
+        "mid":  ("نفوذ به صندوق داخلی بانک", "با کارت جعلی رفتی تو صندوق داخلی، چند کیف پول جمع کردی و بی‌سروصدا برگشتی! 🏦", "کد دسترسی جعلی لو رفت؛ درها بسته شد و نیروهای امنیتی محاصره‌ات کردن!"),
+        "high": ("سرقت از طاق بانک مرکزی", "طاق بانک مرکزی رو با نقشه‌ی بی‌نقصت باز کردی، کیسه‌ها رو پر کردی و از کانال فاضلاب فرار کردی؛ از فردا اسم تو تو اخباره! 🏆💎", "آژیرهای بانک مرکزی بلند شد؛ نیروهای ویژه ساختمون رو محاصره کردن و فراری برات نموند!"),
+    },
+}
+
+
+def tier_cfg(kind: str, tier: str) -> dict:
+    base = ROBBERIES[kind]
+    t = ROB_TIERS.get(tier) or ROB_TIERS["mid"]
+    tier = tier if tier in ROB_TIERS else "mid"
+    c = dict(base)
+    if tier == "low":
+        c["chance"] = min(0.92, base["chance"] + (1 - base["chance"]) * 0.5)
+    elif tier == "high":
+        c["chance"] = base["chance"] * 0.6
+    c["payout"] = (int(base["payout"][0] * t["pay"]), int(base["payout"][1] * t["pay"]))
+    c["penalty"] = min(30, max(1, round(base["penalty"] * t["penalty"])))
+    c["lock"] = int(base["lock"] * t["lock"])
+    c["bail"] = int(base["bail"] * t["bail"])
+    c["cooldown"] = int(base["cooldown"] * t["cd"])
+    c["trace_step"] = t["trace"]
+    c["tier"] = tier
+    c["op"], c["win_text"], c["fail"] = ROB_TEXTS[kind][tier]
+    return c
+
+
 ROBBERY_TRACE_STEP = 12
 ROBBERY_TRACE_LIMIT = 100
 ROBBERY_TRACE_CLEAN_COST = 1_300_000
@@ -6547,10 +6650,10 @@ def _duration_fa(seconds: int) -> str:
 
 def robbery_keyboard(uid: int, trace_available: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [btn("سرقت از کلاب | ۲۰۰ تا ۵۰۰ هزار", "primary", icon=EID_SWORDS, callback_data=f"rb:do:{uid}:club")],
-        [btn("سرقت از سینما | ۵۰۰ تا ۸۵۰ هزار", "primary", icon=EID_TROPHY, callback_data=f"rb:do:{uid}:cinema")],
-        [btn("سرقت از سوپری | ۸۵۰ هزار تا ۱ میلیون", "primary", icon=EID_MONEY, callback_data=f"rb:do:{uid}:shop")],
-        [btn("سرقت از بانک مرکزی | ۱ تا ۱.۵ میلیون", "danger", icon=EID_SWORDS, callback_data=f"rb:do:{uid}:bank")],
+        [btn("سرقت از کلاب", "primary", icon=EID_SWORDS, callback_data=f"rb:pick:{uid}:club")],
+        [btn("سرقت از سینما", "primary", icon=EID_TROPHY, callback_data=f"rb:pick:{uid}:cinema")],
+        [btn("سرقت از سوپری", "primary", icon=EID_MONEY, callback_data=f"rb:pick:{uid}:shop")],
+        [btn("سرقت از بانک مرکزی", "danger", icon=EID_SWORDS, callback_data=f"rb:pick:{uid}:bank")],
     ]
     if trace_available:
         rows.append([btn(f"ردگم‌کن | {ROBBERY_TRACE_CLEAN_COST:,} تومان", "danger", icon=EID_SWORDS, callback_data=f"rb:trace:{uid}:club")])
@@ -6564,7 +6667,7 @@ async def show_robbery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await pool.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", user.id)
     profile = await pool.fetchrow("SELECT trace, cooldown_until, arrest_until, trace_until FROM robbery_profile WHERE user_id=$1", user.id)
     now = time.time()
-    text = (f"{SWORDS_CE} <b>بازار خلاف</b>\n\nیکی از سرقت‌ها رو انتخاب کن؛ هر بار اقدام، ۱۲٪ به رد خلاف اضافه می‌کنه.\n"
+    text = (f"{SWORDS_CE} <b>بازار خلاف</b>\n\nیکی از سرقت‌ها رو انتخاب کن، بعد سطح ریسکش رو (کم‌ریسک / متوسط / پرریسک) خودت تعیین می‌کنی؛ هر اقدام به رد خلاف اضافه می‌کنه.\n"
             f"{HG_CE} رد خلاف: <b>{profile['trace']}٪</b> از ۱۰۰٪\n"
             "بعد از هر عملیات، تایمر مشترک همه‌ی سرقت‌ها فعال می‌شه. اگر دستگیر یا ردت کامل بشه، تا آزادی یا پاک‌کردن رد نمی‌تونی خلاف کنی.")
     if profile['cooldown_until'] > now:
@@ -6578,15 +6681,27 @@ async def show_robbery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; parts = q.data.split(":")
-    if len(parts) != 4:
+    if len(parts) not in (4, 5):
         await q.answer("درخواست نامعتبره.", show_alert=True); return
     action, uid_s, kind = parts[1], parts[2], parts[3]
+    tier = parts[4] if len(parts) == 5 and parts[4] in ROB_TIERS else "mid"
     try: owner = int(uid_s)
     except ValueError: await q.answer("درخواست نامعتبره.", show_alert=True); return
     if q.from_user.id != owner:
         await q.answer("این منوی خلاف برای شخص دیگه‌ایه!", show_alert=True); return
-    cfg = ROBBERIES.get(kind)
-    if not cfg: await q.answer("این سرقت وجود نداره.", show_alert=True); return
+    if kind not in ROBBERIES: await q.answer("این سرقت وجود نداره.", show_alert=True); return
+    cfg = tier_cfg(kind, tier)
+    if action == "pick":
+        await q.answer()
+        lines = [f"{SWORDS_CE} <b>سرقت از {ROBBERIES[kind]['name']}</b>", "", "چطوری می‌خوای بزنی؟ هرچی ریسک بیشتر، غنیمت بیشتر... ولی شانس کار دستته 🎲", ""]
+        rows = []
+        for tk, t in ROB_TIERS.items():
+            c = tier_cfg(kind, tk)
+            lines.append(f"{t['dot']} <b>{t['label']} — {c['op']}</b>\n    💰 {fmt_short(c['payout'][0])} تا {fmt_short(c['payout'][1])} تومان • {t['hint']}")
+            rows.append([btn(f"{t['dot']} {t['label']} • {c['op']}", t["style"], callback_data=f"rb:do:{owner}:{kind}:{tk}")])
+        lines += ["", "⚠️ حتی کم‌ریسک هم صددرصد امن نیست؛ ممکنه یهو گیر بیفتی!"]
+        rows.append([btn("بازگشت به خلاف", "primary", icon=EID_BACK, callback_data=f"rb:menu:{owner}:{kind}")])
+        await edit_html(q, B("\n".join(lines)), InlineKeyboardMarkup(rows)); return
     if action == "menu":
         prof = await pool.fetchrow("SELECT trace_until FROM robbery_profile WHERE user_id=$1", owner)
         await q.answer(); await edit_html(q, B(f"{SWORDS_CE} <b>بازار خلاف</b>\nیکی از عملیات‌ها رو انتخاب کن:"), robbery_keyboard(owner, bool(prof and prof['trace_until'] > time.time()))); return
@@ -6629,7 +6744,7 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _en = await conn.fetchval("SELECT energy FROM users WHERE user_id=$1", owner)
                 _chance = cfg['chance'] * (ROB_LOW_MULT if float(_en or 0) < ENERGY_LOW else 1)  # انرژی کم = بیشتر گیر میفته
                 success = random.random() < _chance
-                new_trace = min(ROBBERY_TRACE_LIMIT, profile['trace'] + ROBBERY_TRACE_STEP)
+                new_trace = min(ROBBERY_TRACE_LIMIT, profile['trace'] + cfg['trace_step'])
                 trace_until = now + ROBBERY_TRACE_LOCK if new_trace >= ROBBERY_TRACE_LIMIT else 0
                 arrest_until = now + cfg['lock'] if not success else 0
                 await conn.execute("UPDATE robbery_profile SET trace=$1, cooldown_until=$2, arrest_until=GREATEST(arrest_until,$3), trace_until=GREATEST(trace_until,$4) WHERE user_id=$5",
@@ -6654,7 +6769,7 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"موجودی جدید: <b>{new_balance:,} تومان</b>\nرد خلاف و تایمر عمومی همچنان پابرجاست.")
         await edit_html(q, B(text), robbery_keyboard(owner)); return
     if success:
-        result = (f"{TROPHY_CE} <b>عملیات با موفقیت انجام شد!</b>\n\nبا یک نقشه‌ی حساب‌شده از سرقت {cfg['name']} فرار کردی و غنیمت رو برداشتی!\n"
+        result = (f"{TROPHY_CE} <b>عملیات {html.escape(cfg['op'])} موفق بود!</b>\n\n<blockquote>{html.escape(cfg['win_text'])}</blockquote>\n\n"
                   f"{MONEY_CE} غنیمت: <b>+{payout:,} تومان</b>\nموجودی جدید: <b>{new_balance:,} تومان</b>\n"
                   f"{HG_CE} قفل مشترک تمام خلاف‌ها: <b>{_duration_fa(cfg['cooldown'])}</b>\nرد خلاف: <b>{new_trace}٪</b>")
         if new_trace >= ROBBERY_TRACE_LIMIT:
@@ -6662,10 +6777,10 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("عملیات موفق بود؛ جایزه به حسابت نشست.")
         await edit_html(q, B(result), robbery_keyboard(owner, new_trace >= ROBBERY_TRACE_LIMIT))
     else:
-        result = (f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji> <b>عملیات شکست خورد؛ دستگیر شدی!</b>\n\n<blockquote>{html.escape(cfg['fail'])}</blockquote>\n\n"
+        result = (f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji> <b>عملیات {html.escape(cfg['op'])} لو رفت؛ دستگیر شدی!</b>\n\n<blockquote>{html.escape(cfg['fail'])}</blockquote>\n\n"
                   f"جریمه: <b>{cfg['penalty']}٪</b> موجودی ({penalty:,} تومان)\nموجودی باقی‌مانده: <b>{new_balance:,} تومان</b>\n"
                   f"مدت بازداشت: <b>{_duration_fa(cfg['lock'])}</b>\nوثیقه آزادی: <b>{cfg['bail']:,} تومان</b>\nرد خلاف: <b>{new_trace}٪</b>")
-        rows = [[btn(f"پرداخت وثیقه ({cfg['bail']:,}) و آزادی", "success", icon=EID_MONEY, callback_data=f"rb:bail:{owner}:{kind}")]]
+        rows = [[btn(f"پرداخت وثیقه ({cfg['bail']:,}) و آزادی", "success", icon=EID_MONEY, callback_data=f"rb:bail:{owner}:{kind}:{tier}")]]
         if new_trace >= ROBBERY_TRACE_LIMIT:
             rows.append([btn(f"ردگم‌کن ({ROBBERY_TRACE_CLEAN_COST:,} تومان)", "danger", icon=EID_SWORDS, callback_data=f"rb:trace:{owner}:{kind}")])
             result += f"\n\nردت به ۱۰۰٪ رسیده؛ ۲ ساعت از همه‌ی خلاف‌ها محرومی یا با ردگم‌کن ۱٫۳ میلیونی، ۱۲٪ از رد رو پاک کن."
