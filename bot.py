@@ -486,6 +486,7 @@ async def init_db(app: Application):
             except Exception:
                 log.exception("bad %s in db", r["key"])
         await c.execute("CREATE TABLE IF NOT EXISTS support_staff (user_id BIGINT PRIMARY KEY, perms TEXT NOT NULL DEFAULT '')")
+        await c.execute("CREATE TABLE IF NOT EXISTS transfer_daily (user_id BIGINT NOT NULL, day TEXT NOT NULL, total BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day))")
         await c.execute("CREATE TABLE IF NOT EXISTS support_manage (manager_id BIGINT NOT NULL, target_id BIGINT NOT NULL, PRIMARY KEY(manager_id, target_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS referrals (referred_id BIGINT PRIMARY KEY, referrer_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, rewarded_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_check DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals (referrer_id)")
@@ -508,6 +509,7 @@ async def init_db(app: Application):
         STAFF_MANAGE.clear()
         for r in await c.fetch("SELECT manager_id, target_id FROM support_manage"):
             STAFF_MANAGE.setdefault(int(r["manager_id"]), set()).add(int(r["target_id"]))
+    await _event_load()
     log.info("database ready")
 
 
@@ -1814,7 +1816,7 @@ def _social_media_input(b, uid, kind):
 async def _social_me(qs, user):
     uid = int(user["id"])
     p = await pool.fetchrow("SELECT username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
-    return _j({"id":uid,"name":user.get("first_name") or "کاربر","is_support":_social_staff(user),"premium_emoji":_social_emoji_staff(user),"profile":dict(p) if p else None})
+    return _j({"id":uid,"name":user.get("first_name") or "کاربر","is_support":_social_staff(user) and not is_managed_support(uid),"premium_emoji":_social_emoji_staff(user),"profile":dict(p) if p else None})
 
 async def _social_feed(qs, user):
     limit = _int(qs.get("limit"), 30, 1, 60)
@@ -1951,7 +1953,7 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     social = path.startswith("/api/social/")
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
-    if not social and not has_perm(int(user["id"]), "panel"):
+    if not social and (not has_perm(int(user["id"]), "panel") or is_managed_support(int(user["id"]))):
         return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
     if pool is None:
         return _j({"error": "دیتابیس هنوز آماده نیست"}, 503)
@@ -2040,6 +2042,7 @@ async def startup(app: Application):
         await init_db(app)
         app.bot_data["car_task"] = asyncio.create_task(car_profit_loop())
         app.bot_data["energy_task"] = asyncio.create_task(energy_decay_loop())
+        app.bot_data["bank_interest_task"] = asyncio.create_task(bank_interest_loop())
         try:
             from telegram import MenuButtonDefault
             await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
@@ -2212,6 +2215,164 @@ BANK_EMOJIS = ("5445355530111437729", "5445353829304387411", "544312728389840535
 BANK_ICON_ID = "5332455502917949981"
 BANK_CE = "".join(f'<tg-emoji emoji-id="{eid}">🏦</tg-emoji>' for eid in BANK_EMOJIS)
 BANK_FEE = 5_000
+# ───── ایونت درآمد: پشتیبان می‌نویسه «ایونت درآمد 5 5دقیقه» ← تو اون مدت حقوق شیفت (کار) و پول جق ×۵ میشه ─────
+INCOME_EVENT = {"mult": 1.0, "end": 0.0}
+EVENT_CE = '<tg-emoji emoji-id="5875483791702630534">🎉</tg-emoji><tg-emoji emoji-id="5875065225664798722">🔥</tg-emoji>'
+EVENT_MAX_SECONDS = 24 * 3600
+EVENT_MAX_MULT = 100
+
+
+def income_mult() -> float:
+    return float(INCOME_EVENT["mult"]) if INCOME_EVENT["end"] > time.time() else 1.0
+
+
+def event_banner() -> str:
+    """متن زیر پیام کار/جق وقتی ایونت فعاله (وقتی تموم شد خالیه و همه‌چی مثل قبل)."""
+    left = INCOME_EVENT["end"] - time.time()
+    if left <= 0 or INCOME_EVENT["mult"] <= 1:
+        return ""
+    return f"\n\n{EVENT_CE} ایونت درآمد ×{INCOME_EVENT['mult']:g} شروع شده! {_duration_fa(int(left) + 1)} دیگه مونده تا تموم شه، بدو"
+
+
+async def _event_save():
+    await pool.execute("INSERT INTO bot_settings (key, value) VALUES ('income_event', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                       f"{INCOME_EVENT['mult']}|{INCOME_EVENT['end']}")
+
+
+async def _event_load():
+    v = await pool.fetchval("SELECT value FROM bot_settings WHERE key = 'income_event'")
+    try:
+        m, e = (v or "").split("|")
+        INCOME_EVENT["mult"], INCOME_EVENT["end"] = float(m), float(e)
+    except Exception:
+        pass
+
+
+def _ev_e(eid: str, fb: str) -> str:
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
+
+
+def event_announce_html(mult: float, dur: int) -> str:
+    e1, e2 = _ev_e("5875483791702630534", "🎉"), _ev_e("5875065225664798722", "🔥")
+    line = "━━━━━━━━━━━━━━"
+    return (
+        f"<b>{e1}{e2} ایونت درآمد شروع شد! {e2}{e1}\n{line}\n"
+        f"{e2} ضریب درآمد: ×{mult:g}\n"
+        f"{ce('jagh', 6, '⏳')} مدت: {_duration_fa(dur)}\n{line}\n"
+        f"{_ev_e(SHIFT_EMOJI_START, '💼')} با «کار» کردن و {ce('jagh', 1, '🤛')} «جق» زدن تو این مدت\n"
+        f"{GIFT_MONEY_CE}{GIFT_MONEY_CE} {mult:g} برابر پول می‌گیری!\n\n"
+        f"{e1} بدو که وقت کمه! {e1}</b>"
+    )
+
+
+async def _event_announce(bot, text: str, starter_id: int):
+    """اعلام شروع ایونت به همه‌ی گروه‌ها (اگه ایموجی پرمیوم قبول نشد، بدونش دوباره می‌فرسته)."""
+    ok = fail = 0
+    for cid in [r["chat_id"] for r in await pool.fetch("SELECT chat_id FROM chats")]:
+        sent = False
+        for attempt in range(3):
+            try:
+                try:
+                    await bot.send_message(chat_id=cid, text=text, parse_mode="HTML")
+                except BadRequest as e:
+                    if "chat not found" in str(e).lower():
+                        raise
+                    await bot.send_message(chat_id=cid, text=_strip_te(text), parse_mode="HTML")
+                sent = True
+                break
+            except RetryAfter as e:
+                await asyncio.sleep(e.retry_after + 1)
+            except (Forbidden, BadRequest) as e:
+                if isinstance(e, Forbidden) or "chat not found" in str(e).lower():
+                    await pool.execute("DELETE FROM chats WHERE chat_id = $1", cid)
+                    KNOWN_CHATS.discard(cid)
+                break
+            except Exception:
+                break
+        ok += sent
+        fail += not sent
+        await asyncio.sleep(0.06)
+    try:
+        await bot.send_message(starter_id, f"📣 اعلام ایونت به {ok:,} گروه رفت" + (f" ({fail:,} ناموفق)." if fail else "."))
+    except Exception:
+        pass
+
+
+async def event_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """فقط پشتیبان‌ها: «ایونت درآمد 5 5دقیقه» (ضریب، مدت) | «پایان ایونت»."""
+    msg, user = update.effective_message, update.effective_user
+    t = norm_word(text).translate(_DIG)
+    compact = t.replace(" ", "")
+    if not (compact.startswith("ایونت") or compact.startswith("پایانایونت")):
+        return False
+    if not has_perm(user.id, "panel"):
+        return False
+    if compact.startswith("پایانایونت") or compact.startswith("ایونتپایان") or compact.startswith("ایونتتمام"):
+        INCOME_EVENT["end"] = 0.0
+        await _event_save()
+        await msg.reply_text(B(f"{EVENT_CE} ایونت درآمد تموم شد؛ همه‌چی برگشت به حالت عادی."), parse_mode="HTML")
+        return True
+    m = re.match(r"^ایونت\s*(?:درآمد|درامد)\s*(.*)$", t)
+    usage = ("مثال: <code>ایونت درآمد 5 5دقیقه</code> (ضریب ۵ برابر برای ۵ دقیقه)\n"
+             f"حداکثر ضریب {EVENT_MAX_MULT} و حداکثر مدت ۲۴ ساعت. برای تموم کردن: <code>پایان ایونت</code>")
+    if not m:
+        cur = event_banner().strip()
+        await msg.reply_text(B((cur + "\n\n" if cur else "الان ایونتی فعال نیست.\n\n") + usage), parse_mode="HTML")
+        return True
+    mm = re.match(r"^[x×*]?\s*(\d+(?:\.\d+)?)\s*(?:برابر|x|×)?\s*(.+)$", m.group(1).strip())
+    dur = parse_duration(mm.group(2).strip()) if mm else None
+    mult = float(mm.group(1)) if mm else 0.0
+    if not mm or dur is None or dur <= 0 or dur > EVENT_MAX_SECONDS or not (1 < mult <= EVENT_MAX_MULT):
+        await msg.reply_text(B("ایونت رو نفهمیدم.\n" + usage), parse_mode="HTML")
+        return True
+    INCOME_EVENT["mult"], INCOME_EVENT["end"] = mult, time.time() + dur
+    await _event_save()
+    if msg.chat.type == "private":   # تو گروه خود اعلامیه جواب دستوره؛ تو پی‌وی یه تایید کوتاه میدیم
+        await msg.reply_text(B(f"{EVENT_CE} ایونت ثبت شد؛ دارم به همه‌ی گروه‌ها اعلام می‌کنم…"), parse_mode="HTML")
+    task = asyncio.create_task(_event_announce(context.bot, event_announce_html(mult, int(dur)), user.id))
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return True
+
+
+BANK_INTEREST_RATE_PCT = 3          # درصد سود
+BANK_INTEREST_EVERY = 12 * 3600     # هر چند ثانیه
+BANK_INTEREST_NEXT = 0.0            # زمان سود بعدی (توسط حلقه‌ی سود ست میشه)
+
+
+def bank_interest_note() -> str:
+    left = BANK_INTEREST_NEXT - time.time()
+    tail = f" • سود بعدی: {_duration_fa(int(left) + 1)} دیگه" if BANK_INTEREST_NEXT and left > 0 else ""
+    return f"سود بانک: <b>{BANK_INTEREST_RATE_PCT}٪ هر ۱۲ ساعت</b> روی موجودی بانک{tail}"
+
+
+async def bank_interest_loop():
+    """هر ۱۲ ساعت ۳٪ سود روی موجودی حساب بانکی همه. زمان آخرین سود تو دیتابیس می‌مونه تا با ری‌استارت دوباره/جا نندازه."""
+    global BANK_INTEREST_NEXT
+    key = "bank_interest_last"
+    while True:
+        try:
+            now = time.time()
+            v = await pool.fetchval("SELECT value FROM bot_settings WHERE key = $1", key)
+            last = float(v) if v else now
+            if not v:
+                await pool.execute("INSERT INTO bot_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING", key, str(last))
+            periods = int((now - last) // BANK_INTEREST_EVERY)
+            if periods > 0:
+                async with pool.acquire() as c:
+                    async with c.transaction():
+                        for _ in range(min(periods, 28)):
+                            await c.execute("UPDATE users SET bank_balance = bank_balance + (bank_balance * $1::bigint) / 100 WHERE bank_balance > 0", BANK_INTEREST_RATE_PCT)
+                        last += periods * BANK_INTEREST_EVERY
+                        await c.execute("UPDATE bot_settings SET value = $2 WHERE key = $1", key, str(last))
+                log.info("bank interest applied x%s", periods)
+            BANK_INTEREST_NEXT = last + BANK_INTEREST_EVERY
+            await asyncio.sleep(max(5.0, min(BANK_INTEREST_NEXT - time.time() + 1, 3600)))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("bank interest loop failed")
+            await asyncio.sleep(60)
 
 HOUSES = {
     "room": {"name": "اتاق اجاره‌ای", "price": 500_000, "income": 30_000},
@@ -2225,15 +2386,25 @@ HOUSE_UPGRADE_COSTS = (5_000_000, 15_000_000, 40_000_000, 100_000_000, 250_000_0
 HOUSE_MAX_LEVEL = len(HOUSE_UPGRADE_COSTS)
 
 _FA_DIGITS_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_MONEY_ALL_WORDS = {"همه", "همش", "همهاش", "همه‌اش", "کل", "تمام", "تمامش", "all", "max"}
+
+
 def parse_money_amount(raw: str) -> int | None:
-    value = raw.translate(_FA_DIGITS_MAP).strip().lower().replace(",", "").replace("٬", "")
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(m|میلیون|میلیارد|k|هزار)?", value)
+    value = raw.translate(_FA_DIGITS_MAP).strip().lower()
+    value = value.replace("ي", "ی").replace("ك", "ک")
+    value = value.replace(",", "").replace("٬", "").replace("،", "").replace("٫", ".").replace("/", ".")
+    value = "".join(ch for ch in value if ch not in "\u200c\u200d\u200e\u200f")
+    m = re.search(r"(\d{1,3}(?:\.\d{3})+|\d+(?:\.\d+)?)\s*(میلیارد|میلیون|هزار|[bmk])?", value)
     if not m:
         return None
-    number = float(m.group(1)); unit = m.group(2) or ""
-    multiplier = 1_000_000_000 if unit == "میلیارد" else 1_000_000 if unit in ("m", "میلیون") else 1_000 if unit in ("k", "هزار") else 1
-    amount = int(number * multiplier)
+    num, unit = m.group(1), m.group(2) or ""
+    if not unit and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):   # 5.000.000 → نقطه‌ها جداکننده‌ی هزارگانِ
+        num = num.replace(".", "")
+    number = float(num)
+    multiplier = 1_000_000_000 if unit in ("میلیارد", "b") else 1_000_000 if unit in ("m", "میلیون") else 1_000 if unit in ("k", "هزار") else 1
+    amount = int(round(number * multiplier))
     return amount if amount > 0 else None
+
 
 async def show_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -2244,7 +2415,8 @@ async def show_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{ce('wallet',1,'👛')} پول نقد داخل جیب: <b>{pocket:,} تومان</b>\n"
             f"{BANK_CE} موجودی حساب بانکی: <b>{bank:,} تومان</b>\n"
             f"{MONEY_CE} مجموع دارایی: <b>{pocket+bank:,} تومان</b>\n\n"
-            f"کارمزد واریز: <b>{BANK_FEE:,} تومان</b> | برداشت بدون کارمزد")
+            f"کارمزد واریز: <b>{BANK_FEE:,} تومان</b> | برداشت بدون کارمزد\n"
+            f"{bank_interest_note()}")
     kb=InlineKeyboardMarkup([[btn("واریز", "success", callback_data=f"bk:dep:{user.id}"), btn("برداشت", "primary", callback_data=f"bk:wd:{user.id}")]])
     await update.effective_message.reply_text(B(text), parse_mode="HTML", reply_markup=kb)
 
@@ -2265,8 +2437,9 @@ async def handle_bank_transfer(update: Update, context: ContextTypes.DEFAULT_TYP
         action=context.user_data.get("bank_action"); raw_amount=text.strip()
     else:
         return False
-    amount=parse_money_amount(raw_amount)
-    if amount is None:
+    want_all = norm_word(raw_amount).replace(" ", "") in _MONEY_ALL_WORDS
+    amount = None if want_all else parse_money_amount(raw_amount)
+    if amount is None and not want_all:
         await update.effective_message.reply_text(B("مبلغ معتبر نیست. نمونه: <code>واریز 100m</code> یا <code>برداشت 100m</code>"),parse_mode="HTML"); return True
     context.user_data.pop("bank_action", None)
     await upsert_user(user.id,user.full_name)
@@ -2274,6 +2447,10 @@ async def handle_bank_transfer(update: Update, context: ContextTypes.DEFAULT_TYP
         async with conn.transaction():
             row=await conn.fetchrow("SELECT balance, bank_balance FROM users WHERE user_id=$1 FOR UPDATE",user.id)
             pocket,bank=int(row['balance']),int(row['bank_balance'])
+            if want_all:
+                amount = (pocket - BANK_FEE) if action in ("واریز","واريز") else bank
+            if amount <= 0:
+                await update.effective_message.reply_text(B("برای این کار موجودی کافی نیست."),parse_mode="HTML"); return True
             if action in ("واریز","واريز"):
                 total=amount+BANK_FEE
                 if pocket < total:
@@ -2497,7 +2674,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "bank":
         row = await get_user(uid); pocket=int(row['balance'] or 0); bank=int(row['bank_balance'] or 0)
         text=(f"{BANK_CE} <b>بانک مرکزی</b>\n\nموجودی بانک: <b>{bank:,} تومان</b>\nپول جیب: <b>{pocket:,} تومان</b>\nمجموع دارایی: <b>{bank+pocket:,} تومان</b>\n\n"
-              f"واریز: <code>واریز 100m</code>\nبرداشت: <code>برداشت 100m</code>\nکارمزد هر واریز: <b>۵٬۰۰۰ تومان</b>؛ برداشت بدون کارمزد.")
+              f"واریز: <code>واریز 100m</code>\nبرداشت: <code>برداشت 100m</code>\nکارمزد هر واریز: <b>۵٬۰۰۰ تومان</b>؛ برداشت بدون کارمزد.\n{bank_interest_note()}")
         await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back)); return
     if action == "robbery":
         await pool.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", uid)
@@ -2848,6 +3025,13 @@ def parse_amount(text: str) -> int:
     return int(round(total)) if seen else 0
 
 
+TRANSFER_DAILY_LIMIT = 200_000_000   # سقف انتقال پول به بقیه، برای هر کاربر در روز (صاحب‌های ربات معاف‌ان)
+
+
+async def transfer_used_today(uid: int) -> int:
+    return int(await pool.fetchval("SELECT total FROM transfer_daily WHERE user_id=$1 AND day=$2", uid, task_period_key("daily")) or 0)
+
+
 async def on_transfer_request(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     msg, user = update.effective_message, update.effective_user
     rest = re.sub(r"^انتقال(\s*پول)?", "", norm_word(text)).strip()
@@ -2867,6 +3051,12 @@ async def on_transfer_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     if row["balance"] < amount:
         await msg.reply_text(B(f"{ce('wallet', 1, '💰')} دارایی‌ت کافی نیست! موجودی: {row['balance']:,} تومن"), parse_mode="HTML")
         return
+    if user.id not in OWNER_IDS:
+        used = await transfer_used_today(user.id)
+        if used + amount > TRANSFER_DAILY_LIMIT:
+            left = max(TRANSFER_DAILY_LIMIT - used, 0)
+            await msg.reply_text(B(f"سقف انتقال پول در روز {TRANSFER_DAILY_LIMIT:,} تومنه. امروز {used:,} تومن منتقل کردی و فقط {left:,} تومن دیگه می‌تونی بفرستی."), parse_mode="HTML")
+            return
     kb = InlineKeyboardMarkup([[
         btn("✅ تایید", "success", callback_data=f"tr:ok:{user.id}:{target.id}:{amount}"),
         btn("❌ لغو", "danger", callback_data=f"tr:no:{user.id}:{target.id}:{amount}"),
@@ -2919,6 +3109,17 @@ async def transfer_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         async with pool.acquire() as c:
             async with c.transaction():
+                if frm not in OWNER_IDS:
+                    got = None
+                    if amt <= TRANSFER_DAILY_LIMIT:
+                        got = await c.fetchval(
+                            "INSERT INTO transfer_daily (user_id, day, total) VALUES ($1::bigint, $2, $3::bigint) "
+                            "ON CONFLICT (user_id, day) DO UPDATE SET total = transfer_daily.total + EXCLUDED.total "
+                            "WHERE transfer_daily.total + EXCLUDED.total <= $4::bigint RETURNING total",
+                            frm, task_period_key("daily"), amt, TRANSFER_DAILY_LIMIT,
+                        )
+                    if got is None:
+                        raise OverflowError("daily limit")
                 ok = await c.fetchval(
                     "UPDATE users SET balance = balance - $1::bigint WHERE user_id = $2::bigint AND balance >= $1::bigint RETURNING 1",
                     amt, frm,
@@ -2930,6 +3131,10 @@ async def transfer_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await q.answer("دارایی‌ت کافی نیست!", show_alert=True)
         await q.edit_message_text("❌ دارایی کافی نبود؛ انتقال انجام نشد.")
+        return
+    except OverflowError:
+        await q.answer("سقف انتقال روزانه پر شده.", show_alert=True)
+        await q.edit_message_text(f"❌ سقف انتقال پول در روز {TRANSFER_DAILY_LIMIT:,} تومنه؛ این انتقال انجام نشد.")
         return
     except Exception:
         done.discard(key)
@@ -3091,6 +3296,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
     text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
     log.info("group text from %s: %r", user.id, msg.text)
+    if await event_text(update, context, text):
+        return
     if await spy_text(update, context, text):
         return
     if _word_key(text) in ("تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks"):
@@ -3175,6 +3382,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     low_en = float(row.get("energy", 0) or 0) < ENERGY_LOW
     if low_en:  # انرژی کم = پول کمتر
         amount = max(1, int(amount * JAGH_LOW_MULT))
+    amount = max(1, int(amount * income_mult()))   # ایونت درآمد
 
     # آپدیت اتمیک: فقط اگه ۵ دقیقه گذشته باشه پول اضافه میشه
     updated = await pool.fetchrow(
@@ -3196,6 +3404,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = pick_reply(amount) + "\n\n" + energy_line(row.get("energy", 0))
     if low_en:
         text += "\n⚠️ انرژیت کمه؛ پول جق کمتر شد! با بغل، بوس یا هدیه انرژی بگیر."
+    text += event_banner()
     new_bal = updated["balance"]
     gender = row["gender"]
     new_jaghs = updated["jaghs"]
@@ -3561,6 +3770,8 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تو پی‌وی ربات هم «خودم» کار می‌کنه."""
     msg = update.effective_message
     if await support_add_input(update, context):
+        return
+    if await event_text(update, context, msg.text or ""):
         return
     if await spy_text(update, context, msg.text or ""):
         return
@@ -4476,6 +4687,7 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lo, hi = (parse_pay(x) for x in JOB_PAY[idx])
     pay = random.randint(lo // 1000, hi // 1000) * 1000
+    pay = int(pay * income_mult())   # ایونت درآمد
     now = time.time()
     new_bal = await pool.fetchval(
         "UPDATE users SET balance = balance + $1::bigint, last_shift = $2::double precision, work_count = work_count + 1 "
@@ -4492,6 +4704,8 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<blockquote><b>{html.escape(done)}\n\n"
         f"{_te(SHIFT_EMOJI_DONE, '💰')} حقوق این شیفت: {pay:,} تومن</b></blockquote>"
     )
+    if (_eb := event_banner()):
+        text += f"<b>{_eb}</b>"
     await q.answer()
     try:
         await q.edit_message_text(text, parse_mode="HTML")
@@ -4527,6 +4741,8 @@ CASINO_OPEN = True    # False = بخش کازینو بسته‌ست
 CASINO_CLOSED_EID = "5938149692423541565"
 CASINO_CLOSED_TEXT = "بخش کازینو به دستور پاول دورف فعلا بسته‌ست."
 CASINO_MIN_BET = 1_000
+CASINO_MAX_BET = 50_000_000   # سقف هر شرط (همه‌ی بازی‌های کازینو)
+_CASINO_MAX_MSG = f"سقف شرط {CASINO_MAX_BET:,} تومنه."
 DICE_NET = 5          # حدس درست تاس: سود ۵ برابر شرط (کلاً ۶ برابر برمی‌گرده)
 CASINO_WAIT = 3.8     # صبر برای تموم شدن انیمیشن تاس/اسلات
 DICE_DELETE_AFTER = 5  # چند ثانیه بعد از اعلام نتیجه، تاس/اسلات‌های فرستاده‌شده پاک میشن
@@ -4771,6 +4987,9 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
     if bet < CASINO_MIN_BET:
         await say(BP(f"حداقل شرط {CASINO_MIN_BET:,} تومنه."))
         return
+    if bet > CASINO_MAX_BET:
+        await say(BP(_CASINO_MAX_MSG))
+        return
     busy = _busy(context)
     if user.id in busy:
         await say(BP("صبر کن بازی قبلیت تموم شه 😅"))
@@ -4844,6 +5063,9 @@ async def create_table(bot, chat_id: int, user, game: str, bet: int, reply_to: i
     if bet < CASINO_MIN_BET:
         await say(BP(f"حداقل شرط {CASINO_MIN_BET:,} تومنه."))
         return
+    if bet > CASINO_MAX_BET:
+        await say(BP(_CASINO_MAX_MSG))
+        return
     if (left := _cd_left(context, user.id)) > 0:
         await say(_cd_html(left))
         return
@@ -4895,8 +5117,8 @@ def mines_keyboard(uid: int, game_id: str, opened: set[int], bombs: set[int], fi
 
 
 async def start_mines(bot, context, chat_id, user, bet, q=None, reply_to=None):
-    if bet < CASINO_MIN_BET:
-        text = BP(f"حداقل شرط {CASINO_MIN_BET:,} تومنه.")
+    if bet < CASINO_MIN_BET or bet > CASINO_MAX_BET:
+        text = BP(f"حداقل شرط {CASINO_MIN_BET:,} و حداکثرش {CASINO_MAX_BET:,} تومنه.")
         if q: await edit_html(q, text)
         else: await send_html(bot, chat_id, text)
         return
@@ -5002,8 +5224,8 @@ def poison_board(game_id, st, reveal=False):
     return InlineKeyboardMarkup(rows)
 
 async def create_poison_table(bot, context, chat_id, user, bet, reply_to=None):
-    if bet < CASINO_MIN_BET:
-        await send_html(bot,chat_id,BP(f"حداقل شرط {CASINO_MIN_BET:,} تومنه.")); return
+    if bet < CASINO_MIN_BET or bet > CASINO_MAX_BET:
+        await send_html(bot,chat_id,BP(f"حداقل شرط {CASINO_MIN_BET:,} و حداکثرش {CASINO_MAX_BET:,} تومنه.")); return
     await upsert_user(user.id,user.full_name)
     if await _take(user.id,bet) is None:
         row=await get_user(user.id); await send_html(bot,chat_id,B(f"موجودی کافی نیست: {row['balance']:,} تومن")); return
@@ -5303,9 +5525,9 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     if custom_choice:
         custom_game, custom_mode = custom_choice
         amt = parse_amount(t)
-        if amt < CASINO_MIN_BET:
+        if amt < CASINO_MIN_BET or amt > CASINO_MAX_BET:
             context.user_data["casino_custom_bet"] = custom_choice
-            await msg.reply_text(BP(f"مبلغ معتبر نیست؛ حداقل {CASINO_MIN_BET:,} تومنه. دوباره بفرست."), parse_mode="HTML")
+            await msg.reply_text(BP(f"مبلغ معتبر نیست؛ حداقل {CASINO_MIN_BET:,} و حداکثر {CASINO_MAX_BET:,} تومنه. دوباره بفرست."), parse_mode="HTML")
         elif custom_mode == "2" and custom_game == "poison":
             await create_poison_table(bot, context, chat_id, user, amt, msg.message_id)
         elif custom_mode == "2":
@@ -6169,6 +6391,7 @@ CP_E = {
     "wallet": ("5334806881548379091", "👛"),
 }
 CP_SEP = "──────────────"
+CP_MAX_EID = "5458653586378469798"   # ایموجی «سطح آخر»
 
 
 def _cpe(key: str) -> str:
@@ -6186,6 +6409,8 @@ def car_panel_pre(idx: int, owned: dict, balance: int) -> str:
 
     def lvl(col: str) -> str:
         lv = int(car[col] or 0)
+        if lv >= CAR_MAX_LEVEL:   # سطح آخر: فقط ایموجی مخصوص، بدون خونه‌ها
+            return f'<tg-emoji emoji-id="{CP_MAX_EID}">✅</tg-emoji>'
         return f"{_bar(lv)} {lv}/{CAR_MAX_LEVEL}"
 
     nxt = _next_car_idx(owned)
@@ -6903,7 +7128,7 @@ def _is_bot_text_command(text: str) -> bool:
     }
     if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS:
         return True
-    if key.startswith(("واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی")):
+    if key.startswith(("واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
         return True
     t = norm_word(raw).translate(_DIG)
     return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
@@ -7015,7 +7240,7 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
     uid = user_id
     # مینی‌اپ برای صاحب ربات و پشتیبان‌هایی که دسترسی panel دارند؛ کاربران عادی دکمه را نمی‌بینند.
-    web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") and uid is not None and has_perm(uid, "panel") else []
+    web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") and uid is not None and has_perm(uid, "panel") and not is_managed_support(uid) else []
     support_row = [[btn("➕ افزودن پشتیبانی", "success", callback_data="sup:add"),
                     btn("📋 لیست پشتیبان‌ها", "primary", callback_data="sup:list")]] if uid in OWNER_IDS else []
     if uid is not None and uid not in OWNER_IDS and has_perm(uid, "staff") and STAFF_MANAGE.get(uid):
@@ -7065,6 +7290,11 @@ async def _save_staff(uid: int):
         "INSERT INTO support_staff(user_id, perms) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET perms=EXCLUDED.perms",
         uid, ",".join(sorted(STAFF.get(uid, set()))),
     )
+
+
+def is_managed_support(uid: int) -> bool:
+    """پشتیبانی که یه پشتیبانِ مدیر انتخابش کرده: مینی‌اپ (و پیام‌های گروه‌ها) براش فعال نیست. صاحب‌ها هیچ‌وقت شامل نمیشن."""
+    return uid not in OWNER_IDS and any(uid in v for v in STAFF_MANAGE.values())
 
 
 def can_manage_staff(actor: int, target: int) -> bool:
@@ -7598,6 +7828,7 @@ def energy_line(energy) -> str:
 
 
 GIFT_MONEY_CE = '<tg-emoji emoji-id="5289850733011693663">💰</tg-emoji>'
+AFFAIR_ENERGY_PENALTY = 3.0      # انرژی منفی برای کسی که رو زوجین بوس/بغل میده
 HUG_COOLDOWN = 5 * 60            # هر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد
 HUG_MONEY = (30, 50)             # تومن
 HUG_ENERGY = (1.0, 2.5)          # شانسی بین این دو عدد
@@ -7917,8 +8148,7 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     affair=False; cheater_id=None; spouse_id=None
     if me['spouse_id'] and int(me['spouse_id'])!=target.id:
         affair=True; cheater_id=user.id; spouse_id=int(me['spouse_id'])
-    elif them['spouse_id'] and int(them['spouse_id'])!=user.id:
-        affair=True; cheater_id=target.id; spouse_id=int(them['spouse_id'])
+    poach=bool(them['spouse_id']) and int(them['spouse_id'])!=user.id   # طرف مقابل همسر دارد (و همسرش خود بوس‌کننده نیست)
     energy_gain=2.0 if married else round(random.uniform(*HUG_ENERGY),1)
     money=random.randint(*HUG_MONEY)
     async with pool.acquire() as c:
@@ -7934,9 +8164,12 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     mn=RLM+random.choice(HUG_MONEY_LINES).format(m=f"{GIFT_MONEY_CE}{GIFT_MONEY_CE}",n=f"{money:,}")
     text=f"<b>{line}\n\n{en}\n\n{mn}</b>"
     await msg.reply_text(text,parse_mode="HTML")
+    if poach:
+        await pool.execute("UPDATE users SET energy=GREATEST(energy-$1::double precision,0) WHERE user_id=$2",AFFAIR_ENERGY_PENALTY,user.id)
+        await msg.reply_text(B(f"{html.escape(user.full_name)} تو حواست هست؟ {html.escape(target.full_name)} همسر داره؛ {_fmt_en(AFFAIR_ENERGY_PENALTY)} انرژی منفی می‌گیری تا دیگه رو زوجین لاو ندی 😤"),parse_mode="HTML")
     if affair:
-        cheater_name=target.full_name if cheater_id==target.id else user.full_name
-        affair_target=user.full_name if cheater_id==target.id else target.full_name
+        cheater_name=user.full_name
+        affair_target=target.full_name
         await msg.reply_text(B(f"⚠️ {html.escape(cheater_name)} داری به همسرت خیانت می‌کنی!"),parse_mode="HTML")
         kb=InlineKeyboardMarkup([[btn("طلاق", "danger", callback_data=f"af:divorce:{cheater_id}:{spouse_id}:{msg.chat_id}"),btn("می‌بخشمش", "success", callback_data=f"af:forgive:{cheater_id}:{spouse_id}:{msg.chat_id}")]])
         notice=B(f"💔 {html.escape(cheater_name)} به {html.escape(affair_target)} در گروه {html.escape(msg.chat.title or 'گروه')} نزدیک شد و داره بهت خیانت می‌کنه!\nمی‌تونی طلاق بگیری و ۱۰٪ دارایی‌ش رو به غنیمت ببری یا ببخشیش.")
