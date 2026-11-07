@@ -196,7 +196,10 @@ SUPPORT_PERMS = {
     "jobs": "جدول شغل‌ها (/setjobs و /jobsreset)",
     "check": "بررسی کارت‌ها (/cardcheck)",
     "pay": "تایید/رد رسید خرید پول بازی",
+    "staff": "مدیریت دسترسی پشتیبان‌های انتخاب‌شده (/admin)",
 }
+# {آیدی پشتیبانِ مدیر: {آیدی پشتیبان‌هایی که اجازه داره دسترسی‌هاشون رو بده/بگیره}} (تو دیتابیس می‌مونه)
+STAFF_MANAGE: dict[int, set] = {}
 
 
 def has_perm(uid: int, perm: str) -> bool:
@@ -483,6 +486,7 @@ async def init_db(app: Application):
             except Exception:
                 log.exception("bad %s in db", r["key"])
         await c.execute("CREATE TABLE IF NOT EXISTS support_staff (user_id BIGINT PRIMARY KEY, perms TEXT NOT NULL DEFAULT '')")
+        await c.execute("CREATE TABLE IF NOT EXISTS support_manage (manager_id BIGINT NOT NULL, target_id BIGINT NOT NULL, PRIMARY KEY(manager_id, target_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS referrals (referred_id BIGINT PRIMARY KEY, referrer_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, rewarded_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_check DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals (referrer_id)")
         await c.execute("CREATE TABLE IF NOT EXISTS purchases (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, amount BIGINT NOT NULL, price BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, file_id TEXT, reviewer BIGINT, reviewed_at DOUBLE PRECISION)")
@@ -501,6 +505,9 @@ async def init_db(app: Application):
         for r in await c.fetch("SELECT user_id, perms FROM support_staff"):
             STAFF[int(r["user_id"])] = {p for p in r["perms"].split(",") if p in SUPPORT_PERMS}
             ADMIN_IDS.add(int(r["user_id"]))
+        STAFF_MANAGE.clear()
+        for r in await c.fetch("SELECT manager_id, target_id FROM support_manage"):
+            STAFF_MANAGE.setdefault(int(r["manager_id"]), set()).add(int(r["target_id"]))
     log.info("database ready")
 
 
@@ -4551,7 +4558,7 @@ SLOT_SYMS = [
     "🔔",
     '<tg-emoji emoji-id="4961065085217801230">🍇</tg-emoji>',
     '<tg-emoji emoji-id="5348476388062015170">🍋</tg-emoji>',
-    '<tg-emoji emoji-id="5915988541644475488">7️⃣</tg-emoji>',
+    '<tg-emoji emoji-id="5357158630091139922">7️⃣</tg-emoji>',
 ]
 GAME_EMOJI = {"dice": "🎲", "slot": "🎰"}  # ایموجی خودِ تلگرام برای sendDice
 GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "mines": f"مین {MINES_BOMB_CE}", "poison": "سم یا خوراکی ☠️"}
@@ -5711,6 +5718,8 @@ def render_car_image(idx: int, rgb: tuple) -> BytesIO:
 # ───────────────────────── 🚗 گاراژ ماشین ─────────────────────────
 CAR_WORDS = {"ماشین", "ماشینم", "ماشینمن", "ماشینها", "ماشینهام", "ماشینهایم", "گاراژ", "گاراژم", "گاراژمن", "گاراژماشین", "cars", "garage"}
 CAR_MAX_LEVEL = 5
+MAX_LEVEL_EID = "5458653586378469798"   # ایموجی «لول آخر» (فقط ماشین)
+MAX_LEVEL_CE = f'<tg-emoji emoji-id="{MAX_LEVEL_EID}">🏆</tg-emoji>'
 CAR_PAY_EVERY = 3600
 CAR_COLOR_PRICE = 20_000_000
 CARS = [
@@ -5951,9 +5960,16 @@ async def _owned_cars(uid: int) -> dict[int, asyncpg.Record]:
     rows = await pool.fetch("SELECT * FROM cars WHERE user_id = $1 ORDER BY car_idx", uid)
     return {r["car_idx"]: r for r in rows}
 
+def _upgrade_btn(car_row, uid: int, idx: int, style: str):
+    """اگه همه‌ی قطعه‌های ماشین به لول آخر رسیده باشن، ایموجی لول آخر نشون داده میشه."""
+    if car_row is not None and all(int(car_row[col] or 0) >= CAR_MAX_LEVEL for _l, _i, col in CAR_PARTS.values()):
+        return btn("ماشین در آخرین سطح", "success", icon=MAX_LEVEL_EID, callback_data=f"car:upmenu:{uid}:{idx}:0")
+    return btn("⬆️ ارتقای ماشین", style, callback_data=f"car:upmenu:{uid}:{idx}:0")
+
+
 def _car_keyboard(uid: int, idx: int, row, balance: int):
     rows = [
-        [btn("⬆️ ارتقای ماشین", "primary", callback_data=f"car:upmenu:{uid}:{idx}:0")],
+        [_upgrade_btn(row, uid, idx, "primary")],
         [btn("🎨 رنگ ماشین", "primary", callback_data=f"car:colors:{uid}:{idx}:0")],
         [btn("💰 جمع‌آوری درآمد", "success", callback_data=f"car:collect:{uid}:{idx}:0")],
         [btn("🔙 گاراژ", callback_data=f"car:garage:{uid}:{idx}:0")],
@@ -6140,18 +6156,63 @@ def car_panel_rich_html(idx: int, owned: dict, balance: int) -> str:
     return "".join(out)
 
 
+# ایموجی‌های پرمیوم پنل ماشین (آیدی هر کدوم)
+CP_E = {
+    "income": ("5787192063099408213", "⏱"),
+    "vault": ("6095712904139510450", "💰"),
+    "engine": ("5775888804392996347", "⚙️"),
+    "body": ("5037414171923186776", "🛡️"),
+    "tires": ("5377521684221815300", "🛞"),
+    "glass": ("5037614751190879049", "🪟"),
+    "rims": ("5037668897843578129", "🛞"),
+    "next": ("5364027807510832333", "⬆️"),
+    "wallet": ("5334806881548379091", "👛"),
+}
+CP_SEP = "──────────────"
+
+
+def _cpe(key: str) -> str:
+    eid, fb = CP_E[key]
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
+
+
 def car_panel_pre(idx: int, owned: dict, balance: int) -> str:
+    """پنل ماشین به‌صورت متن ساده + ایموجی پرمیوم و خط جداکننده (بدون <pre>؛ دیگه با زدن روش کپی نمیشه)."""
     name, _en, emo, _price, _base = CARS[idx]
-    cname = CAR_COLORS[int(owned[idx]["color"])][0]
-    head = B(f"🔑 ماشین شما: {emo} {html.escape(name)} · 🎨 {html.escape(cname)}")
-    return head + "\n" + mono_table(("مشخصات", "مقدار"), car_panel_rows(idx, owned, balance))
+    car = owned[idx]
+    cname = CAR_COLORS[int(car["color"])][0]
+    total_income = sum(car_profit(i, r) for i, r in owned.items())
+    total_vault = sum(int(r["pending_profit"] or 0) for r in owned.values())
+
+    def lvl(col: str) -> str:
+        lv = int(car[col] or 0)
+        return f"{_bar(lv)} {lv}/{CAR_MAX_LEVEL}"
+
+    nxt = _next_car_idx(owned)
+    if nxt < len(CARS):
+        n = CARS[nxt]
+        nxt_txt = f"{n[2]} {html.escape(n[0])} · {fmt_short(n[3])}"
+    else:
+        nxt_txt = "همه‌ی ماشین‌ها رو داری 🏆"
+    lines = [
+        f"🔑 ماشین شما: {emo} {html.escape(name)} · 🎨 {html.escape(cname)}",
+        f"درآمد ساعتی {_cpe('income')}: {fmt_short(total_income)} تومن",
+        f"تو صندوق {_cpe('vault')}: {total_vault:,} تومن",
+        f"موتور {_cpe('engine')}: {lvl('up_engine')}",
+        f"بدنه {_cpe('body')}: {lvl('up_body')}",
+        f"لاستیک‌ها {_cpe('tires')}: {lvl('up_tires')}",
+        f"شیشه و رینگ: {_cpe('glass')}{_cpe('rims')} {lvl('up_glass_rims')}",
+        f"ماشین بعدی {_cpe('next')}: {nxt_txt}",
+        f"کیف پول {_cpe('wallet')}: {balance:,} تومن",
+    ]
+    return B(f"\n{CP_SEP}\n".join(lines))
 
 
 def _panel_keyboard(uid: int, idx: int, owned: dict):
     rows = [
         [btn("💰 جمع کن", "success", callback_data=f"car:collect:{uid}:{idx}:0"),
          btn("🚗 گاراژ", "danger", callback_data=f"car:garage:{uid}:{idx}:0")],
-        [btn("⬆️ ارتقای ماشین", "success", callback_data=f"car:upmenu:{uid}:{idx}:0"),
+        [_upgrade_btn(owned.get(idx), uid, idx, "success"),
          btn("🎨 رنگ", "primary", callback_data=f"car:colors:{uid}:{idx}:0")],
     ]
     nxt = _next_car_idx(owned)
@@ -6306,7 +6367,10 @@ async def _show_upgrade_menu(q, uid: int, idx: int):
         lv = int(car[col] or 0)
         cost = car_upgrade_cost(idx, lv)
         trs.append((label, f"{lv}/{CAR_MAX_LEVEL}", fmt_short(cost) if lv < CAR_MAX_LEVEL else "حداکثر"))
-        rows.append([btn(f"{icon} ارتقای {label} • سطح {lv}/{CAR_MAX_LEVEL} • {fmt_toman(cost)}", "primary", callback_data=f"car:upgrade:{uid}:{idx}:{key}")])
+        if lv >= CAR_MAX_LEVEL:
+            rows.append([btn(f"{label} • آخرین سطح {lv}/{CAR_MAX_LEVEL}", "success", icon=MAX_LEVEL_EID, callback_data=f"car:upgrade:{uid}:{idx}:{key}")])
+        else:
+            rows.append([btn(f"{icon} ارتقای {label} • سطح {lv}/{CAR_MAX_LEVEL} • {fmt_toman(cost)}", "primary", callback_data=f"car:upgrade:{uid}:{idx}:{key}")])
     rows.append([btn("🔙 برگشت", callback_data=f"car:refresh:{uid}:{idx}:0")])
     cap = B(f"⬆️ ارتقای ماشین {html.escape(CARS[idx][0])}\nهر قطعه جداگانه تا سطح {CAR_MAX_LEVEL} ارتقا می‌یابد.") + "\n" + mono_table(("🧰 قطعه", "سطح", "هزینه بعدی"), trs)
     await _edit_cap(q, cap, InlineKeyboardMarkup(rows))
@@ -6363,7 +6427,7 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("اول ماشین را بخر.", show_alert=True); return
         lv = int(car[col] or 0)
         if lv >= CAR_MAX_LEVEL:
-            await q.answer("این قطعه به حداکثر سطح رسیده است.", show_alert=True); return
+            await q.answer("این قطعه به آخرین سطح رسیده است.", show_alert=True); return
         cost = car_upgrade_cost(idx, lv)
         try:
             async with pool.acquire() as c:
@@ -6954,6 +7018,8 @@ def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
     web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") and uid is not None and has_perm(uid, "panel") else []
     support_row = [[btn("➕ افزودن پشتیبانی", "success", callback_data="sup:add"),
                     btn("📋 لیست پشتیبان‌ها", "primary", callback_data="sup:list")]] if uid in OWNER_IDS else []
+    if uid is not None and uid not in OWNER_IDS and has_perm(uid, "staff") and STAFF_MANAGE.get(uid):
+        support_row = [[btn("🛡 دسترسی پشتیبان‌ها", "primary", callback_data="sup:list")]]
     return InlineKeyboardMarkup(web_row + support_row + [
         [btn("💸 کم کردن پول", "primary", callback_data="ad:money"), btn("➕ افزودن پول", "success", callback_data="ad:money_add")],
         [btn("🤛 کم کردن جق", "primary", callback_data="ad:jagh"), btn("➕ افزودن جق", "success", callback_data="ad:jagh_add")],
@@ -7001,22 +7067,73 @@ async def _save_staff(uid: int):
     )
 
 
-async def _staff_list_view():
+def can_manage_staff(actor: int, target: int) -> bool:
+    """صاحب‌ها همه‌ی پشتیبان‌ها رو مدیریت می‌کنن؛ پشتیبانِ دارای دسترسی «staff» فقط پشتیبان‌هایی که صاحب براش انتخاب کرده."""
+    if target in OWNER_IDS or target not in STAFF:
+        return False
+    if actor in OWNER_IDS:
+        return True
+    return "staff" in STAFF.get(actor, ()) and target in STAFF_MANAGE.get(actor, ()) and target != actor
+
+
+def grantable_perms(actor: int) -> dict:
+    """دسترسی‌هایی که actor می‌تونه روشن/خاموش کنه. پشتیبان فقط چیزهایی رو که خودش داره (و نه «staff») می‌تونه بده/بگیره."""
+    if actor in OWNER_IDS:
+        return dict(SUPPORT_PERMS)
+    mine = STAFF.get(actor, set())
+    return {k: v for k, v in SUPPORT_PERMS.items() if k != "staff" and k in mine}
+
+
+async def _staff_list_view(actor: int | None = None):
+    owner = actor is None or actor in OWNER_IDS
     rows = []
     for uid, perms in sorted(STAFF.items()):
+        if not owner and not can_manage_staff(actor, uid):
+            continue
         rows.append([InlineKeyboardButton(f"👤 {await _staff_name(uid)} — {len(perms)} دسترسی", callback_data=f"sup:u:{uid}")])
-    text = "🛡 پشتیبان‌ها\n\n" + ("روی هر پشتیبان بزن تا دسترسی‌هاش رو عوض کنی." if rows else "هنوز پشتیبانی اضافه نکردی.")
-    rows.append([InlineKeyboardButton("➕ افزودن پشتیبانی", callback_data="sup:add")])
-    text += "\n\nبرای افزودن پشتیبان جدید، دکمه‌ی افزودن پشتیبانی رو بزن."
+    if owner:
+        text = "🛡 پشتیبان‌ها\n\n" + ("روی هر پشتیبان بزن تا دسترسی‌هاش رو عوض کنی." if rows else "هنوز پشتیبانی اضافه نکردی.")
+        rows.append([InlineKeyboardButton("➕ افزودن پشتیبانی", callback_data="sup:add")])
+        text += "\n\nبرای افزودن پشتیبان جدید، دکمه‌ی افزودن پشتیبانی رو بزن."
+    else:
+        text = "🛡 پشتیبان‌های قابل مدیریت\n\n" + ("روی هر پشتیبان بزن تا دسترسی‌هاش رو بدی یا بگیری." if rows else "هنوز صاحب ربات پشتیبانی برات انتخاب نکرده.")
+        rows.append([InlineKeyboardButton("⬅️ پنل", callback_data="ad:menu")])
     return text, InlineKeyboardMarkup(rows)
 
 
-async def _staff_user_view(uid: int):
+async def _staff_user_view(uid: int, actor: int | None = None):
+    owner = actor is None or actor in OWNER_IDS
     perms = STAFF.get(uid, set())
-    rows = [[InlineKeyboardButton(("✅ " if k in perms else "❌ ") + fa, callback_data=f"sup:t:{uid}:{k}")] for k, fa in SUPPORT_PERMS.items()]
-    rows.append([InlineKeyboardButton("حذف از پشتیبانی 🗑", callback_data=f"sup:del:{uid}")])
+    allowed = SUPPORT_PERMS if owner else grantable_perms(actor)
+    rows = []
+    for k, fa in SUPPORT_PERMS.items():
+        mark = "✅ " if k in perms else "❌ "
+        if k in allowed:
+            rows.append([InlineKeyboardButton(mark + fa, callback_data=f"sup:t:{uid}:{k}")])
+        else:   # فقط نمایش؛ این دسترسی رو نمی‌تونی دست بزنی
+            rows.append([InlineKeyboardButton(mark + fa + " 🔒", callback_data="sup:noop")])
+    if owner:
+        if "staff" in perms:
+            rows.append([InlineKeyboardButton(f"👥 پشتیبان‌های قابل مدیریت ({len(STAFF_MANAGE.get(uid, ()))})", callback_data=f"sup:mg:{uid}")])
+        rows.append([InlineKeyboardButton("حذف از پشتیبانی 🗑", callback_data=f"sup:del:{uid}")])
     rows.append([InlineKeyboardButton("⬅️ برگشت", callback_data="sup:list")])
-    return f"🛡 {await _staff_name(uid)}\nآیدی: {uid}\n\nهر دسترسی رو با زدن روش روشن/خاموش کن:", InlineKeyboardMarkup(rows)
+    hint = "هر دسترسی رو با زدن روش روشن/خاموش کن:" if owner else "دسترسی‌هایی که خودت داری رو می‌تونی بدی یا بگیری (🔒 = دست‌نخوردنی):"
+    return f"🛡 {await _staff_name(uid)}\nآیدی: {uid}\n\n{hint}", InlineKeyboardMarkup(rows)
+
+
+async def _staff_manage_view(manager: int):
+    """انتخاب اینکه این پشتیبان روی کدوم پشتیبان‌ها اجازه‌ی مدیریت دسترسی داره (فقط صاحب‌ها)."""
+    sel = STAFF_MANAGE.get(manager, set())
+    rows = []
+    for uid in sorted(STAFF):
+        if uid == manager:
+            continue
+        rows.append([InlineKeyboardButton(("✅ " if uid in sel else "❌ ") + await _staff_name(uid), callback_data=f"sup:mt:{manager}:{uid}")])
+    rows.append([InlineKeyboardButton("⬅️ برگشت", callback_data=f"sup:u:{manager}")])
+    text = f"👥 پشتیبان‌های قابل مدیریت برای {await _staff_name(manager)}\n\nهر کدوم که ✅ باشه، این پشتیبان می‌تونه دسترسی‌هاش رو بده یا بگیره:"
+    if len(rows) == 1:
+        text += "\n\n(پشتیبان دیگه‌ای وجود نداره.)"
+    return text, InlineKeyboardMarkup(rows)
 
 
 async def support_add_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -7082,35 +7199,72 @@ async def add_support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def support_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    if q.from_user.id not in OWNER_IDS:
+    actor = q.from_user.id
+    owner = actor in OWNER_IDS
+    manager = (not owner) and has_perm(actor, "staff") and has_perm(actor, "panel")
+    if not owner and not manager:
         await q.answer("فقط صاحب ربات", show_alert=True)
         return
     parts = q.data.split(":")
     act = parts[1]
+    if act == "noop":
+        await q.answer("این دسترسی رو خودت نداری یا اجازه‌ی تغییرش رو نداری.", show_alert=True)
+        return
+    if not owner and act not in ("list", "u", "t"):
+        await q.answer("فقط صاحب ربات", show_alert=True)
+        return
+    if act in ("t", "u", "mg", "mt", "del") and len(parts) > 2 and not owner and not can_manage_staff(actor, int(parts[2])):
+        await q.answer("این پشتیبان برای تو انتخاب نشده.", show_alert=True)
+        return
+    if act == "t" and len(parts) > 3 and parts[3] not in grantable_perms(actor):
+        await q.answer("این دسترسی رو نمی‌تونی تغییر بدی.", show_alert=True)
+        return
     await q.answer()
     if act == "add":
         context.user_data["support_add_wait"] = True
         await q.message.reply_text("آیدی عددی یا @یوزرنیم پشتیبان جدید رو بفرست. کاربر باید قبلاً ربات رو استارت کرده باشه. برای لغو بنویس «لغو».")
         return
     if act == "list":
-        text, kb = await _staff_list_view()
+        text, kb = await _staff_list_view(actor)
+    elif act == "mg":
+        manager_id = int(parts[2])
+        text, kb = await _staff_manage_view(manager_id) if manager_id in STAFF else await _staff_list_view(actor)
+    elif act == "mt":
+        manager_id, target = int(parts[2]), int(parts[3])
+        if manager_id in STAFF and target in STAFF and target != manager_id:
+            if target in STAFF_MANAGE.get(manager_id, set()):
+                STAFF_MANAGE[manager_id].discard(target)
+                await pool.execute("DELETE FROM support_manage WHERE manager_id=$1 AND target_id=$2", manager_id, target)
+            else:
+                STAFF_MANAGE.setdefault(manager_id, set()).add(target)
+                await pool.execute("INSERT INTO support_manage(manager_id, target_id) VALUES($1,$2) ON CONFLICT DO NOTHING", manager_id, target)
+            text, kb = await _staff_manage_view(manager_id)
+        else:
+            text, kb = await _staff_list_view(actor)
     else:
         uid = int(parts[2])
-        if act == "t" and uid in STAFF and parts[3] in SUPPORT_PERMS:
+        if act == "t" and uid in STAFF and parts[3] in grantable_perms(actor):
             STAFF[uid] ^= {parts[3]}
             await _save_staff(uid)
-        elif act == "del":
+            if parts[3] == "staff" and "staff" not in STAFF[uid]:   # دسترسی مدیریت گرفته شد → لیست مدیریت‌شونده‌ها پاک
+                STAFF_MANAGE.pop(uid, None)
+                await pool.execute("DELETE FROM support_manage WHERE manager_id=$1", uid)
+        elif act == "del" and owner:
             STAFF.pop(uid, None)
+            STAFF_MANAGE.pop(uid, None)
+            for v in STAFF_MANAGE.values():
+                v.discard(uid)
             if uid not in OWNER_IDS:
                 ADMIN_IDS.discard(uid)
             await pool.execute("DELETE FROM support_staff WHERE user_id=$1", uid)
-            text, kb = await _staff_list_view()
+            await pool.execute("DELETE FROM support_manage WHERE manager_id=$1 OR target_id=$1", uid)
+            text, kb = await _staff_list_view(actor)
             await q.edit_message_text("🗑 پشتیبان حذف شد.\n\n" + text, reply_markup=kb)
             return
         if uid not in STAFF:
-            text, kb = await _staff_list_view()
+            text, kb = await _staff_list_view(actor)
         else:
-            text, kb = await _staff_user_view(uid)
+            text, kb = await _staff_user_view(uid, actor)
     try:
         await q.edit_message_text(text, reply_markup=kb)
     except Exception:
