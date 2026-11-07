@@ -76,7 +76,7 @@ import math
 from io import BytesIO
 from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
-from telegram import BotCommandScopeAllPrivateChats, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, MessageEntity, ReplyParameters, Update, WebAppInfo
+from telegram import BotCommandScopeAllPrivateChats, InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InputMediaPhoto, MessageEntity, ReplyParameters, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -2034,16 +2034,11 @@ async def startup(app: Application):
         app.bot_data["car_task"] = asyncio.create_task(car_profit_loop())
         app.bot_data["energy_task"] = asyncio.create_task(energy_decay_loop())
         try:
-            from telegram import BotCommand, MenuButtonCommands
-            await app.bot.set_my_commands([
-                BotCommand("menu", "🏠 منوی اصلی"),
-                BotCommand("referral", "👥 زیرمجموعه‌گیری و پول رایگان"),
-                BotCommand("buy", "💎 خرید پول بازی"),
-                BotCommand("start", "🚀 شروع"),
-            ], scope=BotCommandScopeAllPrivateChats())
-            await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+            from telegram import MenuButtonDefault
+            await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
+            await app.bot.set_chat_menu_button(menu_button=MenuButtonDefault())
         except Exception:
-            log.warning("set commands/menu button failed", exc_info=True)
+            log.warning("reset commands menu failed", exc_info=True)
         app.bot_data["ref_task"] = asyncio.create_task(referral_check_loop(app))
         try:
             app.bot_data["web"] = await start_webapp()
@@ -2182,6 +2177,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await process_referral(context.bot, user.id)
     bot_username = (await context.bot.get_me()).username or ""
     await update.message.reply_text(welcome_ok(), parse_mode="HTML", reply_markup=welcome_keyboard(bot_username))
+    await send_main_menu(context.bot, user.id)
 
 
 async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2201,6 +2197,7 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer("تایید شد ✅")
     bot_username = (await context.bot.get_me()).username or ""
     await q.edit_message_text(welcome_ok(), parse_mode="HTML", reply_markup=welcome_keyboard(bot_username))
+    await send_main_menu(context.bot, user.id)
 
 
 # ───────────────────────── بانک و املاک ─────────────────────────
@@ -3563,6 +3560,8 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await admin_input(update, context):
         return
     if await account_transfer_input(update, context):
+        return
+    if await menu_text_router(update, context):
         return
     if msg and msg.text and context.user_data.get("await_jobs") and has_perm(update.effective_user.id, "jobs"):
         if msg.text.strip() == "لغو":
@@ -7385,9 +7384,8 @@ HUG_LINES = {
     ],
 }
 HUG_ENERGY_LINES = [
-    "⚡ انرژی {b}: {eb}  |  انرژی خودت: {ea}",
-    "⚡ حالا انرژی {b} میشه {eb} و انرژی خودت {ea}",
-    "⚡ باتری {b} روی {eb} و باتری خودت روی {ea}",
+    "⚡ انرژیش {eb} و انرژی خودت {ea}",
+    "⚡ انرژیش {eb}، انرژی خودت {ea}",
 ]
 HUG_MONEY_LINES = [
     "{m} {n} تومن پول، هر دوتون گرفتید!",
@@ -7660,11 +7658,12 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
             s_en=await c.fetchval("UPDATE users SET balance=balance+$1,energy=LEAST(energy+$2,$3) WHERE user_id=$4 RETURNING energy",money,energy_gain,ENERGY_MAX,user.id)
             t_en=await c.fetchval("UPDATE users SET balance=balance+$1,energy=LEAST(energy+$2,$3) WHERE user_id=$4 RETURNING energy",money,energy_gain,ENERGY_MAX,target.id)
     a=_ltr_name(user.id,user.full_name); b=_ltr_name(target.id,target.full_name)
-    pct=lambda e: f"{energy_bar(e)} {_fmt_en(float(e)/ENERGY_MAX*100)}٪"
-    line=random.choice(HUG_LINES[kind]).format(a=a,b=b)
-    en=random.choice(HUG_ENERGY_LINES).format(b=b,ea=pct(s_en),eb=pct(t_en))
-    mn=random.choice(HUG_MONEY_LINES).format(m=f"{GIFT_MONEY_CE}{GIFT_MONEY_CE}",n=f"{money:,}")
-    text=f"<b>{line}\n\n{en}\n+{energy_gain:g} انرژی برای هر دو\n\n{mn}</b>"
+    pct=lambda e: f"{_fmt_en(float(e)/ENERGY_MAX*100)}٪"
+    RLM="\u200f"
+    line=RLM+random.choice(HUG_LINES[kind]).format(a=a,b=b)
+    en=RLM+random.choice(HUG_ENERGY_LINES).format(ea=pct(s_en),eb=pct(t_en))
+    mn=RLM+random.choice(HUG_MONEY_LINES).format(m=f"{GIFT_MONEY_CE}{GIFT_MONEY_CE}",n=f"{money:,}")
+    text=f"<b>{line}\n\n{en}\n\n{mn}</b>"
     await msg.reply_text(text,parse_mode="HTML")
     if affair:
         cheater_name=target.full_name if cheater_id==target.id else user.full_name
@@ -7982,9 +7981,55 @@ async def buy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_html(context.bot, update.effective_user.id, text, reply_markup=kb)
 
 
+def kbtn(text: str, style: str | None = None, icon: str | None = None) -> KeyboardButton:
+    extra = {}
+    if style:
+        extra["style"] = style
+    if icon:
+        extra["icon_custom_emoji_id"] = icon
+    if extra:
+        try:
+            return KeyboardButton(text, api_kwargs=extra)
+        except TypeError:
+            pass
+    return KeyboardButton(text)
+
+
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [kbtn("خرید پول بازی", "success", EID_MONEY)],
+            [kbtn("زیرمجموعه‌گیری", "primary", REF_EID), kbtn("خودم", "danger", EID_TROPHY)],
+            [kbtn("بانک", None, BANK_EMOJIS[0]), kbtn("تسک‌ها", None, EID_TROPHY)],
+        ],
+        resize_keyboard=True, is_persistent=True, input_field_placeholder="از دکمه‌های پایین انتخاب کن...",
+    )
+
+
+async def send_main_menu(bot, chat_id: int):
+    try:
+        await send_html(bot, chat_id, B(f"{REF_CE} منوی ربات پایین فعاله؛ از دکمه‌ها انتخاب کن 👇"), reply_markup=main_menu_keyboard())
+    except Exception:
+        log.warning("send_main_menu failed", exc_info=True)
+
+
+async def menu_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """دکمه‌های منوی پایین (کیبورد) تو پی‌وی."""
+    msg = update.effective_message
+    t = (msg.text or "").replace("\u200c", "").strip() if msg else ""
+    if t.replace(" ", "") == "خریدپولبازی":
+        await buy_cmd(update, context)
+        return True
+    if t == "زیرمجموعهگیری":
+        await referral_cmd(update, context)
+        return True
+    return False
+
+
 async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_username = (await context.bot.get_me()).username or ""
     await send_html(context.bot, update.effective_user.id, welcome_ok(), reply_markup=welcome_keyboard(bot_username))
+    await send_main_menu(context.bot, update.effective_user.id)
 
 
 # ───────────────────────── خرید پول بازی ─────────────────────────
