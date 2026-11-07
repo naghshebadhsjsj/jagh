@@ -190,7 +190,7 @@ OWNER_IDS = set(ADMIN_IDS)
 # پشتیبان‌هایی که صاحب‌ها با /support اضافه می‌کنن: {آیدی: {دسترسی‌ها}} (تو دیتابیس می‌مونه)
 STAFF: dict[int, set] = {}
 SUPPORT_PERMS = {
-    "panel": "پنل پشتیبانی (/admin و مینی‌اپ)",
+    "panel": "ورود به پنل پشتیبانی (/admin)",
     "emoji": "ایموجی‌ها (/setemoji)",
     "photo": "عکس کاراکترها (/setphoto)",
     "jobs": "جدول شغل‌ها (/setjobs و /jobsreset)",
@@ -198,6 +198,26 @@ SUPPORT_PERMS = {
     "pay": "تایید/رد رسید خرید پول بازی",
     "staff": "مدیریت دسترسی پشتیبان‌های انتخاب‌شده (/admin)",
 }
+# دسترسیِ تک‌تکِ دکمه‌های /admin و مینی‌اپ؛ صاحب ربات برای هر پشتیبان جدا روشن/خاموش می‌کنه
+ADMIN_PERMS = {
+    "money_sub": "💸 کم کردن پول",
+    "money_add": "➕ افزودن پول",
+    "jagh_sub": "🤛 کم کردن جق",
+    "jagh_add": "➕ افزودن جق",
+    "miniapp": "📱 مینی‌اپ پشتیبانی",
+    "group_msgs": "👁 پیام‌های گروه‌ها",
+    "ban": "🚫 محروم کردن کاربر",
+    "unban": "✅ برداشتن محرومیت",
+    "staff_list": "📋 لیست پشتیبانی",
+    "task_daily": "📋 افزودن تسک روزانه",
+    "task_weekly": "📆 افزودن تسک هفتگی",
+    "bot_toggle": "🔴 خاموش/روشن کردن ربات",
+    "stats": "📊 آمار",
+    "broadcast": "📢 پیام همگانی",
+}
+SUPPORT_PERMS.update(ADMIN_PERMS)
+# این دو تا رو فقط صاحب ربات می‌تونه بده؛ پشتیبانِ مدیر فقط می‌تونه ازشون بگیره
+OWNER_GRANT_ONLY = {"miniapp", "group_msgs"}
 # {آیدی پشتیبانِ مدیر: {آیدی پشتیبان‌هایی که اجازه داره دسترسی‌هاشون رو بده/بگیره}} (تو دیتابیس می‌مونه)
 STAFF_MANAGE: dict[int, set] = {}
 
@@ -205,6 +225,11 @@ STAFF_MANAGE: dict[int, set] = {}
 def has_perm(uid: int, perm: str) -> bool:
     """صاحب‌ها همه‌چیز دارن؛ پشتیبان‌ها فقط دسترسی‌هایی که بهشون داده شده."""
     return uid in OWNER_IDS or perm in STAFF.get(uid, ())
+
+
+def perms_of(uid: int) -> set:
+    """همه‌ی دسترسی‌های فعالِ یه کاربر (صاحب‌ها همه‌چیز)."""
+    return set(SUPPORT_PERMS) if uid in OWNER_IDS else set(STAFF.get(uid, ()))
 
 TRIGGER_WORD = "جق"
 COOLDOWN_SECONDS = 5 * 60 + 5  # پایه ۵:۰۵؛ با پنج ارتقا به ۴:۴۰ می‌رسد
@@ -388,6 +413,7 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_uses INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_affection DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS affection_cooldowns (actor_id BIGINT NOT NULL, target_id BIGINT NOT NULL, last_ts DOUBLE PRECISION NOT NULL, PRIMARY KEY(actor_id,target_id))")
+        await c.execute("CREATE TABLE IF NOT EXISTS actor_cooldowns (actor_id BIGINT NOT NULL, kind TEXT NOT NULL, last_ts DOUBLE PRECISION NOT NULL, PRIMARY KEY(actor_id,kind))")
         await c.execute("CREATE TABLE IF NOT EXISTS marriage_proposals (bride_id BIGINT PRIMARY KEY, groom_id BIGINT NOT NULL, chat_id BIGINT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS casino_records (chat_id BIGINT NOT NULL, game TEXT NOT NULL, user_id BIGINT NOT NULL, name TEXT, record BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(chat_id, game))")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_state (user_id BIGINT NOT NULL, robbery_type TEXT NOT NULL, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, blocked_until DOUBLE PRECISION NOT NULL DEFAULT 0, PRIMARY KEY (user_id, robbery_type))")
@@ -509,6 +535,18 @@ async def init_db(app: Application):
         STAFF_MANAGE.clear()
         for r in await c.fetch("SELECT manager_id, target_id FROM support_manage"):
             STAFF_MANAGE.setdefault(int(r["manager_id"]), set()).add(int(r["target_id"]))
+        # مهاجرت یک‌باره‌ی دسترسی‌های جزئی: پشتیبان‌های قدیمی (دارای panel) همون چیزی که قبلاً داشتن رو نگه می‌دارن.
+        # قبلاً پشتیبانِ انتخاب‌شده مینی‌اپ و پیام‌های گروه نداشت؛ «لیست پشتیبانی» هم تازه‌ست و پیش‌فرض خاموشه.
+        if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'admin_perms_v2'"):
+            base = set(ADMIN_PERMS) - {"staff_list", "miniapp", "group_msgs"}
+            for _uid, _perms in STAFF.items():
+                if "panel" not in _perms:
+                    continue
+                _perms |= base
+                if not any(_uid in v for v in STAFF_MANAGE.values()):
+                    _perms |= {"miniapp", "group_msgs"}
+                await c.execute("UPDATE support_staff SET perms = $2 WHERE user_id = $1", _uid, ",".join(sorted(_perms)))
+            await c.execute("INSERT INTO bot_settings (key, value) VALUES ('admin_perms_v2', '1') ON CONFLICT (key) DO NOTHING")
     await _event_load()
     log.info("database ready")
 
@@ -1035,23 +1073,27 @@ function PanelScreen(){
   const body=h('div',{class:'scroll'});
   const el=h('div',{class:'scr'},h('div',{class:'top'},h('div',{class:'row2'},h('div',{class:'ttl'},'🛠 پنل پشتیبانی'),h('button',{class:'ib',onclick:()=>load()},'↻'))),body);
   async function load(){
-    let me,st;try{[me,st]=await Promise.all([api('/api/me'),api('/api/stats')])}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message));return}
-    const sw=h('div',{class:'sw'+(me.bot_enabled?' on':''),onclick:async()=>{
+    let me,st=null;try{me=await api('/api/me');if((me.perms||[]).includes('stats'))st=await api('/api/stats')}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message));return}
+    const P=new Set(me.perms||[]),has=k=>P.has(k);
+    const sw=!has('bot_toggle')?h('span',{}):h('div',{class:'sw'+(me.bot_enabled?' on':''),onclick:async()=>{
       if(!await ask(me.bot_enabled?'ربات خاموش بشه؟ (فقط پشتیبان‌ها می‌تونن ازش استفاده کنن)':'ربات روشن بشه؟'))return;
       try{const r=await api('/api/toggle',{});toast(r.enabled?'🟢 ربات روشن شد':'🔴 ربات خاموش شد');load()}catch(e){toast(e.message,1)}}});
-    const S=[['👥 کاربران',st.users],['✅ استارت‌کرده',st.started],['💬 گروه‌ها',st.chats],['✉️ پیام‌های ثبت‌شده',st.msgs],['🔥 پیام ۲۴ ساعت اخیر',st.msgs24],['🧑‍🤝‍🧑 فعال ۲۴ ساعت اخیر',st.active24],['💰 مجموع دارایی',st.balance],['🤛 مجموع جق‌ها',st.jaghs],['🚫 محروم‌ها',st.banned],['🪪 اعضای دیده‌شده',st.members]];
-    const mx=Math.max(1,...st.hours);
+    const S=!st?[]:[['👥 کاربران',st.users],['✅ استارت‌کرده',st.started],['💬 گروه‌ها',st.chats],['✉️ پیام‌های ثبت‌شده',st.msgs],['🔥 پیام ۲۴ ساعت اخیر',st.msgs24],['🧑‍🤝‍🧑 فعال ۲۴ ساعت اخیر',st.active24],['💰 مجموع دارایی',st.balance],['🤛 مجموع جق‌ها',st.jaghs],['🚫 محروم‌ها',st.banned],['🪪 اعضای دیده‌شده',st.members]];
+    const mx=st?Math.max(1,...st.hours):1;
+    const mk=(k,cls,label,fn)=>has(k)?h('button',{class:'act '+cls,onclick:fn},label):null;
+    const grp1=[mk('money_sub','red','💸 کم کردن پول',()=>adjustSheet('balance','sub',null)),mk('money_add','ok','➕ افزودن پول',()=>adjustSheet('balance','add',null)),
+      mk('jagh_sub','red','🤛 کم کردن جق',()=>adjustSheet('jaghs','sub',null)),mk('jagh_add','ok','➕ افزودن جق',()=>adjustSheet('jaghs','add',null))].filter(Boolean);
+    const grp2=[mk('ban','red','🚫 محروم کردن',()=>banSheet(null)),mk('unban','ok','✅ رفع محرومیت',()=>pickUser(u=>doUnban(u))),
+      (has('ban')||has('unban'))?h('button',{class:'act',onclick:()=>push(UsersScreen(true))},'📛 لیست محروم‌ها'):null,
+      (has('task_daily')||has('task_weekly'))?h('button',{class:'act',onclick:()=>push(TasksScreen())},'📋 تسک‌ها'):null,
+      mk('broadcast','','📢 پیام همگانی',()=>push(BroadcastScreen())),
+      h('button',{class:'act',onclick:()=>push(LogScreen())},'🧾 گزارش عملیات')].filter(Boolean);
     body.replaceChildren(
       h('div',{class:'card'},h('div',{class:'row2',style:'padding:10px 0'},h('div',{},h('b',{},'وضعیت ربات'),h('div',{class:'sub'},me.bot_enabled?'🟢 روشن':'🔴 خاموش')),sw)),
       h('div',{class:'grid'},S.map(([l,v])=>h('div',{class:'stat'},h('b',{},num(v)),h('span',{},l)))),
-      h('div',{class:'card'},h('h3',{},'پیام‌های ۲۴ ساعت اخیر (هر ستون = یک ساعت)'),h('div',{class:'bars'},st.hours.map((n,i)=>h('i',{style:'height:'+Math.round(n/mx*100)+'%',title:num(n)}))),st.top.length?h('div',{style:'margin-top:8px'},h('div',{class:'sub'},'پرحرف‌های ۲۴ ساعت اخیر'),st.top.map(t=>h('div',{class:'kv cp',onclick:()=>openProfile(t.user_id)},h('span',{},t.name||t.user_id),h('span',{},num(t.n)+' پیام')))):null),
-      h('div',{class:'card'},h('h3',{},'پول و جق'),h('div',{class:'grid',style:'margin:6px 0 10px'},
-        h('button',{class:'act red',onclick:()=>adjustSheet('balance','sub',null)},'💸 کم کردن پول'),h('button',{class:'act ok',onclick:()=>adjustSheet('balance','add',null)},'➕ افزودن پول'),
-        h('button',{class:'act red',onclick:()=>adjustSheet('jaghs','sub',null)},'🤛 کم کردن جق'),h('button',{class:'act ok',onclick:()=>adjustSheet('jaghs','add',null)},'➕ افزودن جق'))),
-      h('div',{class:'card'},h('h3',{},'مدیریت'),h('div',{class:'grid',style:'margin:6px 0 10px'},
-        h('button',{class:'act red',onclick:()=>banSheet(null)},'🚫 محروم کردن'),h('button',{class:'act ok',onclick:()=>pickUser(u=>doUnban(u))},'✅ رفع محرومیت'),
-        h('button',{class:'act',onclick:()=>push(UsersScreen(true))},'📛 لیست محروم‌ها'),h('button',{class:'act',onclick:()=>push(TasksScreen())},'📋 تسک‌ها'),
-        h('button',{class:'act',onclick:()=>push(BroadcastScreen())},'📢 پیام همگانی'),h('button',{class:'act',onclick:()=>push(LogScreen())},'🧾 گزارش عملیات'))),
+      st?h('div',{class:'card'},h('h3',{},'پیام‌های ۲۴ ساعت اخیر (هر ستون = یک ساعت)'),h('div',{class:'bars'},st.hours.map((n,i)=>h('i',{style:'height:'+Math.round(n/mx*100)+'%',title:num(n)}))),st.top.length?h('div',{style:'margin-top:8px'},h('div',{class:'sub'},'پرحرف‌های ۲۴ ساعت اخیر'),st.top.map(t=>h('div',{class:'kv cp',onclick:()=>openProfile(t.user_id)},h('span',{},t.name||t.user_id),h('span',{},num(t.n)+' پیام')))):null):null,
+      grp1.length?h('div',{class:'card'},h('h3',{},'پول و جق'),h('div',{class:'grid',style:'margin:6px 0 10px'},grp1)):null,
+      h('div',{class:'card'},h('h3',{},'مدیریت'),h('div',{class:'grid',style:'margin:6px 0 10px'},grp2)),
       h('div',{class:'sub',style:'text-align:center;padding:6px 12px 24px'},(me.version||'')+' • نگهداری پیام‌ها: '+(me.retention_days?num(me.retention_days)+' روز':'نامحدود'))
     );
   }
@@ -1173,7 +1215,7 @@ function openTab(k){
 async function bootTabs(){
   try{const m=await api('/api/social/me');const isSupport=m.is_support;
     if(!isSupport){document.querySelectorAll('#tabs button').forEach(b=>{if(b.dataset.k!=='social')b.remove()});openTab('social')}
-    else openTab('social');
+    else{if(!(m.perms||[]).includes('group_msgs')){const cb=document.querySelector('#tabs button[data-k="chats"]');if(cb)cb.remove()}openTab('social')}
   }catch(e){document.querySelectorAll('#tabs button').forEach(b=>{if(b.dataset.k!=='social')b.remove()});openTab('social')}
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>openTab(b.dataset.k));
@@ -1187,6 +1229,13 @@ class _ApiError(Exception):
     def __init__(self, msg: str, status: int = 400):
         super().__init__(msg)
         self.status = status
+
+
+def _need(user, *perms):
+    """اگه هیچ‌کدوم از این دسترسی‌ها رو نداشته باشه خطای ۴۰۳ میده."""
+    uid = int(user["id"])
+    if not any(has_perm(uid, p) for p in perms):
+        raise _ApiError("این بخش برای حساب تو فعال نیست.", 403)
 
 
 def _j(obj, status: int = 200):
@@ -1349,7 +1398,7 @@ def _msg_out(r) -> dict:
 # ───────────── GET ها ─────────────
 async def _g_me(qs, user):
     return _j({"id": int(user["id"]), "name": user.get("first_name") or "", "bot_enabled": BOT_ENABLED,
-               "version": BOT_VERSION, "retention_days": MSG_LOG_DAYS})
+               "version": BOT_VERSION, "retention_days": MSG_LOG_DAYS, "perms": sorted(perms_of(int(user["id"])))})
 
 
 async def _g_stats(qs, user):
@@ -1652,6 +1701,8 @@ async def _p_adjust(b, user):
     field, op = b.get("field"), b.get("op")
     if uid is None or field not in ("balance", "jaghs") or op not in ("add", "sub"):
         raise _ApiError("درخواست نامعتبر")
+    _need(user, {("balance", "sub"): "money_sub", ("balance", "add"): "money_add",
+                 ("jaghs", "sub"): "jagh_sub", ("jaghs", "add"): "jagh_add"}[(field, op)])
     raw = b.get("amount")
     amt = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else parse_amount(str(raw or ""))
     if amt <= 0:
@@ -1700,6 +1751,7 @@ async def _p_task_add(b, user):
     period, title = b.get("period"), str(b.get("title") or "").strip()[:300]
     if period not in ("daily", "weekly") or not title:
         raise _ApiError("متن تسک خالیه")
+    _need(user, "task_daily" if period == "daily" else "task_weekly")
     await pool.execute("INSERT INTO tasks (period, title) VALUES ($1, $2)", period, title)
     await _audit(user, "task_add", None, f"{'روزانه' if period == 'daily' else 'هفتگی'}: {title}")
     return _j({"ok": True})
@@ -1709,6 +1761,9 @@ async def _p_task_del(b, user):
     tid = _int(b.get("task_id"))
     if tid is None:
         raise _ApiError("درخواست نامعتبر")
+    per = await pool.fetchval("SELECT period FROM tasks WHERE task_id = $1", tid)
+    if per:
+        _need(user, "task_daily" if per == "daily" else "task_weekly")
     title = await pool.fetchval("UPDATE tasks SET active = FALSE WHERE task_id = $1 RETURNING title", tid)
     await _audit(user, "task_del", None, title or str(tid))
     return _j({"ok": True})
@@ -1816,7 +1871,7 @@ def _social_media_input(b, uid, kind):
 async def _social_me(qs, user):
     uid = int(user["id"])
     p = await pool.fetchrow("SELECT username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
-    return _j({"id":uid,"name":user.get("first_name") or "کاربر","is_support":_social_staff(user) and not is_managed_support(uid),"premium_emoji":_social_emoji_staff(user),"profile":dict(p) if p else None})
+    return _j({"id":uid,"name":user.get("first_name") or "کاربر","is_support":_social_staff(user) and has_perm(uid,"miniapp"),"perms":sorted(perms_of(uid)) if _social_staff(user) and has_perm(uid,"miniapp") else [],"premium_emoji":_social_emoji_staff(user),"profile":dict(p) if p else None})
 
 async def _social_feed(qs, user):
     limit = _int(qs.get("limit"), 30, 1, 60)
@@ -1927,6 +1982,20 @@ async def _social_room_react(b,user):
 _SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get}
 _SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/react":_social_react,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
 
+# هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
+# adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
+_API_PERM = {
+    "/api/stats": ("stats",),
+    "/api/groups": ("group_msgs",), "/api/group": ("group_msgs",),
+    "/api/messages": ("group_msgs",), "/api/media": ("group_msgs",),
+    "/api/tasks": ("task_daily", "task_weekly"),
+    "/api/task/add": ("task_daily", "task_weekly"), "/api/task/delete": ("task_daily", "task_weekly"),
+    "/api/user/adjust": ("money_sub", "money_add", "jagh_sub", "jagh_add"),
+    "/api/user/ban": ("ban",), "/api/user/unban": ("unban",),
+    "/api/toggle": ("bot_toggle",),
+    "/api/bc/start": ("broadcast",), "/api/bc/status": ("broadcast",),
+}
+
 _GET = {
     "/api/me": _g_me, "/api/stats": _g_stats, "/api/groups": _g_groups, "/api/group": _g_group, "/api/messages": _g_messages,
     "/api/users": _g_users, "/api/user": _g_user, "/api/avatar": _g_avatar, "/api/media": _g_media,
@@ -1953,8 +2022,13 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     social = path.startswith("/api/social/")
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
-    if not social and (not has_perm(int(user["id"]), "panel") or is_managed_support(int(user["id"]))):
-        return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
+    if not social:
+        _uid = int(user["id"])
+        if not (has_perm(_uid, "panel") and has_perm(_uid, "miniapp")):
+            return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
+        _need_p = _API_PERM.get(path)
+        if _need_p and not any(has_perm(_uid, p) for p in _need_p):
+            return _j({"error": "این بخش برای حساب تو فعال نیست."}, 403)
     if pool is None:
         return _j({"error": "دیتابیس هنوز آماده نیست"}, 503)
     try:
@@ -7126,7 +7200,7 @@ def _is_bot_text_command(text: str) -> bool:
         "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "کازینو", "casino",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
-    if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS:
+    if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
         return True
     if key.startswith(("واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
         return True
@@ -7239,22 +7313,58 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
     uid = user_id
-    # مینی‌اپ برای صاحب ربات و پشتیبان‌هایی که دسترسی panel دارند؛ کاربران عادی دکمه را نمی‌بینند.
-    web_row = [[btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL.startswith("https://") and uid is not None and has_perm(uid, "panel") and not is_managed_support(uid) else []
-    support_row = [[btn("➕ افزودن پشتیبانی", "success", callback_data="sup:add"),
-                    btn("📋 لیست پشتیبان‌ها", "primary", callback_data="sup:list")]] if uid in OWNER_IDS else []
-    if uid is not None and uid not in OWNER_IDS and has_perm(uid, "staff") and STAFF_MANAGE.get(uid):
-        support_row = [[btn("🛡 دسترسی پشتیبان‌ها", "primary", callback_data="sup:list")]]
-    return InlineKeyboardMarkup(web_row + support_row + [
-        [btn("💸 کم کردن پول", "primary", callback_data="ad:money"), btn("➕ افزودن پول", "success", callback_data="ad:money_add")],
-        [btn("🤛 کم کردن جق", "primary", callback_data="ad:jagh"), btn("➕ افزودن جق", "success", callback_data="ad:jagh_add")],
-        [btn("🚫 محروم کردن کاربر", "danger", callback_data="ad:ban"), btn("✅ رفع محرومیت", "success", callback_data="ad:unban")],
-        [btn("📋 افزودن تسک روزانه", "primary", callback_data="ad:task_daily"), btn("📆 افزودن تسک هفتگی", "primary", callback_data="ad:task_weekly")],
-        [btn("🔴 خاموش کردن ربات", "danger", callback_data="ad:toggle") if BOT_ENABLED
-         else btn("🟢 روشن کردن ربات", "success", callback_data="ad:toggle")],
-        [btn("📢 پیام همگانی", "primary", callback_data="ad:bc"), btn("📊 آمار", "primary", callback_data="ad:stats")],
-        [btn("👁 پیام‌های گروه‌ها", "primary", callback_data="ad:gm")],
-    ])
+    hp = lambda p: uid is not None and has_perm(uid, p)
+    rows = []
+    # هر دکمه فقط برای کسی که دسترسیش رو داره نشون داده میشه (صاحب‌ها همه‌شون رو دارن)
+    if WEBAPP_URL.startswith("https://") and hp("miniapp"):
+        rows.append([btn("📱 مینی‌اپ پنل پشتیبانی", "success", web_app=WebAppInfo(url=WEBAPP_URL))])
+    if uid in OWNER_IDS:
+        rows.append([btn("➕ افزودن پشتیبانی", "success", callback_data="sup:add"),
+                     btn("📋 لیست پشتیبان‌ها", "primary", callback_data="sup:list")])
+    elif uid is not None and has_perm(uid, "staff") and STAFF_MANAGE.get(uid):
+        rows.append([btn("🛡 دسترسی پشتیبان‌ها", "primary", callback_data="sup:list")])
+    elif hp("staff_list"):
+        rows.append([btn("📋 لیست پشتیبانی", "primary", callback_data="ad:slist")])
+
+    def add(*items):
+        r = [b for p, b in items if hp(p)]
+        if r:
+            rows.append(r)
+
+    add(("money_sub", btn("💸 کم کردن پول", "primary", callback_data="ad:money")),
+        ("money_add", btn("➕ افزودن پول", "success", callback_data="ad:money_add")))
+    add(("jagh_sub", btn("🤛 کم کردن جق", "primary", callback_data="ad:jagh")),
+        ("jagh_add", btn("➕ افزودن جق", "success", callback_data="ad:jagh_add")))
+    add(("ban", btn("🚫 محروم کردن کاربر", "danger", callback_data="ad:ban")),
+        ("unban", btn("✅ رفع محرومیت", "success", callback_data="ad:unban")))
+    add(("task_daily", btn("📋 افزودن تسک روزانه", "primary", callback_data="ad:task_daily")),
+        ("task_weekly", btn("📆 افزودن تسک هفتگی", "primary", callback_data="ad:task_weekly")))
+    add(("bot_toggle", btn("🔴 خاموش کردن ربات", "danger", callback_data="ad:toggle") if BOT_ENABLED
+         else btn("🟢 روشن کردن ربات", "success", callback_data="ad:toggle")))
+    add(("broadcast", btn("📢 پیام همگانی", "primary", callback_data="ad:bc")),
+        ("stats", btn("📊 آمار", "primary", callback_data="ad:stats")))
+    add(("group_msgs", btn("👁 پیام‌های گروه‌ها", "primary", callback_data="ad:gm")))
+    if not rows:
+        rows.append([btn("🔒 هنوز دسترسی‌ای برات فعال نشده", callback_data="ad:noop")])
+    return InlineKeyboardMarkup(rows)
+
+
+# دکمه‌ی هر عملیات /admin → دسترسی لازم
+_ADMIN_ACT_PERM = {
+    "money": "money_sub", "money_add": "money_add", "jagh": "jagh_sub", "jagh_add": "jagh_add",
+    "gm": "group_msgs", "gl": "group_msgs", "gu0": "group_msgs", "gu": "group_msgs",
+    "ban": "ban", "unban": "unban", "task_daily": "task_daily", "task_weekly": "task_weekly",
+    "toggle": "bot_toggle", "stats": "stats", "bc": "broadcast", "bcgo": "broadcast", "slist": "staff_list",
+}
+
+
+def _adm_state_perm(st: dict):
+    """دسترسی لازم برای مرحله‌ی در حال انجام (اگه وسط کار دسترسی گرفته بشن، ادامه نمی‌دن)."""
+    act = st.get("act")
+    if act == "task_add":
+        return "task_daily" if st.get("period") == "daily" else "task_weekly"
+    return {"money": "money_sub", "money_add": "money_add", "jagh": "jagh_sub", "jagh_add": "jagh_add",
+            "gmu": "group_msgs", "ban": "ban", "unban": "unban", "bc": "broadcast"}.get(act)
 
 
 def admin_menu_text() -> str:
@@ -7314,6 +7424,17 @@ def grantable_perms(actor: int) -> dict:
     return {k: v for k, v in SUPPORT_PERMS.items() if k != "staff" and k in mine}
 
 
+def can_toggle_perm(actor: int, uid: int, perm: str) -> bool:
+    """صاحب‌ها همه‌چیز؛ پشتیبانِ مدیر: هر دسترسیِ روشن رو می‌تونه از پشتیبان انتخاب‌شده بگیره، ولی فقط دسترسی‌هایی رو می‌تونه بده که خودش داره (و «staff» رو هیچ‌وقت)."""
+    if actor in OWNER_IDS:
+        return True
+    if perm == "staff" or perm not in SUPPORT_PERMS:
+        return False
+    if perm in OWNER_GRANT_ONLY:   # مینی‌اپ و پیام‌های گروه رو پشتیبانِ مدیر فقط می‌تونه بگیره، نه بده
+        return perm in STAFF.get(uid, set())
+    return perm in STAFF.get(uid, set()) or perm in STAFF.get(actor, set())
+
+
 async def _staff_list_view(actor: int | None = None):
     owner = actor is None or actor in OWNER_IDS
     rows = []
@@ -7334,21 +7455,26 @@ async def _staff_list_view(actor: int | None = None):
 async def _staff_user_view(uid: int, actor: int | None = None):
     owner = actor is None or actor in OWNER_IDS
     perms = STAFF.get(uid, set())
-    allowed = SUPPORT_PERMS if owner else grantable_perms(actor)
-    rows = []
-    for k, fa in SUPPORT_PERMS.items():
+
+    def perm_btn(k: str, fa: str) -> InlineKeyboardButton:
         mark = "✅ " if k in perms else "❌ "
-        if k in allowed:
-            rows.append([InlineKeyboardButton(mark + fa, callback_data=f"sup:t:{uid}:{k}")])
-        else:   # فقط نمایش؛ این دسترسی رو نمی‌تونی دست بزنی
-            rows.append([InlineKeyboardButton(mark + fa + " 🔒", callback_data="sup:noop")])
+        if owner or can_toggle_perm(actor, uid, k):
+            return InlineKeyboardButton(mark + fa, callback_data=f"sup:t:{uid}:{k}")
+        return InlineKeyboardButton(mark + fa + " 🔒", callback_data="sup:noop")   # فقط نمایش؛ دست‌نخوردنی
+
+    rows = [[perm_btn(k, fa)] for k, fa in SUPPORT_PERMS.items() if k not in ADMIN_PERMS]
+    btns = [perm_btn(k, fa) for k, fa in ADMIN_PERMS.items()]
+    rows += [btns[i:i + 2] for i in range(0, len(btns), 2)]   # دکمه‌های /admin دوتایی‌دوتایی
     if owner:
+        rows.append([InlineKeyboardButton("✅ روشن کردن همه‌ی دکمه‌ها", callback_data=f"sup:all:{uid}:1"),
+                     InlineKeyboardButton("❌ خاموش کردن همه", callback_data=f"sup:all:{uid}:0")])
         if "staff" in perms:
             rows.append([InlineKeyboardButton(f"👥 پشتیبان‌های قابل مدیریت ({len(STAFF_MANAGE.get(uid, ()))})", callback_data=f"sup:mg:{uid}")])
         rows.append([InlineKeyboardButton("حذف از پشتیبانی 🗑", callback_data=f"sup:del:{uid}")])
     rows.append([InlineKeyboardButton("⬅️ برگشت", callback_data="sup:list")])
-    hint = "هر دسترسی رو با زدن روش روشن/خاموش کن:" if owner else "دسترسی‌هایی که خودت داری رو می‌تونی بدی یا بگیری (🔒 = دست‌نخوردنی):"
-    return f"🛡 {await _staff_name(uid)}\nآیدی: {uid}\n\n{hint}", InlineKeyboardMarkup(rows)
+    hint = "هر دسترسی رو با زدن روش روشن/خاموش کن:" if owner else "هر دسترسیِ روشن رو می‌تونی بگیری؛ فقط دسترسی‌هایی که خودت داری رو می‌تونی بدی (🔒 = دست‌نخوردنی):"
+    return (f"🛡 {await _staff_name(uid)}\nآیدی: {uid}\n\n{hint}\n"
+            "(بالا: دسترسی‌های اصلی • پایین: دسترسی تک‌تک دکمه‌های /admin و مینی‌اپ)"), InlineKeyboardMarkup(rows)
 
 
 async def _staff_manage_view(manager: int):
@@ -7446,7 +7572,7 @@ async def support_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if act in ("t", "u", "mg", "mt", "del") and len(parts) > 2 and not owner and not can_manage_staff(actor, int(parts[2])):
         await q.answer("این پشتیبان برای تو انتخاب نشده.", show_alert=True)
         return
-    if act == "t" and len(parts) > 3 and parts[3] not in grantable_perms(actor):
+    if act == "t" and len(parts) > 3 and not can_toggle_perm(actor, int(parts[2]), parts[3]):
         await q.answer("این دسترسی رو نمی‌تونی تغییر بدی.", show_alert=True)
         return
     await q.answer()
@@ -7473,12 +7599,18 @@ async def support_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text, kb = await _staff_list_view(actor)
     else:
         uid = int(parts[2])
-        if act == "t" and uid in STAFF and parts[3] in grantable_perms(actor):
+        if act == "t" and uid in STAFF and can_toggle_perm(actor, uid, parts[3]):
             STAFF[uid] ^= {parts[3]}
             await _save_staff(uid)
             if parts[3] == "staff" and "staff" not in STAFF[uid]:   # دسترسی مدیریت گرفته شد → لیست مدیریت‌شونده‌ها پاک
                 STAFF_MANAGE.pop(uid, None)
                 await pool.execute("DELETE FROM support_manage WHERE manager_id=$1", uid)
+        elif act == "all" and owner and uid in STAFF and len(parts) > 3:   # روشن/خاموش کردنِ یک‌جای همه‌ی دکمه‌های /admin
+            if parts[3] == "1":
+                STAFF[uid] |= set(ADMIN_PERMS)
+            else:
+                STAFF[uid] -= set(ADMIN_PERMS)
+            await _save_staff(uid)
         elif act == "del" and owner:
             STAFF.pop(uid, None)
             STAFF_MANAGE.pop(uid, None)
@@ -7509,6 +7641,13 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     parts = q.data.split(":")
     act = parts[1]
+    if act == "noop":
+        await q.answer("صاحب ربات هنوز دسترسی‌ای برات روشن نکرده.", show_alert=True)
+        return
+    _need_perm = _ADMIN_ACT_PERM.get(act)
+    if _need_perm and not has_perm(q.from_user.id, _need_perm):
+        await q.answer("این دسترسی برات فعال نیست.", show_alert=True)
+        return
     await q.answer()
     if act in ("menu", "cancel"):
         context.user_data.pop("adm", None)
@@ -7521,6 +7660,10 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{operation} {what}\n\nآیدی عددی یا @یوزرنیم کاربر رو بفرست، یا یه پیام ازش اینجا فوروارد کن.\n(لغو: بنویس «لغو»)",
             reply_markup=CANCEL_KB,
         )
+    elif act == "slist":   # لیست فقط‌خواندنیِ پشتیبان‌ها
+        names = [f"• {await _staff_name(u)} — {u}" for u in sorted(STAFF)]
+        await q.edit_message_text("📋 لیست پشتیبانی\n\n" + ("\n".join(names) if names else "هنوز پشتیبانی اضافه نشده."),
+                                  reply_markup=InlineKeyboardMarkup([[btn("🔙 پنل", callback_data="ad:menu")]]))
     elif act == "gm":   # لیست گروه‌هایی که ربات توشونه
         context.user_data.pop("adm", None)
         rows = await pool.fetch(
@@ -7602,7 +7745,7 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif act == "bcgo":
         st = context.user_data.get("adm")
         if not st or st.get("act") != "bc" or st.get("step") != "confirm":
-            await q.edit_message_text("چیزی برای ارسال نیست.", reply_markup=admin_menu_kb())
+            await q.edit_message_text("چیزی برای ارسال نیست.", reply_markup=admin_menu_kb(q.from_user.id))
             return
         context.user_data.pop("adm", None)
         await q.edit_message_text(f"{HG_CE} ارسال شروع شد؛ وقتی تموم شد خبرت می‌کنم.", parse_mode="HTML")
@@ -7664,7 +7807,12 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         return False
     if msg.text and msg.text.strip() == "لغو":
         context.user_data.pop("adm", None)
-        await msg.reply_text("لغو شد.", reply_markup=admin_menu_kb())
+        await msg.reply_text("لغو شد.", reply_markup=admin_menu_kb(user.id))
+        return True
+    _need_perm = _adm_state_perm(st)
+    if _need_perm and not has_perm(user.id, _need_perm):
+        context.user_data.pop("adm", None)
+        await msg.reply_text("این دسترسی برات فعال نیست.", reply_markup=admin_menu_kb(user.id))
         return True
     act = st["act"]
     if act == "gmu":
@@ -7713,7 +7861,7 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
                 await pool.execute("UPDATE users SET banned_until = 0 WHERE user_id = $1", uid)
                 BANNED.pop(uid, None)
                 context.user_data.pop("adm", None)
-                await msg.reply_text(f"✅ محرومیت {who} برداشته شد.", reply_markup=admin_menu_kb())
+                await msg.reply_text(f"✅ محرومیت {who} برداشته شد.", reply_markup=admin_menu_kb(user.id))
                 return True
             st.update(step="duration", uid=uid, who=who)
             await msg.reply_text(
@@ -7730,7 +7878,7 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
             await pool.execute("UPDATE users SET banned_until = $1::double precision WHERE user_id = $2::bigint", until, st["uid"])
             BANNED[st["uid"]] = until
             context.user_data.pop("adm", None)
-            await msg.reply_text(f"🚫 {st['who']} {_ban_until_txt(until)} محروم شد.", reply_markup=admin_menu_kb())
+            await msg.reply_text(f"🚫 {st['who']} {_ban_until_txt(until)} محروم شد.", reply_markup=admin_menu_kb(user.id))
             return True
     if act in ("money", "jagh", "money_add", "jagh_add"):
         if st["step"] == "target":
@@ -7775,7 +7923,7 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
             if act.startswith("money"):
                 await notify_primary_support(context, user.id, st["uid"], amt if act.endswith("_add") else -amt, "تغییر موجودی از پنل پشتیبانی")
             unit = "تومن" if act.startswith("money") else "جق"
-            await msg.reply_text(f"✅ {amt:,} {unit} {verb}. مقدار جدید: {new:,} {unit}", reply_markup=admin_menu_kb())
+            await msg.reply_text(f"✅ {amt:,} {unit} {verb}. مقدار جدید: {new:,} {unit}", reply_markup=admin_menu_kb(user.id))
             return True
     if act == 'task_add' and st['step'] == 'title':
         title = (msg.text or '').strip()[:300]
@@ -7784,7 +7932,7 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         await pool.execute('INSERT INTO tasks(period,title) VALUES($1,$2)', st['period'], title)
         context.user_data.pop('adm', None)
         period_label = 'روزانه' if st['period'] == 'daily' else 'هفتگی'
-        await msg.reply_text(f'✅ تسک {period_label} برای همه کاربران اضافه شد.', reply_markup=admin_menu_kb())
+        await msg.reply_text(f'✅ تسک {period_label} برای همه کاربران اضافه شد.', reply_markup=admin_menu_kb(user.id))
         return True
     if act == 'bc' and st['step'] == 'msg':
         st.update(step="confirm", src_chat=msg.chat_id, src_msg=msg.message_id)
@@ -8180,6 +8328,107 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     return True
 
 
+# ───────────────────────── گی و لز (بین کاراکترهای هم‌جنس، با ریپلای) ─────────────────────────
+# مردها با «گی»/«لواط» و دخترها با «لز»/«قیچی» روی پیامِ یه کاربرِ هم‌جنس ریپلای می‌کنن.
+# هر کاربر هر ۳۰ دقیقه فقط یه بار تو گی/لز شرکت می‌کنه (چه خودش شروع کرده باشه چه طرف مقابل بوده)؛
+# تا ۳۰ دقیقه با هیچ‌کس دیگه‌ای نمی‌تونه. هر دو نفر شانسی ۵ تا ۷ هزار تومن می‌گیرن.
+# اگه هر کدوم از دو طرف همسر داشته باشه انجام نمیشه.
+PAIR_FUN_COOLDOWN = 30 * 60
+PAIR_FUN_MONEY = (5_000, 7_000)
+PAIR_FUN = {
+    "gay": dict(
+        gender="m", only="مرد", mate="زن", do="گی کنی", name="گی کردن",
+        eid="5253687731149630615", fb="🏳️‍🌈",
+        words=("گی", "گیکن", "گیکردن", "لواط"),
+        lines=[
+            "{a} با یه نگاه معنی‌دار {b} رو برد گوشه‌ی گپ؛ هر چی شد، هر دو با لبخند برگشتن 😏",
+            "{a} و {b} همه‌ی دنیا رو فراموش کردن و فقط به هم خیره شدن؛ گروه یه لحظه سرخ شد 🌈",
+            "{a} دل {b} رو برد و {b} هم بی‌مقاومت تسلیم شد؛ عاشقانه‌ترین لحظه‌ی امشبِ گپ 💞",
+            "هیچکس نفهمید پشت پرده چی گذشت، ولی {a} و {b} با چهره‌ی راضی برگشتن 😌",
+            "{a} با یه شاخه گل رفت سراغ {b} و {b} هم بی‌خیال همه‌چی شد؛ گروه غرق سکوت شد 🌹",
+            "{a} و {b} امشب یه اتحاد جدید ساختن؛ تا صبح همه درباره‌شون حرف می‌زنن 🔥",
+            "{a} به {b} چشمک زد و {b} هم جواب داد؛ همین کافی بود تا گپ آتیش بگیره 💥",
+            "{a} و {b} قرارشون رو گذاشتن و با هم رفتن؛ ما موندیم و کنجکاوی 😂",
+        ],
+    ),
+    "lez": dict(
+        gender="f", only="دختر", mate="شوهر", do="لز کنی", name="لز کردن",
+        eid="5328040156278576417", fb="🏳️‍🌈",
+        words=("لز", "لزکن", "لزکردن", "قیچی"),
+        lines=[
+            "{a} و {b} یه نگاه رد و بدل کردن که کل گپ رو ساکت کرد؛ هیچکس نفهمید بعدش چی شد 🌸",
+            "{a} با یه لبخند شیطون {b} رو برد گوشه‌ی گپ و هر دو با گونه‌های سرخ برگشتن 😏",
+            "{a} دست {b} رو گرفت و گفت «امشب مال ماست»؛ گروه نفسش رو حبس کرد 💞",
+            "{a} و {b} امشب یه قرار مخفی گذاشتن و ستاره‌ها هم شاهد بودن ✨",
+            "{a} یه دسته گل برای {b} آورد و {b} هم دلش رو تقدیمش کرد 🌹",
+            "{a} به {b} چشمک زد؛ همین یه لحظه کافی بود تا گپ آتیش بگیره 🔥",
+            "{a} و {b} با هم رفتن یه گوشه‌ی دنج و برگشتنشون خیلی مشکوک بود 😂",
+            "{a} و {b} یه جفت جدید ساختن و کل گروه از خوشحالی کف زدن 👏",
+        ],
+    ),
+}
+PAIR_FUN_WORDS = {w: k for k, cfg in PAIR_FUN.items() for w in cfg["words"]}
+
+
+async def pair_fun(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> bool:
+    cfg = PAIR_FUN[kind]
+    msg, user = update.effective_message, update.effective_user
+    target = msg.reply_to_message.from_user if msg.reply_to_message else None
+    if target is None or target.is_bot or target.id == user.id:
+        return False
+    if (rl := await rift_left(user.id, target.id)) > 0:   # قهر بودن مثل بغل و بوس جلوشو می‌گیره
+        await msg.reply_text(rift_block_html(rl), parse_mode="HTML")
+        return True
+    now = time.time()
+    await upsert_user(user.id, user.full_name)
+    await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
+    err, m1, m2 = None, 0, 0
+    async with pool.acquire() as c:
+        async with c.transaction():   # قفل ردیف‌ها: دو پیام همزمان نمی‌تونن کولداون رو دور بزنن
+            rows = await c.fetch("SELECT user_id, gender, spouse_id FROM users WHERE user_id = ANY($1::bigint[]) ORDER BY user_id FOR UPDATE",
+                                 [user.id, target.id])
+            by = {int(r["user_id"]): r for r in rows}
+            me, other = by.get(user.id), by.get(target.id)
+            if not me or not other or not me["gender"] or not other["gender"]:
+                err = "هر دو نفر باید اول جنسیتشون رو از تنظیمات انتخاب کنن."
+            elif me["gender"] != cfg["gender"] or other["gender"] != cfg["gender"]:
+                err = f"{cfg['name']} فقط بین کاراکترهای {cfg['only']} انجام میشه."
+            elif me["spouse_id"]:
+                err = f"داری چکار می‌کنی؟ تو {cfg['mate']} داری!"
+            elif other["spouse_id"]:
+                err = f"داری چکار می‌کنی؟ این کاربر {cfg['mate']} داره!"
+            else:
+                # تایمر هر دو نفر (تو جدول actor_cooldowns با kind='pair_fun'؛ ردیف users قفله پس همزمانی امنه)
+                waits = {}
+                for uid_ in (user.id, target.id):
+                    last = await c.fetchval("SELECT last_ts FROM actor_cooldowns WHERE actor_id = $1 AND kind = 'pair_fun'", uid_) or 0
+                    waits[uid_] = PAIR_FUN_COOLDOWN - (now - float(last))
+                if waits[user.id] > 0:
+                    err = f"{HG_CE} هر کاربر هر {_duration_fa(PAIR_FUN_COOLDOWN)} فقط یه بار می‌تونه گی یا لز کنه؛ {_duration_fa(int(waits[user.id]) + 1)} دیگه صبر کن."
+                elif waits[target.id] > 0:
+                    err = f"{HG_CE} این کاربر تازه تو {cfg['name']} شرکت کرده؛ {_duration_fa(int(waits[target.id]) + 1)} دیگه باید صبر کنه."
+                else:
+                    m1, m2 = random.randint(*PAIR_FUN_MONEY), random.randint(*PAIR_FUN_MONEY)
+                    await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", m1, user.id)
+                    await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", m2, target.id)
+                    for uid_ in (user.id, target.id):
+                        await c.execute("INSERT INTO actor_cooldowns(actor_id,kind,last_ts) VALUES($1,'pair_fun',$2::double precision) "
+                                        "ON CONFLICT(actor_id,kind) DO UPDATE SET last_ts = EXCLUDED.last_ts", uid_, now)
+    if err:
+        await msg.reply_text(B(err), parse_mode="HTML")
+        return True
+    a = _ltr_name(user.id, user.full_name)
+    b = _ltr_name(target.id, target.full_name)
+    RLM = "\u200f"
+    emo = f'<tg-emoji emoji-id="{cfg["eid"]}">{cfg["fb"]}</tg-emoji>'
+    line = random.choice(cfg["lines"]).format(a=a, b=b)
+    text = (f"<b>{RLM}{emo} {line}\n\n"
+            f"{RLM}{GIFT_MONEY_CE} {a}: {m1:,} تومن\n"
+            f"{RLM}{GIFT_MONEY_CE} {b}: {m2:,} تومن</b>")
+    await msg.reply_text(text, parse_mode="HTML")
+    return True
+
+
 # ───────────────────────── افت انرژی با زمان + قهر و آشتی ─────────────────────────
 ENERGY_DECAY_PER_HOUR = 1.5      # هر ساعت این‌قدر از انرژی همه کم میشه
 ENERGY_DECAY_EVERY = 10 * 60     # هر چند ثانیه یه بار کم کنه (به نسبت)
@@ -8339,6 +8588,9 @@ async def gift_hug_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
     kind = HUG_WORDS.get(key)
     if kind:
         return await hug_kiss(update, context, kind)
+    fun = PAIR_FUN_WORDS.get(key)
+    if fun:
+        return await pair_fun(update, context, fun)
     return False
 
 
