@@ -538,6 +538,10 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS social_room_messages (message_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, text TEXT NOT NULL, reply_to BIGINT, premium_emoji_id TEXT, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE INDEX IF NOT EXISTS social_room_created_idx ON social_room_messages(created_at DESC)")
         await c.execute("CREATE TABLE IF NOT EXISTS social_room_reactions (message_id BIGINT NOT NULL REFERENCES social_room_messages(message_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, emoji TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(message_id,user_id,emoji))")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_comments (comment_id BIGSERIAL PRIMARY KEY, post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, text TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE INDEX IF NOT EXISTS social_comments_post_idx ON social_comments(post_id, comment_id)")
+        await c.execute("CREATE TABLE IF NOT EXISTS social_quota (user_id BIGINT NOT NULL, day TEXT NOT NULL, posts INT NOT NULL DEFAULT 0, stories INT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day))")
+        await c.execute("CREATE INDEX IF NOT EXISTS social_reactions_post_idx ON social_reactions(post_id)")
         STAFF.clear()
         for r in await c.fetch("SELECT user_id, perms FROM support_staff"):
             STAFF[int(r["user_id"])] = {p for p in r["perms"].split(",") if p in SUPPORT_PERMS}
@@ -611,11 +615,104 @@ textarea.inp{min-height:130px;resize:vertical}
 #tabs button.on{color:var(--btn);font-weight:600}
 #app.deep #tabs{display:none}
 /* جقستگرام */
-.social-top{background:linear-gradient(135deg,#7b2ff7,#f107a3);color:#fff;padding:14px;border-radius:0 0 20px 20px}
-.social-brand{font-size:23px;font-weight:900;letter-spacing:-.5px}.social-sub{font-size:12px;opacity:.85}
-.snav{display:flex;gap:7px;padding:10px 12px;overflow:auto;flex:none}.snav button{border:1px solid var(--line);background:var(--sec);border-radius:20px;padding:7px 13px;white-space:nowrap}.snav button.on{background:#b12bd5;color:#fff;border-color:#b12bd5}
-.stories{display:flex;gap:12px;padding:12px;overflow:auto;border-bottom:1px solid var(--line)}.story{width:66px;flex:none;text-align:center;font-size:11px;cursor:pointer}.story .av{width:58px;height:58px;margin:0 auto 4px;border:3px solid #c42bcf;outline:2px solid #ff9b42}
-.spost{margin:12px;background:var(--sec);border:1px solid var(--line);border-radius:17px;overflow:hidden}.sphead{display:flex;align-items:center;gap:9px;padding:10px}.spmedia{width:100%;max-height:420px;object-fit:cover;display:block;background:var(--line)}.spcaption{padding:9px 12px;white-space:pre-wrap}.spactions{display:flex;gap:8px;padding:0 12px 10px}.spactions button{border:0;background:transparent;padding:5px 7px;font-size:14px}.scompose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}.scompose .inp{margin:0;min-width:0}.sprofile{display:flex;align-items:center;gap:15px;padding:18px 14px}.sprofile .av{width:82px;height:82px}.sroom{flex:1;overflow:auto;padding:10px;background:var(--sec)}.smsg{max-width:85%;margin:7px 0;padding:9px 11px;border-radius:14px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13)}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
+.sg{--sg1:#7b2ff7;--sg2:#f107a3;--sg3:#ff9b42}
+.sg-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 14px 22px;color:#fff;background:linear-gradient(135deg,#6a1bff 0%,#c11bd8 55%,#ff5d8f 100%);border-radius:0 0 28px 28px;position:relative;overflow:hidden;flex:none}
+.sg-top::before{content:'';position:absolute;width:170px;height:170px;border-radius:50%;background:rgba(255,255,255,.12);top:-70px;inset-inline-start:-40px}
+.sg-top::after{content:'';position:absolute;width:120px;height:120px;border-radius:50%;background:rgba(255,155,66,.28);bottom:-60px;inset-inline-end:40px}
+.sg-logo{display:flex;align-items:center;gap:10px;position:relative;z-index:1}
+.sg-cam{width:44px;height:44px;border-radius:15px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:23px}
+.sg-brand{font-size:22px;font-weight:900;letter-spacing:-.4px;line-height:1.1}
+.sg-tag{font-size:11.5px;opacity:.9}
+.sg-ico{position:relative;z-index:1;border:0;background:rgba(255,255,255,.2);color:#fff;width:38px;height:38px;border-radius:50%;font-size:19px;cursor:pointer}
+.sg-ico:active{background:rgba(255,255,255,.35)}
+.sg-nav{display:flex;gap:6px;margin:-16px 12px 4px;padding:5px;background:var(--bg);border:1px solid var(--line);border-radius:20px;box-shadow:0 6px 18px rgba(120,40,200,.18);position:relative;z-index:2;flex:none}
+.sg-nav button{flex:1;border:0;background:none;border-radius:16px;padding:6px 2px;display:flex;flex-direction:column;align-items:center;color:var(--hint);cursor:pointer;transition:.18s}
+.sg-nav i{font-style:normal;font-size:18px}.sg-nav span{font-size:11px}
+.sg-nav button.on{background:linear-gradient(135deg,var(--sg1),var(--sg2));color:#fff;font-weight:700;box-shadow:0 3px 10px rgba(193,27,216,.4)}
+.sg-fab{position:absolute;bottom:18px;inset-inline-end:16px;width:56px;height:56px;border-radius:50%;border:0;color:#fff;font-size:30px;line-height:1;background:linear-gradient(135deg,var(--sg1),var(--sg2) 60%,var(--sg3));box-shadow:0 8px 22px rgba(193,27,216,.5);cursor:pointer;z-index:5;transition:transform .15s}
+.sg-fab:active{transform:scale(.9)}
+.sg-ban{margin:10px 12px 0;padding:14px;border-radius:18px;color:#fff;background:linear-gradient(135deg,var(--sg1),var(--sg2));display:flex;align-items:center;gap:12px;font-size:13.5px}
+.sg-ban .btn{width:auto;margin:0;background:#fff;color:#a71cc8;padding:8px 14px;flex:none}
+.sg-strip{display:flex;gap:13px;padding:14px 12px 8px;overflow-x:auto;scrollbar-width:none}.sg-strip::-webkit-scrollbar{display:none}
+.sg-st{flex:none;width:68px;text-align:center;font-size:11.5px;cursor:pointer}
+.sg-st span{display:block;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sg-ring{position:relative;width:68px;height:68px;border-radius:50%;padding:3px;background:conic-gradient(from 200deg,#ff9b42,#f107a3,#7b2ff7,#ff9b42);display:flex;align-items:center;justify-content:center}
+.sg-ring>.av{border:3px solid var(--bg)}
+.sg-ring.seen,.sg-ring.none{background:var(--line)}
+.sg-plus{position:absolute;bottom:-2px;inset-inline-end:-2px;width:22px;height:22px;border-radius:50%;border:2px solid var(--bg);background:var(--btn);color:#fff;font-size:15px;line-height:1;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.sg-post{margin:12px;background:var(--sec);border-radius:22px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.06);border:1px solid var(--line)}
+.sg-ph{display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer}
+.sg-ib2{border:0;background:none;font-size:22px;padding:0 6px;color:var(--hint);cursor:pointer}
+.sg-pw{position:relative;background:#000;touch-action:manipulation}
+.sg-m{position:relative;min-height:120px;background:var(--line);overflow:hidden}
+.sg-m img,.sg-m video{display:block;width:100%;max-height:480px;object-fit:cover;background:#000}
+.sg-pw .sg-m video{object-fit:contain}
+.sg-shim{position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.22) 50%,transparent 70%),var(--line);background-size:200% 100%;animation:sgsh 1.2s infinite linear}
+@keyframes sgsh{from{background-position:200% 0}to{background-position:-200% 0}}
+.sg-bad{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--hint);font-size:12px}
+.sg-big{position:absolute;inset:0;margin:auto;width:96px;height:96px;font-size:80px;line-height:96px;text-align:center;opacity:0;pointer-events:none}
+.sg-big.go{animation:sgpop .75s ease}
+@keyframes sgpop{0%{transform:scale(.2);opacity:0}25%{transform:scale(1.15);opacity:1}60%{transform:scale(1);opacity:1}100%{transform:scale(1.25);opacity:0}}
+.sg-ptext{padding:34px 22px;min-height:170px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:20px;font-weight:800;color:#fff;white-space:pre-wrap;word-break:break-word}
+.g0{background:linear-gradient(135deg,#7b2ff7,#f107a3)}.g1{background:linear-gradient(135deg,#ff9b42,#f107a3)}.g2{background:linear-gradient(135deg,#00b4ff,#7b2ff7)}.g3{background:linear-gradient(135deg,#11998e,#38c172)}.g4{background:linear-gradient(135deg,#f7971e,#ff4e50)}
+.sg-acts{display:flex;gap:6px;padding:9px 10px 2px}
+.sg-act{border:0;background:var(--bg);border-radius:20px;padding:6px 14px;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;font-weight:700;transition:transform .12s}
+.sg-act i{font-style:normal;font-size:18px}.sg-act:active{transform:scale(.92)}
+.sg-act.on{background:rgba(241,7,163,.13);color:#e0158f}
+.sg-act.pulse i{animation:sgpulse .35s}
+@keyframes sgpulse{50%{transform:scale(1.6)}}
+.sg-cap{padding:7px 14px 4px;white-space:pre-wrap;word-break:break-word}
+.sg-more{border:0;background:none;color:var(--hint);padding:2px 14px 12px;font-size:13px;cursor:pointer}
+.sg-more:empty{display:none}
+.sg-create{display:grid;gap:10px;margin:8px 0 4px}
+.sg-cbtn{display:flex;align-items:center;gap:12px;border:0;background:var(--sec);border-radius:18px;padding:13px;cursor:pointer;text-align:start;width:100%}
+.sg-cbtn i{font-style:normal;font-size:24px;width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sg1),var(--sg2));flex:none}
+.sg-cbtn b{flex:1}.sg-cbtn span{font-size:12px;color:var(--hint)}
+.sg-pick{width:100%;margin-top:10px;border:2px dashed var(--line);background:var(--sec);border-radius:18px;padding:22px 10px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}
+.sg-pick i{font-style:normal;font-size:34px}.sg-pick span{font-size:12px;color:var(--hint)}
+.sg-prev{position:relative;margin-top:10px;border-radius:16px;overflow:hidden;background:#000}.sg-prev:empty{display:none}
+.sg-prev img,.sg-prev video{display:block;width:100%;max-height:300px;object-fit:contain}
+.sg-x{position:absolute;top:8px;inset-inline-end:8px;width:32px;height:32px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;cursor:pointer}
+.sg-cnt{text-align:end;font-size:11.5px;color:var(--hint);margin-top:2px}
+.sg-note{font-size:12px;color:var(--hint);background:var(--sec);border-radius:12px;padding:8px 10px;margin-top:8px}
+.sg-go{background:linear-gradient(135deg,var(--sg1),var(--sg2))}
+.sg-sv{position:fixed;inset:0;z-index:90;background:#000;display:flex;flex-direction:column;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.sg-bars{display:flex;gap:4px;padding:calc(10px + env(safe-area-inset-top)) 10px 6px;position:absolute;top:0;inset-inline:0;z-index:3}
+.sg-bars i{flex:1;height:3px;border-radius:3px;background:rgba(255,255,255,.3);overflow:hidden;display:block}.sg-bars b{display:block;height:100%;width:0;background:#fff}
+.sg-who{position:absolute;top:calc(22px + env(safe-area-inset-top));inset-inline:0;z-index:3;display:flex;align-items:center;gap:9px;padding:8px 12px 18px;color:#fff;background:linear-gradient(rgba(0,0,0,.55),transparent)}
+.sg-ago{font-size:11.5px;opacity:.8}
+.sg-ib{border:0;background:rgba(255,255,255,.2);color:#fff;width:36px;height:36px;border-radius:50%;font-size:17px;cursor:pointer}
+.sg-stage{flex:1;display:flex;min-height:0}
+.sg-stage>.sg-m{flex:1;min-height:0;align-self:stretch;background:#000}
+.sg-stage .sg-m img,.sg-stage .sg-m video{position:absolute;inset:0;width:100%;height:100%;max-height:none;object-fit:contain}
+.sg-stxt{flex:1;display:flex;align-items:center;justify-content:center;padding:30px;text-align:center;color:#fff;font-size:26px;font-weight:800;white-space:pre-wrap;word-break:break-word}
+.sg-scap{position:absolute;bottom:0;inset-inline:0;padding:44px 18px calc(24px + env(safe-area-inset-bottom));color:#fff;font-size:16px;text-align:center;background:linear-gradient(transparent,rgba(0,0,0,.7));white-space:pre-wrap;z-index:3}
+.sg-hero{position:relative;text-align:center;padding:0 14px 8px}
+.sg-cover{height:96px;margin:0 -14px;background:linear-gradient(135deg,#7b2ff7,#f107a3 60%,#ff9b42)}
+.sg-pav{display:inline-block;margin-top:-46px;padding:4px;border-radius:50%;background:var(--bg);position:relative}
+.sg-pn{font-size:20px;font-weight:800;margin-top:4px}
+.sg-bio{margin:6px auto 0;max-width:340px;font-size:14px;white-space:pre-wrap}
+.sg-stats{display:flex;justify-content:center;gap:10px;margin:12px 0 4px}
+.sg-stat{background:var(--sec);border-radius:16px;padding:8px 14px;min-width:84px}.sg-stat b{display:block;font-size:18px}.sg-stat span{font-size:12px;color:var(--hint)}
+.sg-btns{display:flex;gap:8px;margin:10px 14px 0}.sg-btns .btn{margin:0;flex:1;padding:10px 6px;font-size:13.5px}
+.sg-q{display:flex;gap:8px;margin:10px 14px 0}.sg-q div{flex:1;background:var(--sec);border-radius:14px;padding:8px 10px;font-size:12px;color:var(--hint);text-align:center}.sg-q b{display:block;font-size:15px;color:var(--fg)}
+.sg-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px 12px 96px}
+.sg-tile{position:relative;aspect-ratio:1;border-radius:12px;overflow:hidden;background:var(--sec);cursor:pointer}
+.sg-tile .sg-m{position:absolute;inset:0;min-height:0}.sg-tile .sg-m img{height:100%;max-height:none}
+.sg-ttxt{position:absolute;inset:0;padding:8px;display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;font-size:12px;font-weight:700;overflow:hidden}
+.sg-tstat{position:absolute;bottom:0;inset-inline:0;padding:14px 6px 4px;font-size:11px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.6));text-align:center}
+.sg-tv{position:absolute;top:6px;inset-inline-end:7px;color:#fff;font-size:14px;text-shadow:0 1px 3px #000}
+.sg-h{font-weight:800;font-size:16px;padding:14px 14px 2px}
+.sg-cl{max-height:46vh;overflow:auto;margin-top:4px}
+.sg-c{display:flex;gap:10px;padding:9px 0;align-items:flex-start}
+.sg-c .t{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap;font-size:14px}.sg-c b{font-size:13px}.sg-c small{color:var(--hint);margin-inline-start:6px;font-size:11px}
+.sg-c .d{border:0;background:none;color:var(--hint);font-size:15px;cursor:pointer;padding:0 4px}
+.sg-cbar{display:flex;gap:8px;align-items:center;position:sticky;bottom:-16px;background:var(--bg);padding:10px 0 2px;border-top:1px solid var(--line);margin-top:6px}
+.sg-cbar .inp{margin:0}
+.sg-sk{margin:12px;border-radius:22px;background:var(--sec);overflow:hidden;height:300px;position:relative}
+.sg-gate{text-align:center;padding:44px 22px}.sg-gi{font-size:56px}.sg-gate h3{margin:8px 0 4px}.sg-gate p{color:var(--hint);font-size:13.5px;margin:0 0 6px}
+.sg-flex{display:flex;flex-direction:column;overflow:hidden}
+.sroom{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--sec)}.smsg{max-width:85%;margin:7px 0;padding:9px 11px;border-radius:14px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13)}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
 .av{border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;overflow:hidden;user-select:none}
 .av img{width:100%;height:100%;object-fit:cover;display:block}
 /* گپ‌ها / کاربران */
@@ -1176,50 +1273,344 @@ async function imageData(file){
   const scale=Math.min(1,1000/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
   let out=c.toDataURL('image/jpeg',.72);if(out.length>180000)out=c.toDataURL('image/jpeg',.52);if(out.length>185000)throw new Error('حجم عکس زیاده؛ عکس کم‌حجم‌تری انتخاب کن');return out;
 }
+const SG_MAX=3*1024*1024;
+const toDataURL=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('خواندن فایل ممکن نشد'));r.readAsDataURL(f)});
+const isVideoFile=f=>/^video\//.test(f.type||'')||/\.(mp4|mov|m4v|webm)$/i.test(f.name||'');
+async function socialMedia(file){
+  if(!file)return null;
+  if(isVideoFile(file)){
+    if(file.size>SG_MAX)throw new Error('حجم ویدیو باید کمتر از ۳ مگابایت باشد؛ ویدیوی کوتاه‌تری انتخاب کن');
+    return await toDataURL(file);
+  }
+  if(!/^image\//.test(file.type||'')&&!/\.(jpe?g|png|webp|gif)$/i.test(file.name||''))throw new Error('فقط عکس یا ویدیو انتخاب کن');
+  if(file.type==='image/gif'){
+    if(file.size>SG_MAX)throw new Error('حجم گیف باید کمتر از ۳ مگابایت باشد');
+    return await toDataURL(file);
+  }
+  const src=await toDataURL(file);
+  const im=await new Promise((res,rej)=>{const x=new Image();x.onload=()=>res(x);x.onerror=()=>rej(new Error('این عکس قابل خواندن نیست'));x.src=src});
+  const scale=Math.min(1,1280/Math.max(im.width,im.height));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*scale));c.height=Math.max(1,Math.round(im.height*scale));
+  const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(im,0,0,c.width,c.height);
+  let out=c.toDataURL('image/jpeg',.82);
+  if(out.length*.75>SG_MAX)out=c.toDataURL('image/jpeg',.6);
+  if(out.length*.75>SG_MAX)throw new Error('حجم عکس زیاده؛ عکس کم‌حجم‌تری انتخاب کن');
+  return out;
+}
+const ago=ts=>{const s=Math.max(0,Date.now()/1000-ts);if(s<60)return 'الان';if(s<3600)return num(Math.floor(s/60))+' دقیقه پیش';if(s<86400)return num(Math.floor(s/3600))+' ساعت پیش';if(s<7*86400)return num(Math.floor(s/86400))+' روز پیش';return whenShort(ts)};
+const SEEN=(()=>{try{return JSON.parse(localStorage.getItem('jg_seen')||'{}')}catch(e){return {}}})();
+const markSeen=id=>{SEEN[id]=1;try{const k=Object.keys(SEEN);if(k.length>500)k.slice(0,250).forEach(x=>delete SEEN[x]);localStorage.setItem('jg_seen',JSON.stringify(SEEN))}catch(e){}};
+const sgIO=('IntersectionObserver' in window)?new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){sgIO.unobserve(e.target);e.target._go&&e.target._go()}}),{rootMargin:'400px'}):null;
+function sgMedia(id,type,cls,opt){
+  opt=opt||{};
+  const vid=/^video\//.test(type||'');
+  const box=h('div',{class:'sg-m '+(cls||'')});
+  const ph=h('div',{class:'sg-shim'});
+  const el=vid?h('video',{playsinline:true,preload:'metadata',controls:opt.controls!==false}):h('img',{alt:'',draggable:'false'});
+  if(vid)el.muted=!!opt.muted;
+  box.append(el,ph);
+  let started=false;
+  box._go=()=>{if(started)return;started=true;
+    blob('social'+id,'/api/social/media?id='+id).then(u=>{
+      if(u){el.src=u;ph.remove();opt.onready&&opt.onready(el)}
+      else{ph.className='sg-bad';ph.textContent='رسانه در دسترس نیست';opt.onfail&&opt.onfail()}
+    })};
+  if(opt.lazy===false||!sgIO)box._go();else sgIO.observe(box);
+  return box;
+}
+function sgAvatar(p,size){
+  const name=p.display_name||p.username||String(p.user_id||'?');
+  const d=h('div',{class:'av',style:`width:${size}px;height:${size}px;font-size:${Math.round(size*.42)}px;background:${colorOf(p.user_id)}`},ini(name));
+  if(p.avatar_media_id)blob('social'+p.avatar_media_id,'/api/social/media?id='+p.avatar_media_id).then(u=>{if(u){d.style.background='none';d.replaceChildren(h('img',{src:u,draggable:'false'}))}});
+  return d;
+}
+const sgSkel=()=>h('div',{class:'sg-sk'},h('div',{class:'sg-shim'}));
 function SocialScreen(){
-  let me=null,section='feed',profile=null,guest=false,roomTimer=null,roomAfter=0,reply=null,roomBusy=false;
-  const root=h('div',{class:'scr'}),body=h('div',{class:'scroll'});
-  const head=h('div',{class:'social-top'},h('div',{class:'social-brand'},'📸 جقستگرام'),h('div',{class:'social-sub'},'لحظه‌هات رو به اشتراک بذار')); 
-  const nav=h('div',{class:'snav'});const tabs=[['feed','🏠 خانه'],['explore','🔎 اکسپلور'],['room','💬 چت‌روم'],['profile','👤 پروفایل']];
-  function drawNav(){nav.replaceChildren(...tabs.map(([k,l])=>h('button',{class:section===k?'on':'',onclick:()=>{section=k;drawNav();renderSection()}},l)))}
-  root.append(head,nav,body);
-  const mediaImg=(id,cls)=>{const im=h('img',{class:cls||'spmedia',alt:'رسانه'});if(id)blob('social'+id,'/api/social/media?id='+id).then(u=>{if(u)im.src=u});return im};
-  function fileInput(){return h('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'sfile'})}
+  let me=null,section='feed',profile=null,roomTimer=null,roomAfter=0,reply=null,roomBusy=false,stripBox=null;
+  const root=h('div',{class:'scr sg'}),body=h('div',{class:'scroll'});
+  const head=h('div',{class:'sg-top'},
+    h('div',{class:'sg-logo'},h('div',{class:'sg-cam'},'📸'),h('div',{},h('div',{class:'sg-brand'},'جقستگرام'),h('div',{class:'sg-tag'},'بساز، ببین، لایک کن و کامنت بذار'))),
+    h('button',{class:'sg-ico',title:'بروزرسانی',onclick:()=>renderSection()},'↻'));
+  const nav=h('div',{class:'sg-nav'});
+  const tabs=[['feed','🏠','خانه'],['explore','🔥','اکسپلور'],['room','💬','چت‌روم'],['profile','👤','پروفایل']];
+  function drawNav(){nav.replaceChildren(...tabs.map(([k,i,l])=>h('button',{class:section===k?'on':'',onclick:()=>{section=k;drawNav();renderSection()}},h('i',{},i),h('span',{},l))))}
+  const fab=h('button',{class:'sg-fab hid',onclick:()=>createMenu()},'＋');
+  root.append(head,nav,body,fab);
+
+  /* ── پیج ── */
+  function profileGate(){toast('برای انتشار محتوا اول پیج بساز',1);profileSheet()}
+  const gateCard=()=>h('div',{class:'sg-gate'},h('div',{class:'sg-gi'},'📸'),h('h3',{},'پیج جقستگرامت رو بساز'),h('p',{},'با ساخت پیج نام کاربری اختصاصی می‌گیری و می‌تونی هر روز ۵ پست و ۲ استوری با عکس و ویدیو منتشر کنی، لایک کنی و کامنت بذاری.'),h('button',{class:'btn sg-go',onclick:profileSheet},'✨ ساخت پیج'));
   function profileSheet(){
     sheet(profile?'ویرایش پیج':'ساخت پیج جقستگرام',close=>{
-      const un=h('input',{class:'inp',placeholder:'نام کاربری انگلیسی (مثلاً murad_1)',value:profile?.username||''});
+      const un=h('input',{class:'inp',placeholder:'نام کاربری انگلیسی (مثلاً murad_1)',value:profile?.username||'',dir:'ltr'});
       const nm=h('input',{class:'inp',placeholder:'نام نمایشی',value:profile?.display_name||me.name||''});
-      const bio=h('textarea',{class:'inp',placeholder:'بیوگرافی کوتاه',value:profile?.bio||''});const fi=fileInput();const prev=h('div',{class:'snotice'},'عکس پروفایل: اختیاری • حداکثر ۱۳۵ کیلوبایت پس از فشرده‌سازی');fi.onchange=()=>{prev.textContent=fi.files[0]?.name||'عکس انتخاب شد'};
-      const save=h('button',{class:'btn',onclick:async()=>{save.disabled=true;try{const media=fi.files[0]?await imageData(fi.files[0]):null;await api('/api/social/profile/save',{username:un.value,display_name:nm.value,bio:bio.value,media_data:media});profile=(await api('/api/social/me')).profile;guest=false;close();toast('پیجت آماده شد ✨');renderSection()}catch(e){toast(e.message,1);save.disabled=false}}},'ذخیره پیج');
-      return h('div',{},h('div',{class:'snotice'},'با ساخت پیج، نام کاربری اختصاصی می‌گیری و می‌تونی پست و استوری منتشر کنی.'),un,nm,bio,fi,prev,save);
+      const bio=h('textarea',{class:'inp',style:'min-height:80px',placeholder:'بیوگرافی کوتاه',value:profile?.bio||''});
+      const fi=h('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'sfile'});
+      const prev=h('button',{class:'sg-pick',onclick:()=>fi.click()},h('i',{},'🙂'),h('b',{},'عکس پروفایل (اختیاری)'),h('span',{},'از گالری انتخاب کن'));
+      fi.onchange=()=>{prev.querySelector('b').textContent=fi.files[0]?.name||'عکس انتخاب شد'};
+      const save=h('button',{class:'btn sg-go',onclick:async()=>{save.disabled=true;try{const media=fi.files[0]?await imageData(fi.files[0]):null;await api('/api/social/profile/save',{username:un.value,display_name:nm.value,bio:bio.value,media_data:media});me=await api('/api/social/me');profile=me.profile;close();toast('پیجت آماده شد ✨');drawNav();renderSection()}catch(e){toast(e.message,1);save.disabled=false}}},'ذخیره پیج');
+      return h('div',{},h('div',{class:'sg-note'},'با ساخت پیج نام کاربری اختصاصی می‌گیری و می‌تونی پست و استوری منتشر کنی.'),un,nm,bio,fi,prev,save);
     });
+  }
+
+  /* ── ساخت محتوا ── */
+  function createMenu(){
+    if(!profile)return profileGate();
+    const q=me.quota||{};
+    const left=(n,m)=>q.unlimited?'نامحدود':num(n)+' از '+num(m)+' باقی‌مونده امروز';
+    sheet('ساخت محتوای جدید',close=>h('div',{class:'sg-create'},
+      h('button',{class:'sg-cbtn',onclick:()=>{close();compose('post')}},h('i',{},'🖼'),h('b',{},'پست جدید'),h('span',{},left(q.posts_left,q.posts_max))),
+      h('button',{class:'sg-cbtn',onclick:()=>{close();compose('story')}},h('i',{},'⭕'),h('b',{},'استوری جدید (۲۴ ساعته)'),h('span',{},left(q.stories_left,q.stories_max)))));
   }
   function compose(kind){
-    if(!profile)return toast('برای انتشار محتوا اول پیج بساز',1);
-    sheet(kind==='story'?'استوری جدید':'پست جدید',close=>{
-      const txt=h('textarea',{class:'inp',placeholder:kind==='story'?'متن استوری…':'کپشن پست…',maxlength:kind==='story'?'500':'1500'});const fi=fileInput();const prev=h('div',{class:'snotice'},'می‌تونی عکس هم اضافه کنی (اختیاری)');fi.onchange=()=>{prev.textContent=fi.files[0]?.name||'عکس انتخاب شد'};
-      const go=h('button',{class:'btn',onclick:async()=>{go.disabled=true;try{const media=fi.files[0]?await imageData(fi.files[0]):null;await api(kind==='story'?'/api/social/story':'/api/social/post',{caption:txt.value,media_data:media});close();toast(kind==='story'?'استوری منتشر شد':'پست منتشر شد');renderSection()}catch(e){toast(e.message,1);go.disabled=false}}},'انتشار');return h('div',{},txt,fi,prev,go);
+    if(!profile)return profileGate();
+    const q=me.quota||{},story=kind==='story',left=story?q.stories_left:q.posts_left;
+    if(!q.unlimited&&left<=0)return toast(story?'سهمیه‌ی استوری امروزت تموم شده؛ فردا دوباره':'سهمیه‌ی پست امروزت تموم شده؛ فردا دوباره',1);
+    sheet(story?'استوری جدید':'پست جدید',close=>{
+      let file=null;const maxc=story?500:1500;
+      const fi=h('input',{type:'file',accept:'image/*,video/mp4,video/webm,video/quicktime',class:'sfile'});
+      const prev=h('div',{class:'sg-prev'});
+      const pick=h('button',{class:'sg-pick',onclick:()=>fi.click()},h('i',{},'🖼'),h('b',{},'انتخاب عکس یا ویدیو از گالری'),h('span',{},'عکس یا ویدیو • حداکثر ۳ مگابایت'));
+      const txt=h('textarea',{class:'inp',style:'min-height:90px',placeholder:story?'متن استوری…':'کپشن پست…',maxlength:String(maxc)});
+      const cnt=h('div',{class:'sg-cnt'},'۰ / '+num(maxc));
+      txt.oninput=()=>{cnt.textContent=num(txt.value.length)+' / '+num(maxc)};
+      fi.onchange=()=>{
+        const f=fi.files[0];if(!f)return;
+        if(isVideoFile(f)&&f.size>SG_MAX){fi.value='';return toast('حجم ویدیو باید کمتر از ۳ مگابایت باشد',1)}
+        if(!isVideoFile(f)&&f.size>40*1024*1024){fi.value='';return toast('این عکس خیلی بزرگه',1)}
+        file=f;const url=URL.createObjectURL(f);
+        const m=isVideoFile(f)?h('video',{src:url,controls:true,playsinline:true,muted:true}):h('img',{src:url});
+        prev.replaceChildren(m,h('button',{class:'sg-x',onclick:()=>{file=null;fi.value='';prev.replaceChildren();pick.classList.remove('hid')}},'✕'));
+        pick.classList.add('hid');
+      };
+      const go=h('button',{class:'btn sg-go',onclick:async()=>{
+        if(!file&&!txt.value.trim())return toast('عکس، ویدیو یا متن اضافه کن',1);
+        go.disabled=true;go.textContent='در حال ارسال…';
+        try{
+          const data=file?await socialMedia(file):null;
+          await api(story?'/api/social/story':'/api/social/post',{caption:txt.value,media_data:data});
+          close();toast(story?'استوری منتشر شد ✨':'پست منتشر شد ✨');
+          me=await api('/api/social/me');renderSection();
+        }catch(e){toast(e.message,1);go.disabled=false;go.textContent='انتشار'}
+      }},'انتشار');
+      const note=h('div',{class:'sg-note'},story?'استوری بعد از ۲۴ ساعت خودکار حذف میشه.':'پست روی صفحه‌ی خانه و اکسپلور نمایش داده میشه.');
+      return h('div',{},fi,pick,prev,txt,cnt,note,go);
     });
   }
-  function storyViewer(st){sheet('استوری • '+(st.display_name||st.username||st.user_id),close=>h('div',{},st.media_id?mediaImg(st.media_id):null,h('div',{class:'spcaption'},st.caption||''),h('div',{class:'sub'},'استوری پس از ۲۴ ساعت حذف می‌شود')))}
-  async function drawStories(container){try{const rows=await api('/api/social/stories');const strip=h('div',{class:'stories'});strip.append(h('div',{class:'story',onclick:()=>compose('story')},h('div',{class:'av',style:'background:var(--btn);font-size:28px'},'+'), 'استوری شما'));rows.forEach(st=>{const a=h('div',{class:'story',onclick:()=>storyViewer(st)},h('div',{class:'av',style:'background:linear-gradient(135deg,#b12bd5,#ff9b42)'},ini(st.display_name||st.username)),oneLine(st.display_name||st.username||st.user_id,12));strip.append(a)});container.append(strip)}catch(e){}}
-  async function drawPosts(container){const rows=await api('/api/social/feed?limit=40');if(!rows.length){container.append(h('div',{class:'empty'},'هنوز پستی منتشر نشده؛ اولین پست رو تو بذار!'));return}
-    rows.forEach(p=>{const name=p.display_name||p.username||String(p.user_id);const card=h('div',{class:'spost'});const av=avatar('user',p.user_id,name,38);if(p.avatar_media_id)blob('social'+p.avatar_media_id,'/api/social/media?id='+p.avatar_media_id).then(u=>{if(u){av.replaceChildren(h('img',{src:u}));av.style.background='none'}});card.append(h('div',{class:'sphead'},av,h('div',{class:'grow'},h('b',{},name),h('div',{class:'sub'},p.username?'@'+p.username:'')),h('span',{class:'sub'},whenShort(p.created_at))));if(p.media_id)card.append(mediaImg(p.media_id));if(p.caption)card.append(h('div',{class:'spcaption'},p.caption));const actions=h('div',{class:'spactions'},h('button',{onclick:async()=>{try{await api('/api/social/react',{post_id:p.post_id,emoji:'❤️'});toast('❤️ ثبت شد')}catch(e){toast(e.message,1)}}},'❤️ '+num(p.likes)),h('button',{onclick:()=>sheet('واکنش',close=>h('div',{class:'chips'},['❤️','🔥','😂','😍','👏','💯','😮'].map(em=>h('button',{class:'chip',onclick:async()=>{try{await api('/api/social/react',{post_id:p.post_id,emoji:em});close();toast('واکنش ثبت شد')}catch(e){toast(e.message,1)}}},em))))},'😊 واکنش'));card.append(actions);container.append(card)});
+
+  /* ── استوری ── */
+  const allSeen=list=>list.every(s=>SEEN[s.story_id]);
+  async function loadStories(box){
+    try{
+      const rows=await api('/api/social/stories');
+      const by=new Map();
+      for(let k=rows.length-1;k>=0;k--){const s=rows[k];if(!by.has(s.user_id))by.set(s.user_id,[]);by.get(s.user_id).push(s)}
+      const strip=h('div',{class:'sg-strip'});
+      const mine=by.get(me.id);
+      const ownAv=profile?sgAvatar({...profile,user_id:me.id},62):h('div',{class:'av',style:'width:62px;height:62px;font-size:26px;background:var(--btn)'},'👤');
+      const own=h('div',{class:'sg-st',onclick:()=>mine?openStories(mine):compose('story')},
+        h('div',{class:'sg-ring '+(mine?(allSeen(mine)?'seen':''):'none')},ownAv,h('button',{class:'sg-plus',onclick:e=>{e.stopPropagation();compose('story')}},'+')),
+        h('span',{},'استوری شما'));
+      strip.append(own);
+      const others=[...by.entries()].filter(([uid])=>uid!==me.id).sort((a,b)=>{const sa=allSeen(a[1]),sb=allSeen(b[1]);if(sa!==sb)return sa?1:-1;return b[1][b[1].length-1].created_at-a[1][a[1].length-1].created_at});
+      others.forEach(([uid,list])=>{const f=list[list.length-1];strip.append(h('div',{class:'sg-st',onclick:()=>openStories(list)},h('div',{class:'sg-ring '+(allSeen(list)?'seen':'')},sgAvatar(f,62)),h('span',{},oneLine(f.display_name||f.username||uid,10))))});
+      box.replaceChildren(strip);
+    }catch(e){}
   }
-  function renderProfile(){if(!profile&&!guest){body.replaceChildren(h('div',{class:'empty'},h('div',{style:'font-size:46px'},'📸'),'برای ورود به جقستگرام پیج بساز یا به‌عنوان میهمان وارد شو.'),h('div',{class:'card'},h('button',{class:'btn',onclick:profileSheet},'✨ ساخت پیج'),h('button',{class:'btn gh',onclick:()=>{guest=true;toast('به‌عنوان میهمان وارد شدی');renderSection()}},'👀 ورود به‌عنوان میهمان')));return}
-    if(guest&&!profile){body.replaceChildren(h('div',{class:'hero'},h('div',{class:'hn'},'👤 میهمان'),h('div',{class:'sub'},'در حالت میهمان می‌تونی اکسپلور و چت‌روم رو ببینی و پیام بدی.')),h('div',{class:'card'},h('button',{class:'btn',onclick:profileSheet},'ساخت پیج و انتشار محتوا')));return}
-    const box=h('div',{}),av=avatar('user',me.id,profile.display_name,82);if(profile.avatar_media_id)blob('social'+profile.avatar_media_id,'/api/social/media?id='+profile.avatar_media_id).then(u=>{if(u){av.replaceChildren(h('img',{src:u}));av.style.background='none'}});box.append(h('div',{class:'sprofile'},av,h('div',{class:'grow'},h('b',{},profile.display_name),h('div',{class:'sub'},'@'+profile.username),h('div',{class:'sub'},profile.bio||'بدون بیو')),h('button',{class:'btn s gh',onclick:profileSheet},'ویرایش')));box.append(h('div',{class:'grid'},h('button',{class:'act',onclick:()=>compose('post')},'＋ پست'),h('button',{class:'act',onclick:()=>compose('story')},'＋ استوری')));body.replaceChildren(box);drawPosts(body).catch(e=>toast(e.message,1));
+  function openStories(list){const i=list.findIndex(s=>!SEEN[s.story_id]);storyViewer(list,i<0?0:i)}
+  function storyViewer(list,start){
+    let i=-1,elapsed=0,dur=6000,paused=false,vid=null,ready=false,down=0;
+    const ov=h('div',{class:'sg-sv'});
+    const bars=h('div',{class:'sg-bars'},...list.map(()=>h('i',{},h('b',{}))));
+    const who=h('div',{class:'sg-who'}),stage=h('div',{class:'sg-stage'}),cap=h('div',{class:'sg-scap hid'});
+    const tm=setInterval(tick,60);
+    const stopEv=e=>e.stopPropagation();
+    function close(){clearInterval(tm);ov.remove();if(stripBox)loadStories(stripBox)}
+    function setBar(p){const b=bars.children[i]&&bars.children[i].firstChild;if(b)b.style.width=Math.min(100,Math.max(0,p*100))+'%'}
+    function tick(){
+      if(paused||i<0||!ready)return;
+      if(vid&&vid.duration&&isFinite(vid.duration)){if(vid.ended)return next();setBar(vid.currentTime/vid.duration);return}
+      elapsed+=60;setBar(elapsed/dur);if(elapsed>=dur)next();
+    }
+    function next(){show(i+1)}
+    function prev(){show(Math.max(0,i-1))}
+    async function del(st){
+      if(!await ask('این استوری حذف بشه؟'))return;
+      try{await api('/api/social/story/delete',{story_id:st.story_id});toast('استوری حذف شد');close()}catch(e){toast(e.message,1)}
+    }
+    function show(n){
+      if(n>=list.length)return close();
+      i=n;elapsed=0;paused=false;ready=false;vid=null;
+      const st=list[i];markSeen(st.story_id);
+      [...bars.children].forEach((x,j)=>{x.firstChild.style.width=j<i?'100%':'0%'});
+      const canDel=st.user_id===me.id||me.is_support;
+      who.replaceChildren(sgAvatar(st,38),h('div',{class:'grow'},h('b',{},st.display_name||st.username||'کاربر'),h('div',{class:'sg-ago'},ago(st.created_at))),
+        canDel?h('button',{class:'sg-ib',onpointerdown:stopEv,onpointerup:stopEv,onclick:()=>del(st)},'🗑'):null,
+        h('button',{class:'sg-ib',onpointerdown:stopEv,onpointerup:stopEv,onclick:close},'✕'));
+      stage.replaceChildren();
+      cap.textContent=st.caption||'';cap.classList.toggle('hid',!st.caption||!st.media_id);
+      if(st.media_id){
+        stage.append(sgMedia(st.media_id,st.media_type,'',{controls:false,lazy:false,
+          onready:el=>{ready=true;if(el.tagName==='VIDEO'){vid=el;el.play().catch(()=>{el.muted=true;el.play().catch(()=>{})})}},
+          onfail:()=>{ready=true}}));
+      }else{ready=true;stage.append(h('div',{class:'sg-stxt g'+(st.story_id%5)},st.caption||''))}
+    }
+    ov.onpointerdown=()=>{down=Date.now();paused=true;if(vid)vid.pause()};
+    ov.onpointercancel=()=>{paused=false;if(vid)vid.play().catch(()=>{})};
+    ov.onpointerup=e=>{paused=false;if(vid)vid.play().catch(()=>{});if(Date.now()-down<260){e.clientX<innerWidth/2?next():prev()}};
+    ov.append(stage,bars,who,cap);document.body.append(ov);show(start||0);
   }
+
+  /* ── پست ── */
+  function postMenu(p,card,opt){
+    sheet('',close=>h('div',{},
+      sact('🗑 حذف پست',async()=>{close();if(!await ask('این پست حذف بشه؟'))return;try{await api('/api/social/post/delete',{post_id:p.post_id});card.remove();opt.close&&opt.close();toast('پست حذف شد');renderSection()}catch(e){toast(e.message,1)}}),
+      sact('بستن',close)));
+  }
+  function commentsSheet(p,onCount){
+    sheet('💬 کامنت‌ها',close=>{
+      const list=h('div',{class:'sg-cl'});
+      const inp=h('input',{class:'inp',placeholder:profile?'کامنتت رو بنویس…':'برای کامنت اول پیج بساز',maxlength:'500',disabled:!profile});
+      const send=h('button',{class:'btn s sg-go',disabled:!profile,onclick:go},'ارسال');
+      function row(c){
+        const mine=c.user_id===me.id||me.is_support;
+        return h('div',{class:'sg-c'},sgAvatar(c,34),
+          h('div',{class:'t',dir:'auto'},h('b',{},c.display_name||c.username||'کاربر'),h('small',{},ago(c.created_at)),h('div',{},c.text)),
+          mine?h('button',{class:'d',onclick:async()=>{if(!await ask('این کامنت حذف بشه؟'))return;try{await api('/api/social/comment/delete',{comment_id:c.comment_id});load()}catch(e){toast(e.message,1)}}},'🗑'):null);
+      }
+      async function load(){
+        try{const rows=await api('/api/social/comments?post_id='+p.post_id);
+          list.replaceChildren(...(rows.length?rows.map(row):[h('div',{class:'empty'},'هنوز کامنتی نیست؛ اولین نفر باش 💬')]));
+          onCount(rows.length);
+        }catch(e){list.replaceChildren(h('div',{class:'empty err'},e.message))}
+      }
+      async function go(){
+        const t=inp.value.trim();if(!t)return;send.disabled=true;
+        try{await api('/api/social/comment',{post_id:p.post_id,text:t});inp.value='';await load();list.scrollTop=list.scrollHeight}catch(e){toast(e.message,1)}
+        send.disabled=!profile;
+      }
+      inp.onkeydown=e=>{if(e.key==='Enter')go()};
+      list.append(h('div',{class:'empty'},'در حال بارگذاری…'));load();
+      return h('div',{},list,h('div',{class:'sg-cbar'},inp,send));
+    });
+  }
+  function postCard(p,opt){
+    opt=opt||{};
+    const name=p.display_name||p.username||String(p.user_id);
+    const card=h('article',{class:'sg-post'});
+    const canMenu=p.user_id===me.id||me.is_support;
+    card.append(h('div',{class:'sg-ph',onclick:()=>{opt.close&&opt.close();openUser(p.user_id)}},sgAvatar(p,40),
+      h('div',{class:'grow'},h('b',{},name),h('div',{class:'sub'},(p.username?'@'+p.username+' • ':'')+ago(p.created_at))),
+      canMenu?h('button',{class:'sg-ib2',onclick:e=>{e.stopPropagation();postMenu(p,card,opt)}},'⋯'):null));
+    const isV=/^video\//.test(p.media_type||'');
+    const heart=h('div',{class:'sg-big'},'❤️');
+    if(p.media_id){
+      const wrap=h('div',{class:'sg-pw'},sgMedia(p.media_id,p.media_type,'',{}),heart);
+      if(!isV){let last=0;wrap.onclick=()=>{const n=Date.now();if(n-last<320){like(true)}last=n}}
+      card.append(wrap);
+    }else if(p.caption){
+      const wrap=h('div',{class:'sg-pw'},h('div',{class:'sg-ptext g'+(p.post_id%5),dir:'auto'},p.caption),heart);
+      let last=0;wrap.onclick=()=>{const n=Date.now();if(n-last<320){like(true)}last=n};
+      card.append(wrap);
+    }
+    const likeI=h('i',{}),likeN=h('span',{}),likeBtn=h('button',{class:'sg-act',onclick:()=>like(false)},likeI,likeN);
+    const cmN=h('span',{}),cmBtn=h('button',{class:'sg-act',onclick:()=>commentsSheet(p,setCount)},h('i',{},'💬'),cmN);
+    const more=h('button',{class:'sg-more',onclick:()=>commentsSheet(p,setCount)});
+    function upd(){likeBtn.classList.toggle('on',!!p.my_reaction);likeI.textContent=p.my_reaction?'❤️':'🤍';likeN.textContent=num(p.likes);cmN.textContent=num(p.comments);more.textContent=p.comments>0?'مشاهده '+num(p.comments)+' کامنت':''}
+    function setCount(n){p.comments=n;upd()}
+    function burst(){heart.classList.remove('go');void heart.offsetWidth;heart.classList.add('go')}
+    async function like(dbl){
+      if(dbl&&p.my_reaction){burst();return}
+      try{const r=await api('/api/social/react',{post_id:p.post_id,emoji:'❤️'});p.my_reaction=r.liked?'❤️':null;p.likes=r.likes;upd();
+        if(r.liked){burst();likeBtn.classList.add('pulse');setTimeout(()=>likeBtn.classList.remove('pulse'),400)}}
+      catch(e){toast(e.message,1)}
+    }
+    upd();
+    card.append(h('div',{class:'sg-acts'},likeBtn,cmBtn));
+    if(p.caption&&(p.media_id))card.append(h('div',{class:'sg-cap',dir:'auto'},h('b',{},name+' '),p.caption));
+    card.append(more);
+    return card;
+  }
+  function openPost(p){sheet('',close=>postCard(p,{close}))}
+  function tile(p){
+    const isV=/^video\//.test(p.media_type||'');
+    const t=h('div',{class:'sg-tile',onclick:()=>openPost(p)});
+    if(p.media_id&&!isV)t.append(sgMedia(p.media_id,p.media_type,'',{controls:false}));
+    else if(isV)t.append(h('div',{class:'sg-ttxt g'+(p.post_id%5),style:'font-size:30px'},'▶'));
+    else t.append(h('div',{class:'sg-ttxt g'+(p.post_id%5),dir:'auto'},oneLine(p.caption,70)));
+    if(isV)t.append(h('div',{class:'sg-tv'},'🎬'));
+    t.append(h('div',{class:'sg-tstat'},'❤️ '+num(p.likes)+'   💬 '+num(p.comments)));
+    return t;
+  }
+
+  /* ── صفحه‌ها ── */
+  async function renderFeed(){
+    body.replaceChildren();
+    const strip=h('div',{}),posts=h('div',{});stripBox=strip;
+    if(!profile)body.append(h('div',{class:'sg-ban'},h('div',{class:'grow'},'پیج بساز تا پست و استوری بذاری و لایک و کامنت کنی 📸'),h('button',{class:'btn s',onclick:profileSheet},'ساخت پیج')));
+    body.append(strip,posts);loadStories(strip);posts.append(sgSkel());
+    try{const rows=await api('/api/social/feed?limit=30');
+      posts.replaceChildren(...(rows.length?rows.map(p=>postCard(p)):[h('div',{class:'empty'},h('div',{style:'font-size:46px'},'✨'),'هنوز پستی منتشر نشده؛ اولین پست رو تو بذار!')]));
+    }catch(e){posts.replaceChildren(h('div',{class:'empty err'},e.message))}
+  }
+  async function renderExplore(){
+    body.replaceChildren(h('div',{class:'sg-h'},'🔥 داغ‌ترین‌های این هفته'),sgSkel());
+    const rows=await api('/api/social/feed?limit=60&mode=top');
+    const grid=h('div',{class:'sg-grid'},...rows.map(tile));
+    body.replaceChildren(h('div',{class:'sg-h'},'🔥 داغ‌ترین‌های این هفته'),rows.length?grid:h('div',{class:'empty'},'هنوز پستی برای نمایش نیست'));
+  }
+  function profileBlock(d,isMe){
+    const pr=d.profile,box=h('div',{});
+    if(!pr){box.append(h('div',{class:'empty'},'این کاربر هنوز پیجی نساخته'));return box}
+    const st=d.stats||{};
+    const stat=(n,l)=>h('div',{class:'sg-stat'},h('b',{},num(n)),h('span',{},l));
+    box.append(h('div',{class:'sg-hero'},h('div',{class:'sg-cover'}),h('div',{class:'sg-pav'},sgAvatar(pr,88)),
+      h('div',{class:'sg-pn'},pr.display_name),h('div',{class:'sub ltr'},'@'+pr.username),
+      pr.bio?h('div',{class:'sg-bio',dir:'auto'},pr.bio):null,
+      h('div',{class:'sg-stats'},stat(st.posts,'پست'),stat(st.likes,'لایک'),stat(st.comments,'کامنت'))));
+    if(isMe){
+      const q=me.quota||{};
+      box.append(h('div',{class:'sg-btns'},h('button',{class:'btn s gh',onclick:profileSheet},'✏️ ویرایش'),h('button',{class:'btn s sg-go',onclick:()=>compose('post')},'＋ پست'),h('button',{class:'btn s sg-go',onclick:()=>compose('story')},'＋ استوری')));
+      box.append(h('div',{class:'sg-q'},h('div',{},h('b',{},q.unlimited?'∞':num(q.posts_left)+'/'+num(q.posts_max)),'پست امروز'),h('div',{},h('b',{},q.unlimited?'∞':num(q.stories_left)+'/'+num(q.stories_max)),'استوری امروز')));
+    }
+    box.append(d.posts.length?h('div',{class:'sg-grid'},...d.posts.map(tile)):h('div',{class:'empty'},isMe?'هنوز پستی نذاشتی؛ با دکمه‌ی ＋ شروع کن!':'هنوز پستی نداره'));
+    return box;
+  }
+  async function renderProfile(){
+    if(!profile){body.replaceChildren(gateCard());return}
+    body.replaceChildren(sgSkel());
+    const d=await api('/api/social/profile?uid='+me.id);
+    body.replaceChildren(profileBlock(d,true));
+  }
+  function UserScreen(uid){
+    const scroll=h('div',{class:'scroll'});
+    const el=h('div',{class:'scr sg'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'پروفایل')),scroll);
+    scroll.append(sgSkel());
+    (async()=>{try{const d=await api('/api/social/profile?uid='+uid);scroll.replaceChildren(profileBlock(d,false))}catch(e){scroll.replaceChildren(h('div',{class:'empty err'},e.message))}})();
+    return el;
+  }
+  function openUser(uid){if(uid===me.id&&profile){section='profile';drawNav();renderSection();return}push(UserScreen(uid))}
   async function renderRoom(){clearInterval(roomTimer);roomTimer=null;roomAfter=0;body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری چت‌روم…'));const msgs=h('div',{class:'sroom'}),composer=h('div',{class:'scomposer'}),inp=h('input',{class:'inp',placeholder:'پیامت رو بنویس…'}),send=h('button',{class:'btn s',style:'background:#b12bd5',onclick:sendMsg},'ارسال');let replyBar=h('div',{class:'snotice hid'});const premium=h('button',{class:'ib',title:'ایموجی پرمیوم',onclick:()=>{const id=prompt('شناسه عددی ایموجی پرمیوم را وارد کن');if(id&&/^\d+$/.test(id)){premium.dataset.id=id;toast('ایموجی برای پیام بعدی انتخاب شد')}}},'💎');if(!me.premium_emoji)premium.classList.add('hid');composer.append(premium,inp,send);
     function renderMessage(m){const name=m.display_name||m.username||String(m.user_id);const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});node.append(h('div',{class:'sub'},name+' • '+whenShort(m.created_at)));if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text||'پاسخ به پیام')));if(m.text)node.append(h('div',{class:'tx',dir:'auto'},m.text));if(m.premium_emoji_id){const tag=h('tg-emoji',{'emoji-id':m.premium_emoji_id},'⭐');tag.className='prem';node.append(tag)}const rs=h('div',{class:'sreacts'},...(m.reactions||[]).map(r=>h('button',{onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));rs.append(h('button',{onclick:()=>reactSheet(m)},'＋'));node.append(rs);let x=null;node.ontouchstart=e=>{x=e.touches[0].clientX};node.ontouchend=e=>{if(x!==null&&x-e.changedTouches[0].clientX>55){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(m.text,60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}x=null};return node}
     async function loadRoom(){if(roomBusy)return;roomBusy=true;try{const arr=await api('/api/social/room?after='+roomAfter);if(arr.length){arr.forEach(m=>{msgs.append(renderMessage(m));roomAfter=Math.max(roomAfter,m.message_id)});msgs.scrollTop=msgs.scrollHeight}}catch(e){}roomBusy=false}
     async function react(mid,em){try{await api('/api/social/room/react',{message_id:mid,emoji:em});loadRoom()}catch(e){toast(e.message,1)}}
     function reactSheet(m){sheet('ری‌اکشن پیام',close=>h('div',{class:'chips'},['❤️','😂','😍','🔥','👏','👍','👎','😮'].map(em=>h('button',{class:'chip',onclick:()=>{close();react(m.message_id,em)}},em))))}
     async function sendMsg(){const text=inp.value.trim(),pe=premium.dataset.id||null;if(!text&&!pe)return;send.disabled=true;try{await api('/api/social/room/send',{text,reply_to:reply?.message_id||null,premium_emoji_id:pe});inp.value='';premium.dataset.id='';reply=null;replyBar.classList.add('hid');await loadRoom()}catch(e){toast(e.message,1)}send.disabled=false}
-    body.replaceChildren(msgs,replyBar,composer);await loadRoom();roomTimer=setInterval(loadRoom,3500);el._destroy=()=>{clearInterval(roomTimer);roomTimer=null};
+    body.replaceChildren(msgs,replyBar,composer);await loadRoom();roomTimer=setInterval(loadRoom,3500);root._destroy=()=>{clearInterval(roomTimer);roomTimer=null};
   }
-  async function renderSection(){if(!me){body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری…'));return}if(section==='profile'){renderProfile();return}if(section==='room'){await renderRoom();return}body.replaceChildren();if(section==='feed')await drawStories(body);const title=h('div',{class:'row2',style:'padding:12px'},h('b',{},section==='explore'?'اکسپلور':'پست‌های تازه'),profile?h('button',{class:'btn s',onclick:()=>compose('post')},'＋ پست'):h('span',{class:'sub'},guest?'حالت میهمان':''));body.append(title);await drawPosts(body)}
-  async function init(){try{me=await api('/api/social/me');profile=me.profile;guest=!profile;drawNav();await renderSection()}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
+  async function renderSection(){
+    clearInterval(roomTimer);roomTimer=null;
+    body.classList.toggle('sg-flex',section==='room');
+    fab.classList.toggle('hid',!(profile&&section!=='room'));
+    if(!me){body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری…'));return}
+    try{
+      if(section==='feed')await renderFeed();
+      else if(section==='explore')await renderExplore();
+      else if(section==='room')await renderRoom();
+      else await renderProfile();
+    }catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}
+  }
+  async function init(){try{me=await api('/api/social/me');profile=me.profile;drawNav();await renderSection()}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
   root._show=()=>{if(!me)init()};root._destroy=()=>{clearInterval(roomTimer)};init();return root;
 }
 
@@ -1882,75 +2273,167 @@ def _social_emoji_staff(user):
     uid = int(user["id"])
     return uid in OWNER_IDS or "emoji" in STAFF.get(uid, set())
 
+SOCIAL_MEDIA_MAX = 3 * 1024 * 1024        # عکس/ویدیوی پست و استوری: حداکثر ۳ مگابایت
+SOCIAL_AVATAR_MAX = 135_000               # عکس پروفایل (بعد از فشرده‌سازی)
+SOCIAL_POSTS_PER_DAY = 5                  # سقف پست روزانه‌ی کاربر عادی
+SOCIAL_STORIES_PER_DAY = 2                # سقف استوری روزانه‌ی کاربر عادی
+_SOCIAL_LAST_CLEAN = 0.0
+
+
+def _social_day() -> str:
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Tehran")).strftime("%Y-%m-%d")
+
+
+def _social_mod(user) -> bool:
+    uid = int(user["id"])
+    return _social_staff(user) and has_perm(uid, "miniapp")
+
+
+def _sniff_video(b: bytes):
+    if len(b) > 12 and b[4:8] == b"ftyp":
+        return "video/quicktime" if b[8:12] == b"qt  " else "video/mp4"
+    if b[:4] == b"\x1a\x45\xdf\xa3":
+        return "video/webm"
+    return None
+
+
 def _social_media_input(b, uid, kind):
     raw = b.get("media_data")
     if not raw:
         return None
     if not isinstance(raw, str) or "," not in raw:
-        raise _ApiError("فایل تصویر معتبر نیست")
+        raise _ApiError("فایل معتبر نیست")
     head, payload = raw.split(",", 1)
-    m = re.match(r"data:(image/(?:jpeg|png|webp));base64$", head)
-    if not m:
-        raise _ApiError("فقط تصویر JPG، PNG یا WEBP پشتیبانی می‌شود")
+    if not re.fullmatch(r"data:[\w/+.\-]*;base64", head):
+        raise _ApiError("فایل معتبر نیست")
+    big = kind in ("post", "story")
+    limit = SOCIAL_MEDIA_MAX if big else SOCIAL_AVATAR_MAX
+    too_big = "حجم فایل باید کمتر از ۳ مگابایت باشد" if big else "حجم تصویر باید کمتر از ۱۳۵ کیلوبایت باشد"
+    if len(payload) > limit * 4 // 3 + 16:
+        raise _ApiError(too_big)
     import base64, binascii
     try:
         data = base64.b64decode(payload, validate=True)
     except (ValueError, binascii.Error):
-        raise _ApiError("تصویر خراب است")
-    if not data or len(data) > 135_000:
-        raise _ApiError("حجم تصویر باید کمتر از ۱۳۵ کیلوبایت باشد")
-    ctype = m.group(1)
-    if not _sniff_image(data):
-        raise _ApiError("محتوای فایل تصویر معتبر نیست")
+        raise _ApiError("فایل خراب است")
+    if not data or len(data) > limit:
+        raise _ApiError(too_big)
+    ctype = _sniff_image(data)
+    if ctype == "image/gif" and not big:
+        ctype = None
+    if not ctype and big:
+        ctype = _sniff_video(data)
+    if not ctype:
+        raise _ApiError("فقط عکس (JPG/PNG/WEBP/GIF) یا ویدیو (MP4/MOV/WEBM) پشتیبانی می‌شود")
     return data, ctype
+
+
+async def _social_cleanup():
+    """استوری‌های منقضی‌شده (بعد از ۲۴ ساعت) و فایل‌هاشون رو از دیتابیس پاک می‌کنه."""
+    global _SOCIAL_LAST_CLEAN
+    now = time.time()
+    if now - _SOCIAL_LAST_CLEAN < 300:
+        return
+    _SOCIAL_LAST_CLEAN = now
+    try:
+        async with pool.acquire() as c:
+            async with c.transaction():
+                await c.execute("DELETE FROM social_media WHERE kind='story' AND expires_at IS NOT NULL AND expires_at<$1", now)
+                await c.execute("DELETE FROM social_stories WHERE expires_at<$1", now)
+    except Exception:
+        log.warning("social cleanup failed", exc_info=True)
+
+
+async def _social_quota(uid, user):
+    if _social_staff(user):
+        return {"unlimited": True, "posts_max": 0, "stories_max": 0, "posts_left": 999, "stories_left": 999}
+    row = await pool.fetchrow("SELECT posts, stories FROM social_quota WHERE user_id=$1 AND day=$2", uid, _social_day())
+    p = int(row["posts"]) if row else 0
+    s = int(row["stories"]) if row else 0
+    return {"unlimited": False, "posts_max": SOCIAL_POSTS_PER_DAY, "stories_max": SOCIAL_STORIES_PER_DAY,
+            "posts_left": max(0, SOCIAL_POSTS_PER_DAY - p), "stories_left": max(0, SOCIAL_STORIES_PER_DAY - s)}
+
+
+async def _social_take_quota(c, uid, user, col, maxn, label):
+    if _social_staff(user):
+        return
+    r = await c.fetchval(
+        f"INSERT INTO social_quota(user_id,day,{col}) VALUES($1,$2,1) "
+        f"ON CONFLICT(user_id,day) DO UPDATE SET {col}=social_quota.{col}+1 WHERE social_quota.{col}<$3 RETURNING {col}",
+        uid, _social_day(), maxn)
+    if r is None:
+        raise _ApiError(f"سهمیه‌ی {label} امروزت تموم شده (روزی {maxn} تا)؛ فردا دوباره می‌تونی", 429)
+
 
 async def _social_me(qs, user):
     uid = int(user["id"])
     p = await pool.fetchrow("SELECT username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
-    return _j({"id":uid,"name":user.get("first_name") or "کاربر","is_support":_social_staff(user) and has_perm(uid,"miniapp"),"perms":sorted(perms_of(uid)) if _social_staff(user) and has_perm(uid,"miniapp") else [],"premium_emoji":_social_emoji_staff(user),"profile":dict(p) if p else None})
+    return _j({"id": uid, "name": user.get("first_name") or "کاربر",
+               "is_support": _social_staff(user) and has_perm(uid, "miniapp"),
+               "perms": sorted(perms_of(uid)) if _social_staff(user) and has_perm(uid, "miniapp") else [],
+               "premium_emoji": _social_emoji_staff(user), "profile": dict(p) if p else None,
+               "quota": await _social_quota(uid, user)})
+
+
+async def _social_posts_rows(me_id, uid=None, top=False, limit=30):
+    args = [limit, me_id]
+    cond = ""
+    if uid is not None:
+        args.append(uid)
+        cond = f"WHERE p.user_id=${len(args)}"
+    elif top:
+        args.append(time.time() - 7 * 86400)
+        cond = f"WHERE p.created_at>${len(args)}"
+    order = ("((SELECT count(*) FROM social_reactions r2 WHERE r2.post_id=p.post_id)*2 + "
+             "(SELECT count(*) FROM social_comments c2 WHERE c2.post_id=p.post_id)) DESC, p.created_at DESC") if top else "p.created_at DESC"
+    rows = await pool.fetch(
+        "SELECT p.post_id,p.user_id,p.caption,p.media_id,p.created_at,sp.username,sp.display_name,sp.avatar_media_id, "
+        "(SELECT content_type FROM social_media m WHERE m.media_id=p.media_id) AS media_type, "
+        "(SELECT count(*) FROM social_reactions r WHERE r.post_id=p.post_id) AS likes, "
+        "(SELECT count(*) FROM social_comments c WHERE c.post_id=p.post_id) AS comments, "
+        "(SELECT emoji FROM social_reactions r WHERE r.post_id=p.post_id AND r.user_id=$2) AS my_reaction "
+        "FROM social_posts p LEFT JOIN social_profiles sp ON sp.user_id=p.user_id " + cond +
+        " ORDER BY " + order + " LIMIT $1", *args)
+    return [dict(r) for r in rows]
+
 
 async def _social_feed(qs, user):
     limit = _int(qs.get("limit"), 30, 1, 60)
-    rows = await pool.fetch(
-        "SELECT p.post_id,p.user_id,p.caption,p.media_id,p.created_at,sp.username,sp.display_name,sp.avatar_media_id, "
-        "(SELECT count(*) FROM social_reactions r WHERE r.post_id=p.post_id) AS likes, "
-        "(SELECT emoji FROM social_reactions r WHERE r.post_id=p.post_id AND r.user_id=$2) AS my_reaction "
-        "FROM social_posts p LEFT JOIN social_profiles sp ON sp.user_id=p.user_id ORDER BY p.created_at DESC LIMIT $1", limit, int(user["id"]))
-    return _j([dict(r) for r in rows])
+    return _j(await _social_posts_rows(int(user["id"]), _int(qs.get("uid")), qs.get("mode") == "top", limit))
+
 
 async def _social_stories(qs, user):
+    await _social_cleanup()
     rows = await pool.fetch(
-        "SELECT s.story_id,s.user_id,s.caption,s.media_id,s.created_at,s.expires_at,sp.username,sp.display_name "
+        "SELECT s.story_id,s.user_id,s.caption,s.media_id,s.created_at,s.expires_at,sp.username,sp.display_name,sp.avatar_media_id, "
+        "(SELECT content_type FROM social_media m WHERE m.media_id=s.media_id) AS media_type "
         "FROM social_stories s LEFT JOIN social_profiles sp ON sp.user_id=s.user_id "
-        "WHERE s.expires_at>$1 ORDER BY s.created_at DESC LIMIT 80", time.time())
+        "WHERE s.expires_at>$1 ORDER BY s.created_at DESC LIMIT 120", time.time())
     return _j([dict(r) for r in rows])
+
 
 async def _social_profile(qs, user):
     uid = _int(qs.get("uid"), int(user["id"]))
     p = await pool.fetchrow("SELECT user_id,username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
     if not p:
-        return _j({"profile":None,"posts":[]})
-    posts = await pool.fetch("SELECT post_id,caption,media_id,created_at FROM social_posts WHERE user_id=$1 ORDER BY created_at DESC LIMIT 40", uid)
-    return _j({"profile":dict(p),"posts":[dict(x) for x in posts]})
+        return _j({"profile": None, "posts": [], "stats": {"posts": 0, "likes": 0, "comments": 0}})
+    posts = await _social_posts_rows(int(user["id"]), uid, False, 60)
+    st = await pool.fetchrow(
+        "SELECT (SELECT count(*) FROM social_posts WHERE user_id=$1) AS posts, "
+        "(SELECT count(*) FROM social_reactions r JOIN social_posts x ON x.post_id=r.post_id WHERE x.user_id=$1) AS likes, "
+        "(SELECT count(*) FROM social_comments c JOIN social_posts x ON x.post_id=c.post_id WHERE x.user_id=$1) AS comments", uid)
+    return _j({"profile": dict(p), "posts": posts, "stats": dict(st)})
 
-async def _social_room(qs, user):
-    after = _int(qs.get("after"), 0, 0)
-    rows = await pool.fetch(
-        "SELECT m.message_id,m.user_id,m.text,m.reply_to,m.premium_emoji_id,m.created_at,sp.username,sp.display_name, "
-        "(SELECT json_agg(json_build_object('emoji',r.emoji,'n',r.n,'mine',r.mine)) FROM (SELECT emoji,count(*)::int n,bool_or(user_id=$2) mine FROM social_room_reactions WHERE message_id=m.message_id GROUP BY emoji) r) reactions, "
-        "(SELECT text FROM social_room_messages x WHERE x.message_id=m.reply_to) reply_text, "
-        "(SELECT COALESCE(sp2.display_name,sp2.username,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name "
-        "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id "
-        "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]))
-    return _j([dict(r) for r in reversed(rows)])
 
 async def _social_media_get(qs, user):
     mid = _int(qs.get("id"))
     if mid is None: raise _ApiError("رسانه نامعتبره")
     r = await pool.fetchrow("SELECT data,content_type,expires_at FROM social_media WHERE media_id=$1", mid)
     if not r or (r["expires_at"] and r["expires_at"] < time.time()):
-        return 404,"text/plain",b"not found",{}
-    return 200,r["content_type"],bytes(r["data"]),{"Cache-Control":"private, max-age=300"}
+        return 404, "text/plain", b"not found", {}
+    return 200, r["content_type"], bytes(r["data"]), {"Cache-Control": "private, max-age=300"}
+
 
 async def _social_profile_save(b, user):
     uid=int(user["id"]); username=(b.get("username") or "").strip().lower().lstrip("@"); name=(b.get("display_name") or user.get("first_name") or "کاربر").strip()[:60]; bio=(b.get("bio") or "").strip()[:300]
@@ -1967,38 +2450,117 @@ async def _social_profile_save(b, user):
     except asyncpg.UniqueViolationError: raise _ApiError("این نام کاربری قبلاً گرفته شده")
     return _j({"ok":True})
 
-async def _social_post_create(b,user):
-    uid=int(user["id"])
+
+async def _social_post_create(b, user):
+    uid = int(user["id"])
     if not await pool.fetchval("SELECT 1 FROM social_profiles WHERE user_id=$1", uid): raise _ApiError("برای انتشار پست اول پیج بساز")
-    caption=(b.get("caption") or "").strip()[:1500]; media=_social_media_input(b,uid,"post")
-    if not caption and not media: raise _ApiError("متن یا عکس پست رو وارد کن")
-    mid=None
+    caption = (b.get("caption") or "").strip()[:1500]; media = _social_media_input(b, uid, "post")
+    if not caption and not media: raise _ApiError("متن، عکس یا ویدیوی پست رو وارد کن")
+    mid = None
     async with pool.acquire() as c:
         async with c.transaction():
-            if media: mid=await c.fetchval("INSERT INTO social_media(user_id,kind,data,content_type,created_at) VALUES($1,'post',$2,$3,$4) RETURNING media_id",uid,media[0],media[1],time.time())
-            pid=await c.fetchval("INSERT INTO social_posts(user_id,caption,media_id,created_at) VALUES($1,$2,$3,$4) RETURNING post_id",uid,caption,mid,time.time())
-    return _j({"ok":True,"post_id":pid})
+            await _social_take_quota(c, uid, user, "posts", SOCIAL_POSTS_PER_DAY, "پست")
+            if media: mid = await c.fetchval("INSERT INTO social_media(user_id,kind,data,content_type,created_at) VALUES($1,'post',$2,$3,$4) RETURNING media_id", uid, media[0], media[1], time.time())
+            pid = await c.fetchval("INSERT INTO social_posts(user_id,caption,media_id,created_at) VALUES($1,$2,$3,$4) RETURNING post_id", uid, caption, mid, time.time())
+    return _j({"ok": True, "post_id": pid})
 
-async def _social_story_create(b,user):
-    uid=int(user["id"])
+
+async def _social_story_create(b, user):
+    uid = int(user["id"])
     if not await pool.fetchval("SELECT 1 FROM social_profiles WHERE user_id=$1", uid): raise _ApiError("برای انتشار استوری اول پیج بساز")
-    caption=(b.get("caption") or "").strip()[:500]; media=_social_media_input(b,uid,"story")
-    if not caption and not media: raise _ApiError("متن یا عکس استوری رو وارد کن")
-    now=time.time(); mid=None
+    caption = (b.get("caption") or "").strip()[:500]; media = _social_media_input(b, uid, "story")
+    if not caption and not media: raise _ApiError("متن، عکس یا ویدیوی استوری رو وارد کن")
+    await _social_cleanup()
+    now = time.time(); mid = None
     async with pool.acquire() as c:
         async with c.transaction():
-            if media: mid=await c.fetchval("INSERT INTO social_media(user_id,kind,data,content_type,created_at,expires_at) VALUES($1,'story',$2,$3,$4,$5) RETURNING media_id",uid,media[0],media[1],now,now+86400)
-            sid=await c.fetchval("INSERT INTO social_stories(user_id,caption,media_id,created_at,expires_at) VALUES($1,$2,$3,$4,$5) RETURNING story_id",uid,caption,mid,now,now+86400)
-    return _j({"ok":True,"story_id":sid})
+            await _social_take_quota(c, uid, user, "stories", SOCIAL_STORIES_PER_DAY, "استوری")
+            if media: mid = await c.fetchval("INSERT INTO social_media(user_id,kind,data,content_type,created_at,expires_at) VALUES($1,'story',$2,$3,$4,$5) RETURNING media_id", uid, media[0], media[1], now, now + 86400)
+            sid = await c.fetchval("INSERT INTO social_stories(user_id,caption,media_id,created_at,expires_at) VALUES($1,$2,$3,$4,$5) RETURNING story_id", uid, caption, mid, now, now + 86400)
+    return _j({"ok": True, "story_id": sid})
 
-async def _social_react(b,user):
-    pid=_int(b.get("post_id")); emoji=(b.get("emoji") or "❤️").strip()
-    if pid is None or emoji not in ("❤️","🔥","😂","😍","👏","💯","😮"): raise _ApiError("واکنش نامعتبره")
-    uid=int(user["id"])
-    old=await pool.fetchval("SELECT emoji FROM social_reactions WHERE post_id=$1 AND user_id=$2",pid,uid)
-    if old==emoji: await pool.execute("DELETE FROM social_reactions WHERE post_id=$1 AND user_id=$2",pid,uid)
-    else: await pool.execute("INSERT INTO social_reactions(post_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(post_id,user_id) DO UPDATE SET emoji=EXCLUDED.emoji,created_at=EXCLUDED.created_at",pid,uid,emoji,time.time())
-    return _j({"ok":True})
+
+async def _social_post_delete(b, user):
+    uid = int(user["id"]); pid = _int(b.get("post_id"))
+    row = await pool.fetchrow("SELECT user_id,media_id FROM social_posts WHERE post_id=$1", pid) if pid is not None else None
+    if not row: raise _ApiError("پست پیدا نشد", 404)
+    if int(row["user_id"]) != uid and not _social_mod(user): raise _ApiError("اجازه‌ی حذف این پست رو نداری", 403)
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute("DELETE FROM social_reactions WHERE post_id=$1", pid)
+            await c.execute("DELETE FROM social_comments WHERE post_id=$1", pid)
+            await c.execute("DELETE FROM social_posts WHERE post_id=$1", pid)
+            if row["media_id"]: await c.execute("DELETE FROM social_media WHERE media_id=$1", row["media_id"])
+    return _j({"ok": True})
+
+
+async def _social_story_delete(b, user):
+    uid = int(user["id"]); sid = _int(b.get("story_id"))
+    row = await pool.fetchrow("SELECT user_id,media_id FROM social_stories WHERE story_id=$1", sid) if sid is not None else None
+    if not row: raise _ApiError("استوری پیدا نشد", 404)
+    if int(row["user_id"]) != uid and not _social_mod(user): raise _ApiError("اجازه‌ی حذف این استوری رو نداری", 403)
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute("DELETE FROM social_stories WHERE story_id=$1", sid)
+            if row["media_id"]: await c.execute("DELETE FROM social_media WHERE media_id=$1", row["media_id"])
+    return _j({"ok": True})
+
+
+async def _social_react(b, user):
+    pid = _int(b.get("post_id")); emoji = (b.get("emoji") or "❤️").strip()
+    if pid is None or emoji not in ("❤️", "🔥", "😂", "😍", "👏", "💯", "😮"): raise _ApiError("واکنش نامعتبره")
+    if not await pool.fetchval("SELECT 1 FROM social_posts WHERE post_id=$1", pid): raise _ApiError("پست پیدا نشد", 404)
+    uid = int(user["id"])
+    old = await pool.fetchval("SELECT emoji FROM social_reactions WHERE post_id=$1 AND user_id=$2", pid, uid)
+    if old == emoji:
+        await pool.execute("DELETE FROM social_reactions WHERE post_id=$1 AND user_id=$2", pid, uid); liked = False
+    else:
+        await pool.execute("INSERT INTO social_reactions(post_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(post_id,user_id) DO UPDATE SET emoji=EXCLUDED.emoji,created_at=EXCLUDED.created_at", pid, uid, emoji, time.time()); liked = True
+    likes = await pool.fetchval("SELECT count(*) FROM social_reactions WHERE post_id=$1", pid)
+    return _j({"ok": True, "liked": liked, "likes": int(likes)})
+
+
+async def _social_comments(qs, user):
+    pid = _int(qs.get("post_id"))
+    if pid is None: raise _ApiError("پست نامعتبره")
+    rows = await pool.fetch(
+        "SELECT c.comment_id,c.user_id,c.text,c.created_at,sp.username,sp.display_name,sp.avatar_media_id "
+        "FROM social_comments c LEFT JOIN social_profiles sp ON sp.user_id=c.user_id "
+        "WHERE c.post_id=$1 ORDER BY c.comment_id ASC LIMIT 300", pid)
+    return _j([dict(r) for r in rows])
+
+
+async def _social_comment_add(b, user):
+    uid = int(user["id"]); pid = _int(b.get("post_id")); text = (b.get("text") or "").strip()[:500]
+    if not await pool.fetchval("SELECT 1 FROM social_profiles WHERE user_id=$1", uid): raise _ApiError("برای کامنت گذاشتن اول پیج بساز")
+    if pid is None or not await pool.fetchval("SELECT 1 FROM social_posts WHERE post_id=$1", pid): raise _ApiError("پست پیدا نشد", 404)
+    if not text: raise _ApiError("کامنت خالیه")
+    if int(await pool.fetchval("SELECT count(*) FROM social_comments WHERE user_id=$1 AND created_at>$2", uid, time.time() - 30)) >= 8:
+        raise _ApiError("خیلی سریع کامنت می‌ذاری؛ کمی صبر کن", 429)
+    cid = await pool.fetchval("INSERT INTO social_comments(post_id,user_id,text,created_at) VALUES($1,$2,$3,$4) RETURNING comment_id", pid, uid, text, time.time())
+    return _j({"ok": True, "comment_id": cid})
+
+
+async def _social_comment_del(b, user):
+    uid = int(user["id"]); cid = _int(b.get("comment_id"))
+    owner = await pool.fetchval("SELECT user_id FROM social_comments WHERE comment_id=$1", cid) if cid is not None else None
+    if owner is None: raise _ApiError("کامنت پیدا نشد", 404)
+    if int(owner) != uid and not _social_mod(user): raise _ApiError("اجازه‌ی حذف این کامنت رو نداری", 403)
+    await pool.execute("DELETE FROM social_comments WHERE comment_id=$1", cid)
+    return _j({"ok": True})
+
+
+async def _social_room(qs, user):
+    after = _int(qs.get("after"), 0, 0)
+    rows = await pool.fetch(
+        "SELECT m.message_id,m.user_id,m.text,m.reply_to,m.premium_emoji_id,m.created_at,sp.username,sp.display_name, "
+        "(SELECT json_agg(json_build_object('emoji',r.emoji,'n',r.n,'mine',r.mine)) FROM (SELECT emoji,count(*)::int n,bool_or(user_id=$2) mine FROM social_room_reactions WHERE message_id=m.message_id GROUP BY emoji) r) reactions, "
+        "(SELECT text FROM social_room_messages x WHERE x.message_id=m.reply_to) reply_text, "
+        "(SELECT COALESCE(sp2.display_name,sp2.username,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name "
+        "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id "
+        "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]))
+    return _j([dict(r) for r in reversed(rows)])
+
 
 async def _social_room_send(b,user):
     uid=int(user["id"]); txt=(b.get("text") or "").strip()[:1200]; reply=_int(b.get("reply_to")); pe=(str(b.get("premium_emoji_id") or "").strip() or None)
@@ -2008,6 +2570,7 @@ async def _social_room_send(b,user):
     mid=await pool.fetchval("INSERT INTO social_room_messages(user_id,text,reply_to,premium_emoji_id,created_at) VALUES($1,$2,$3,$4,$5) RETURNING message_id",uid,txt,reply,pe,time.time())
     return _j({"ok":True,"message_id":mid})
 
+
 async def _social_room_react(b,user):
     mid=_int(b.get("message_id")); emoji=(b.get("emoji") or "❤️").strip()
     if mid is None or emoji not in ("❤️","😂","😍","🔥","👏","👍","👎","😮"): raise _ApiError("ری‌اکشن نامعتبره")
@@ -2015,8 +2578,8 @@ async def _social_room_react(b,user):
     await pool.execute("INSERT INTO social_room_reactions(message_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,user_id,emoji) DO NOTHING",mid,uid,emoji,time.time())
     return _j({"ok":True})
 
-_SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get}
-_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/react":_social_react,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
+_SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get,"/api/social/comments":_social_comments}
+_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
@@ -2103,10 +2666,10 @@ async def _http_conn(reader, writer):
         clen = _int(headers.get("content-length"), 0, 0)
         if method not in ("GET", "HEAD", "POST"):
             status, ctype, body, extra = 405, "text/plain", b"method not allowed", {}
-        elif clen > 200_000:
+        elif clen > (4_700_000 if urllib.parse.urlsplit(target).path in ("/api/social/post", "/api/social/story") else 200_000):
             status, ctype, body, extra = 413, "text/plain", b"too large", {}
         else:
-            raw = await asyncio.wait_for(reader.readexactly(clen), 15) if clen else b""
+            raw = await asyncio.wait_for(reader.readexactly(clen), 15 if clen < 300_000 else 90) if clen else b""
             url = urllib.parse.urlsplit(target)
             status, ctype, body, extra = await _web_route(method, url.path, dict(urllib.parse.parse_qsl(url.query)), headers, raw)
     except Exception:
