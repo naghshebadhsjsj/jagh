@@ -195,6 +195,7 @@ SUPPORT_PERMS = {
     "photo": "عکس کاراکترها (/setphoto)",
     "jobs": "جدول شغل‌ها (/setjobs و /jobsreset)",
     "check": "بررسی کارت‌ها (/cardcheck)",
+    "pay": "تایید/رد رسید خرید پول بازی",
 }
 
 
@@ -482,6 +483,9 @@ async def init_db(app: Application):
             except Exception:
                 log.exception("bad %s in db", r["key"])
         await c.execute("CREATE TABLE IF NOT EXISTS support_staff (user_id BIGINT PRIMARY KEY, perms TEXT NOT NULL DEFAULT '')")
+        await c.execute("CREATE TABLE IF NOT EXISTS referrals (referred_id BIGINT PRIMARY KEY, referrer_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, rewarded_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_check DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals (referrer_id)")
+        await c.execute("CREATE TABLE IF NOT EXISTS purchases (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, amount BIGINT NOT NULL, price BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, file_id TEXT, reviewer BIGINT, reviewed_at DOUBLE PRECISION)")
         # جقستگرام: پروفایل، رسانه، پست، استوری، ری‌اکشن و چت‌روم عمومی
         await c.execute("CREATE TABLE IF NOT EXISTS social_profiles (user_id BIGINT PRIMARY KEY, username TEXT UNIQUE, display_name TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', avatar_media_id BIGINT, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS social_media (media_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, kind TEXT NOT NULL, data BYTEA NOT NULL, content_type TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, expires_at DOUBLE PRECISION)")
@@ -2029,6 +2033,7 @@ async def startup(app: Application):
         await init_db(app)
         app.bot_data["car_task"] = asyncio.create_task(car_profit_loop())
         app.bot_data["energy_task"] = asyncio.create_task(energy_decay_loop())
+        app.bot_data["ref_task"] = asyncio.create_task(referral_check_loop(app))
         try:
             app.bot_data["web"] = await start_webapp()
         except Exception:
@@ -2121,7 +2126,11 @@ def welcome_ok() -> str:
 
 
 def welcome_keyboard(bot_username: str = "") -> InlineKeyboardMarkup:
-    rows = [[btn("📖 راهنما", "primary", callback_data="guide:open")]]
+    rows = [
+        [btn("زیرمجموعه‌گیری", "success", icon=REF_EID, callback_data="rf:open")],
+        [btn("خرید پول بازی", "primary", icon=EID_MONEY, callback_data="bu:menu")],
+        [btn("📖 راهنما", "primary", callback_data="guide:open")],
+    ]
     if bot_username:
         rows.append([btn("👥 منو ببر به گروهت", "success", url=f"https://t.me/{bot_username}?startgroup=true")])
     return InlineKeyboardMarkup(rows)
@@ -2159,6 +2168,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(BP(JOIN_MSG), parse_mode="HTML", reply_markup=join_keyboard(missing))
         return
     await set_started(user.id)
+    await process_referral(context.bot, user.id)
     bot_username = (await context.bot.get_me()).username or ""
     await update.message.reply_text(welcome_ok(), parse_mode="HTML", reply_markup=welcome_keyboard(bot_username))
 
@@ -2176,6 +2186,7 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
     await set_started(user.id)
+    await process_referral(context.bot, user.id)
     await q.answer("تایید شد ✅")
     bot_username = (await context.bot.get_me()).username or ""
     await q.edit_message_text(welcome_ok(), parse_mode="HTML", reply_markup=welcome_keyboard(bot_username))
@@ -3842,6 +3853,8 @@ async def on_private_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پیام‌های غیرمتنی تو پی‌وی (مثل جدول واقعی تلگرام): فقط وقتی پشتیبان بعد از /setjobs منتظره."""
     msg = update.effective_message
     if await admin_input(update, context):
+        return
+    if await buy_receipt(update, context):
         return
     g = context.user_data.get("await_jobs")
     if msg and g and has_perm(update.effective_user.id, "jobs"):
@@ -6749,6 +6762,11 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # عضویت اجباری فقط هنگام اجرای دستورهای اسلش یا فشردن دکمه‌های ربات بررسی می‌شود؛
     # پیام‌های عادی کاربران در گروه/پی‌وی نباید پیام عضویت تولید کنند.
     _msg_for_join = update.effective_message
+    # ثبت دعوت زیرمجموعه: /start ref_<id> (قبل از بررسی عضویت، چون نامعضو از اینجا جلوتر نمیره)
+    if (user and not user.is_bot and chat and chat.type == "private" and _msg_for_join and _msg_for_join.text
+            and _msg_for_join.text.startswith("/start ref_")):
+        await upsert_user(user.id, user.full_name)
+        await register_referral(user, _msg_for_join.text.split(" ", 1)[1].strip())
     _is_bot_command = bool(_msg_for_join and _msg_for_join.text and _is_bot_text_command(_msg_for_join.text))
     if (user and not user.is_bot and user.id not in ADMIN_IDS and chat and chat.type != "channel"
             and (update.callback_query or _is_bot_command)):
@@ -6759,6 +6777,7 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await cq.answer("❌ هنوز عضویتت در هر دو کانال تایید نشده! اول عضو شو و دوباره بزن.", show_alert=True)
             else:
                 await cq.answer("✅ عضویتت تایید شد، حالا می‌تونی از ربات استفاده کنی.", show_alert=True)
+                await process_referral(context.bot, user.id)
                 try:
                     await cq.message.delete()
                 except Exception:
@@ -7793,6 +7812,283 @@ async def gift_hug_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
 
 
 
+# ───────────────────────── زیرمجموعه‌گیری ─────────────────────────
+# هر کاربر یه لینک اختصاصی داره: https://t.me/<ربات>?start=ref_<آیدی>
+# کاربر جدیدی که با لینک بیاد و عضو کانال‌های اجباری بشه، ۱m پول بازی به دعوت‌کننده میده.
+# اگه بعداً از کانال‌ها لفت بده، همون مبلغ از دعوت‌کننده کم میشه و بهش خبر داده میشه.
+REF_EID = "5769289093221454192"
+REF_CE = f'<tg-emoji emoji-id="{REF_EID}">👥</tg-emoji>'
+REFERRAL_REWARD = 1_000_000
+REF_CHECK_EVERY = 10 * 60   # هر چند ثانیه یه دسته از زیرمجموعه‌ها دوباره چک بشن
+REF_CHECK_BATCH = 40
+
+
+async def register_referral(user, payload: str):
+    """ثبت دعوت (فقط برای کاربرِ جدیدی که هنوز استارت نزده)."""
+    try:
+        if not payload or not payload.startswith("ref_"):
+            return
+        ref = int(payload[4:])
+        if ref == user.id:
+            return
+        me = await pool.fetchrow("SELECT started FROM users WHERE user_id = $1", user.id)
+        if me and me["started"]:
+            return
+        r = await pool.fetchrow("SELECT started FROM users WHERE user_id = $1", ref)
+        if not r or not r["started"]:
+            return
+        await pool.execute(
+            "INSERT INTO referrals (referred_id, referrer_id, status, created_at) VALUES ($1, $2, 'pending', $3) "
+            "ON CONFLICT (referred_id) DO NOTHING", user.id, ref, time.time())
+    except Exception:
+        log.warning("register_referral failed", exc_info=True)
+
+
+async def process_referral(bot, uid: int):
+    """وقتی کاربر عضو کانال‌ها شد، پاداش دعوت‌کننده پرداخت میشه (فقط یک‌بار)."""
+    try:
+        async with pool.acquire() as c:
+            async with c.transaction():
+                r = await c.fetchrow("SELECT referrer_id FROM referrals WHERE referred_id = $1 AND status = 'pending' FOR UPDATE", uid)
+                if not r:
+                    return
+                now = time.time()
+                await c.execute("UPDATE referrals SET status = 'rewarded', rewarded_at = $2, last_check = $2 WHERE referred_id = $1", uid, now)
+                await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", REFERRAL_REWARD, r["referrer_id"])
+        name = await pool.fetchval("SELECT name FROM users WHERE user_id = $1", uid) or "کاربر"
+        await send_html(
+            bot, r["referrer_id"],
+            B(f"{REF_CE} زیرمجموعه جدید!\n\n{_ulink(uid, name)} با لینک تو وارد ربات شد و عضو کانال‌ها شد.\n"
+              f"{MONEY_CE} +{REFERRAL_REWARD:,} تومن پول بازی به حسابت اضافه شد!\n"
+              "⚠️ اگه از کانال‌ها لفت بده، همین مبلغ ازت کم میشه."))
+    except Exception:
+        log.warning("process_referral failed", exc_info=True)
+
+
+async def revoke_referral(bot, referred_id: int, referrer_id: int):
+    async with pool.acquire() as c:
+        async with c.transaction():
+            ok = await c.fetchval("UPDATE referrals SET status = 'revoked' WHERE referred_id = $1 AND status = 'rewarded' RETURNING 1", referred_id)
+            if not ok:
+                return
+            row = await c.fetchrow("SELECT balance, bank_balance FROM users WHERE user_id = $1 FOR UPDATE", referrer_id)
+            if not row:
+                return
+            from_pocket = min(int(row["balance"] or 0), REFERRAL_REWARD)
+            from_bank = min(int(row["bank_balance"] or 0), REFERRAL_REWARD - from_pocket)
+            await c.execute("UPDATE users SET balance = balance - $1::bigint, bank_balance = bank_balance - $2::bigint WHERE user_id = $3::bigint",
+                            from_pocket, from_bank, referrer_id)
+    name = await pool.fetchval("SELECT name FROM users WHERE user_id = $1", referred_id) or "کاربر"
+    try:
+        await send_html(
+            bot, referrer_id,
+            B(f"{REF_CE} یکی از زیرمجموعه‌هات لفت داد!\n\n{_ulink(referred_id, name)} از کانال‌های اجباری خارج شد.\n"
+              f"{MONEY_CE} -{from_pocket + from_bank:,} تومن پول بازی ازت کم شد."))
+    except Exception:
+        log.warning("revoke notify failed", exc_info=True)
+
+
+async def referral_check_loop(app):
+    while True:
+        await asyncio.sleep(REF_CHECK_EVERY)
+        try:
+            rows = await pool.fetch(
+                "SELECT referred_id, referrer_id FROM referrals WHERE status = 'rewarded' ORDER BY last_check LIMIT $1", REF_CHECK_BATCH)
+            for r in rows:
+                ok = await is_channel_member(app.bot, r["referred_id"])
+                if ok is False:
+                    await revoke_referral(app.bot, r["referred_id"], r["referrer_id"])
+                else:
+                    await pool.execute("UPDATE referrals SET last_check = $2 WHERE referred_id = $1", r["referred_id"], time.time())
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("referral check loop failed")
+
+
+async def referral_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    await q.answer()
+    me = await context.bot.get_me()
+    link = f"https://t.me/{me.username}?start=ref_{uid}"
+    st = await pool.fetchrow(
+        "SELECT count(*) FILTER (WHERE status = 'rewarded') AS ok, count(*) FILTER (WHERE status = 'revoked') AS left_, "
+        "count(*) FILTER (WHERE status = 'pending') AS pend FROM referrals WHERE referrer_id = $1", uid)
+    ok_n, left_n, pend_n = int(st["ok"] or 0), int(st["left_"] or 0), int(st["pend"] or 0)
+    import urllib.parse
+    share = "https://t.me/share/url?" + urllib.parse.urlencode({"url": link, "text": "بیا تو ربات جق‌بازی، با لینک من وارد شو و پول بگیر! 🔥"})
+    text = (f"{REF_CE} <b>زیرمجموعه‌گیری</b>\n\n"
+            f"{MONEY_CE} به ازای هر کاربر جدیدی که با لینک اختصاصی تو وارد ربات بشه و عضو کانال‌ها بشه، "
+            f"<b>{REFERRAL_REWARD:,} تومن</b> پول بازی می‌گیری!\n"
+            "⚠️ اگه زیرمجموعه‌ات از کانال‌ها لفت بده، همین مبلغ ازت کم میشه.\n\n"
+            f"🔗 لینک اختصاصی تو (روش بزن تا کپی بشه):\n<code>{link}</code>\n\n"
+            f"✅ زیرمجموعه فعال: <b>{ok_n:,}</b>\n"
+            f"{MONEY_CE} درآمد فعلی: <b>{ok_n * REFERRAL_REWARD:,} تومن</b>\n"
+            f"⏳ منتظر تایید عضویت: <b>{pend_n:,}</b>\n"
+            f"💔 لفت‌داده: <b>{left_n:,}</b>")
+    kb = InlineKeyboardMarkup([
+        [btn("📤 ارسال لینک به دوستان", "success", icon=REF_EID, url=share)],
+        [btn("برگشت", "primary", icon=EID_BACK, callback_data="bu:home")],
+    ])
+    await edit_html(q, text, kb)
+
+
+# ───────────────────────── خرید پول بازی ─────────────────────────
+BUY_CARD = "6219861851160068"
+BUY_CARD_OWNER = "ظریفی"
+# (پول بازی، قیمت به تومن، عنوان)
+BUY_PACKAGES = [
+    (100_000_000, 100_000, "۱۰۰m"),
+    (350_000_000, 347_000, "۳۵۰m"),
+    (500_000_000, 489_000, "۵۰۰m"),
+    (1_000_000_000, 860_000, "۱ میلیارد"),
+]
+BUY_MAX_PENDING = 3
+PURCHASE_MSGS: dict[int, list[tuple[int, int]]] = {}   # order_id -> پیام‌هایی که برای پشتیبان‌ها رفته
+
+
+def buy_menu_view():
+    lines = [f"{MONEY_CE} <b>خرید پول بازی</b>", "", "یکی از بسته‌ها رو انتخاب کن 👇", ""]
+    rows = []
+    for i, (amount, price, title) in enumerate(BUY_PACKAGES):
+        lines.append(f"{TROPHY_CE if i == len(BUY_PACKAGES) - 1 else '💎'} <b>{title}</b> پول بازی ← <b>{price:,} تومن</b>")
+        rows.append([btn(f"{title} پول بازی • {price:,} تومن", "success" if i == len(BUY_PACKAGES) - 1 else "primary", icon=EID_MONEY, callback_data=f"bu:pk:{i}")])
+    lines.append("\n🔥 هرچی بسته بزرگ‌تر، ارزون‌تر!")
+    rows.append([btn("برگشت", "primary", icon=EID_BACK, callback_data="bu:home")])
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+
+async def buy_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    parts = q.data.split(":")
+    act = parts[1]
+    if q.message.chat.type != "private":
+        await q.answer("خرید فقط تو پی‌وی ربات ممکنه.", show_alert=True)
+        return
+    await q.answer()
+    if act == "home":
+        context.user_data.pop("buy_wait", None)
+        bot_username = (await context.bot.get_me()).username or ""
+        await edit_html(q, welcome_ok(), welcome_keyboard(bot_username))
+    elif act == "menu":
+        context.user_data.pop("buy_wait", None)
+        text, kb = buy_menu_view()
+        await edit_html(q, text, kb)
+    elif act == "cancel":
+        context.user_data.pop("buy_wait", None)
+        text, kb = buy_menu_view()
+        await edit_html(q, text, kb)
+    elif act == "pk":
+        try:
+            i = int(parts[2])
+            amount, price, title = BUY_PACKAGES[i]
+        except (IndexError, ValueError):
+            return
+        context.user_data["buy_wait"] = i
+        text = (f"{MONEY_CE} <b>خرید {title} پول بازی</b>\n\n"
+                f"💳 مبلغ قابل پرداخت: <b>{price:,} تومن</b>\n\n"
+                f"لطفاً مبلغ رو به این شماره کارت واریز کن:\n<code>{BUY_CARD}</code>\n"
+                f"👤 به نام: <b>{BUY_CARD_OWNER}</b>\n\n"
+                "📸 بعد از پرداخت، <b>عکس رسید</b> رو همینجا بفرست تا برای پشتیبانی ارسال بشه. "
+                f"بعد از تایید، {title} پول بازی به حسابت میاد.")
+        kb = InlineKeyboardMarkup([
+            [btn("❌ انصراف", "danger", callback_data="bu:cancel")],
+            [btn("برگشت", "primary", icon=EID_BACK, callback_data="bu:menu")],
+        ])
+        await edit_html(q, text, kb)
+
+
+async def buy_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """عکس رسید کاربر. True یعنی پیام مصرف شد."""
+    msg, user = update.effective_message, update.effective_user
+    i = context.user_data.get("buy_wait")
+    if i is None or not msg:
+        return False
+    if not msg.photo:
+        await msg.reply_text("📸 لطفاً رسید رو به‌صورت عکس بفرست (یا از دکمه‌ی انصراف استفاده کن).")
+        return True
+    amount, price, title = BUY_PACKAGES[i]
+    await upsert_user(user.id, user.full_name)
+    pend = await pool.fetchval("SELECT count(*) FROM purchases WHERE user_id = $1 AND status = 'pending'", user.id)
+    if pend >= BUY_MAX_PENDING:
+        await msg.reply_text(f"تا الان {pend} درخواست در انتظار تایید داری؛ صبر کن پشتیبانی بررسی کنه.")
+        return True
+    file_id = msg.photo[-1].file_id
+    oid = await pool.fetchval(
+        "INSERT INTO purchases (user_id, amount, price, status, created_at, file_id) VALUES ($1,$2,$3,'pending',$4,$5) RETURNING id",
+        user.id, amount, price, time.time(), file_id)
+    context.user_data.pop("buy_wait", None)
+    caption = (f"🧾 <b>رسید خرید پول بازی #{oid}</b>\n\n"
+               f"👤 کاربر: {_ulink(user.id, user.full_name)}"
+               + (f" (@{html.escape(user.username)})" if user.username else "") + f"\n🆔 <code>{user.id}</code>\n"
+               f"💎 بسته: <b>{title}</b> ({amount:,} پول بازی)\n"
+               f"💳 مبلغ: <b>{price:,} تومن</b>")
+    kb = InlineKeyboardMarkup([[
+        btn("✅ تایید", "success", callback_data=f"bp:ok:{oid}"),
+        btn("❌ رد", "danger", callback_data=f"bp:no:{oid}"),
+    ]])
+    sent = []
+    for aid in [a for a in (set(OWNER_IDS) | set(STAFF)) if has_perm(a, "pay")]:
+        try:
+            m = await context.bot.send_photo(aid, file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+            sent.append((aid, m.message_id))
+        except Exception:
+            log.warning("purchase notify failed for %s", aid, exc_info=True)
+    PURCHASE_MSGS[oid] = sent
+    if len(PURCHASE_MSGS) > 500:
+        PURCHASE_MSGS.pop(next(iter(PURCHASE_MSGS)), None)
+    await send_html(context.bot, user.id,
+                    B(f"✅ رسید شماره #{oid} ثبت شد و برای پشتیبانی ارسال شد.\n{HG_CE} بعد از بررسی، نتیجه همینجا بهت اعلام میشه."))
+    return True
+
+
+async def purchase_review_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not has_perm(q.from_user.id, "pay"):
+        await q.answer("دسترسی بررسی خرید رو نداری.", show_alert=True)
+        return
+    _, act, oid_s = q.data.split(":")
+    oid = int(oid_s)
+    approve = act == "ok"
+    async with pool.acquire() as c:
+        async with c.transaction():
+            r = await c.fetchrow(
+                "UPDATE purchases SET status = $2, reviewer = $3, reviewed_at = $4 WHERE id = $1 AND status = 'pending' "
+                "RETURNING user_id, amount, price", oid, "approved" if approve else "rejected", q.from_user.id, time.time())
+            if not r:
+                await q.answer("این رسید قبلاً بررسی شده.", show_alert=True)
+                try:
+                    await q.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                return
+            if approve:
+                await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", r["amount"], r["user_id"])
+    await q.answer("تایید شد ✅" if approve else "رد شد ❌")
+    verdict = f"\n\n{'✅ تایید شد' if approve else '❌ رد شد'} توسط {html.escape(q.from_user.full_name)}"
+    try:
+        await q.edit_message_caption(caption=(q.message.caption_html or "") + verdict, parse_mode="HTML", reply_markup=None)
+    except Exception:
+        log.warning("purchase caption edit failed", exc_info=True)
+    for chat_id, mid in PURCHASE_MSGS.pop(oid, []):
+        if (chat_id, mid) == (q.message.chat_id, q.message.message_id):
+            continue
+        try:
+            await context.bot.edit_message_caption(chat_id, mid, caption=(q.message.caption_html or "") + verdict, parse_mode="HTML", reply_markup=None)
+        except Exception:
+            pass
+    if approve:
+        text = B(f"{TROPHY_CE} خریدت تایید شد!\n\n{MONEY_CE} <b>+{r['amount']:,}</b> پول بازی به حسابت اضافه شد.\nرسید شماره #{oid} • مرسی از خریدت 🔥")
+    else:
+        text = B(f"❌ رسید شماره #{oid} تایید نشد.\nاگه پرداخت کردی و فکر می‌کنی اشتباهه، با پشتیبانی تماس بگیر.")
+    try:
+        await send_html(context.bot, r["user_id"], text)
+    except Exception:
+        log.warning("purchase result notify failed", exc_info=True)
+
+
 def main():
     app = (
         Application.builder()
@@ -7813,6 +8109,9 @@ def main():
     app.add_handler(CallbackQueryHandler(affair_cb, pattern=r"^af:(divorce|forgive):\d+:\d+:\-?\d+$"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
     app.add_handler(CallbackQueryHandler(duel_answer, pattern=r"^du:(ok|no):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
+    app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\d+)$"))
+    app.add_handler(CallbackQueryHandler(purchase_review_cb, pattern=r"^bp:(ok|no):\d+$"))
     app.add_handler(CommandHandler("admin", admin_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("support", support_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("addsupport", add_support_cmd, filters=filters.ChatType.PRIVATE))
