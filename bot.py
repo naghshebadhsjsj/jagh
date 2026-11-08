@@ -361,10 +361,12 @@ REPLY_TIERS = [
 ]
 
 
-def pick_reply(amount: int) -> str:
+def pick_reply(amount: int, tier_amount: int | None = None) -> str:
+    """amount = پولی که نشون داده میشه؛ tier_amount = مبلغ پایه (بدون ضریب ایونت) برای انتخاب جمله."""
     texts = REPLY_TIERS[-1][1]
+    ta = amount if tier_amount is None else tier_amount
     for max_amount, tier_texts in REPLY_TIERS:
-        if amount <= max_amount:
+        if ta <= max_amount:
             texts = tier_texts
             break
     return random.choice(texts).format(amount=amount, **emoji_vars())
@@ -457,8 +459,8 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS up_body INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS up_tires INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS up_glass_rims INT NOT NULL DEFAULT 0")
-        # کاربرهای قدیمی که تعداد جقشون ثبت نشده: از روی موجودی تخمین زده میشه (میانگین هر جق ≈ ۵۲ تومن)
-        await c.execute("UPDATE users SET jaghs = balance / 52 WHERE jaghs = 0 AND balance > 0")
+        # (مهاجرت قدیمی «jaghs = balance / 52» حذف شد: با هر ریستارت برای کسی که پولش از راه‌های دیگه اومده بود
+        #  تعداد جق الکی هزارتایی می‌ساخت و تو لیدربرد می‌اومد.)
         await c.execute(
             """CREATE TABLE IF NOT EXISTS char_photos (
                 gender  TEXT NOT NULL,
@@ -3140,24 +3142,27 @@ HOUSE_REPAIR_SECONDS = 30 * 60        # تعمیر ۳۰ دقیقه طول می�
 HOUSE_BASE_INCOME = 2_000_000         # درآمد روزانه‌ی خونه‌ی تعمیرشده (2m)
 HOUSE_MAX_INCOME = 50_000_000         # سقف درآمد روزانه وقتی همه‌ی وسایل خریده شده (50m)
 HOUSE_STORE_DAYS = 7                  # درآمد جمع‌نشده حداکثر تا چند روز ذخیره می‌شه
-# (کلید، ایموجی، اسم، قیمت)
+HOUSE_EID = "5197291967284801683"     # ایموجی خود خونه
+# (کلید، ایموجی جایگزین، اسم، قیمت، آیدی ایموجی پرمیوم)
 _HOUSE_ITEM_DEFS = (
-    ("tv", "📺", "تلویزیون", 35_000_000),
-    ("fridge", "🧊", "یخچال", 90_000_000),
-    ("carpet", "🧶", "فرش", 50_000_000),
-    ("sofa", "🛋", "مبل", 80_000_000),
-    ("bed", "🛏", "تخت", 100_000_000),
-    ("chandelier", "💡", "لوستر", 50_000_000),
-    ("window", "🪟", "پنجره رو به بیرون", 150_000_000),
-    ("wardrobe", "🚪", "کمد", 45_000_000),
+    ("tv", "📺", "تلویزیون", 35_000_000, "5882223664836907064"),
+    ("fridge", "🧊", "یخچال", 90_000_000, "5800648191342809303"),
+    ("carpet", "🧶", "فرش", 50_000_000, "5402506758818122460"),
+    ("sofa", "🛋", "مبل", 80_000_000, "5319032080850496268"),
+    ("bed", "🛏", "تخت", 100_000_000, "5291884812343201811"),
+    ("chandelier", "💡", "لوستر", 50_000_000, "5314562428644635117"),
+    ("window", "🪟", "پنجره رو به بیرون", 150_000_000, "5233525505394751729"),
+    ("wardrobe", "🚪", "کمد", 45_000_000, "5474624933369765083"),
 )
 _HOUSE_PRICE_SUM = sum(d[3] for d in _HOUSE_ITEM_DEFS)
 # درآمد هر وسیله متناسب با قیمتش؛ جمع کل با خرید همه‌ی وسایل دقیقاً می‌شه HOUSE_MAX_INCOME
 HOUSE_ITEMS = {
-    k: {"emoji": e, "name": n, "price": p,
+    k: {"emoji": e, "name": n, "price": p, "eid": eid,
+        "ce": f'<tg-emoji emoji-id="{eid}">{e}</tg-emoji>',
         "income": (p * (HOUSE_MAX_INCOME - HOUSE_BASE_INCOME)) // _HOUSE_PRICE_SUM}
-    for k, e, n, p in _HOUSE_ITEM_DEFS
+    for k, e, n, p, eid in _HOUSE_ITEM_DEFS
 }
+HOUSE_CE = f'<tg-emoji emoji-id="{HOUSE_EID}">🏠</tg-emoji>'
 _HOUSE_IMG_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
 _HOUSE_BASE_IMG: Image.Image | None = None
 _HOUSE_TASKS: set = set()
@@ -3172,14 +3177,21 @@ def _house_items_of(row) -> set:
     return {x for x in raw.split(",") if x in HOUSE_ITEMS}
 
 
-def _house_pending(row, now: float) -> int:
-    """درآمد آماده‌ی دریافت = ذخیره‌شده + درآمد از آخرین دریافت (تا سقف HOUSE_STORE_DAYS روز)."""
+def _house_days_ready(row, now: float) -> int:
+    """چند «روز کامل» از آخرین دریافت گذشته (درآمد فقط سر ساعتِ ۲۴ ساعته آماده می‌شه، نه تدریجی)."""
     if not row or now < float(row["repair_done_at"] or 0):
         return 0
-    daily = _house_daily(_house_items_of(row))
     elapsed = max(0.0, now - float(row["last_claim"] or now))
-    total = int(row["stored_income"] or 0) + int(daily * elapsed / 86400)
-    return min(total, daily * HOUSE_STORE_DAYS)
+    return min(int(elapsed // 86400), HOUSE_STORE_DAYS)
+
+
+def _house_pending(row, now: float) -> int:
+    return _house_daily(_house_items_of(row)) * _house_days_ready(row, now) if row else 0
+
+
+def _house_wait(row, now: float) -> int:
+    """چند ثانیه تا آماده شدن درآمد بعدی."""
+    return max(0, int(float(row["last_claim"]) + 86400 - now))
 
 
 def _load_house_base():
@@ -3304,46 +3316,71 @@ def _house_price_label(p: int) -> str:
     return f"{p // 1_000_000} میلیون" if p % 1_000_000 == 0 else f"{p:,}"
 
 
-async def _house_panel(uid: int):
-    """(عکس، کپشن، کیبورد) پنل خونه برای کاربر."""
+async def _house_panel(uid: int, view: str = "main"):
+    """(عکس، کپشن، کیبورد). view: main = صفحه‌ی اول | up = صفحه‌ی ارتقا (خرید وسایل)."""
     now = time.time()
     row = await pool.fetchrow("SELECT repair_done_at, last_claim, stored_income, items FROM user_house WHERE user_id=$1", uid)
     bal = await pool.fetchval("SELECT balance FROM users WHERE user_id=$1", uid) or 0
     if not row:
         cap = (f"🏚 <b>خونه‌ی خراب</b>\n\nیه خونه‌ی ویرونه داری که باید تعمیرش کنی!\n"
                f"🔧 هزینه‌ی تعمیر: <b>{HOUSE_REPAIR_COST:,} تومان</b>\n⏳ مدت تعمیر: <b>۳۰ دقیقه</b>\n"
-               f"💰 بعد از تعمیر روزانه <b>{HOUSE_BASE_INCOME:,}</b> تومان درآمد می‌ده و با خرید وسایل تا <b>{HOUSE_MAX_INCOME:,}</b> تومان در روز می‌ره بالا.\n\n"
+               f"{MONEY_CE} بعد از تعمیر روزانه <b>{HOUSE_BASE_INCOME:,}</b> تومان درآمد می‌ده و با ارتقا تا <b>{HOUSE_MAX_INCOME:,}</b> تومان در روز می‌ره بالا.\n\n"
                f"موجودی جیبت: <b>{bal:,}</b>")
-        kb = InlineKeyboardMarkup([[btn(f"🔧 تعمیر خونه | {HOUSE_REPAIR_COST:,}", "success", callback_data=f"hm:repair:{uid}:x")]])
+        kb = InlineKeyboardMarkup([[btn(f"تعمیر خونه | {HOUSE_REPAIR_COST:,}", "success", icon=HOUSE_EID, callback_data=f"hm:repair:{uid}:x")]])
         return await _house_photo(False, set()), cap, kb
     if now < float(row["repair_done_at"]):
         left = int(float(row["repair_done_at"]) - now)
-        m, s = divmod(left, 60)
-        cap = (f"🔧 <b>خونه در حال تعمیره...</b>\n\n⏳ زمان باقی‌مانده: <b>{m:02d}:{s:02d}</b>\n"
-               f"بعد از تعمیر می‌تونی وسایل بخری و درآمد روزانه بگیری.")
-        kb = InlineKeyboardMarkup([[btn("🔄 بروزرسانی", "primary", callback_data=f"hm:ref:{uid}:x")]])
+        m, s_ = divmod(left, 60)
+        cap = (f"🔧 <b>خونه در حال تعمیره...</b>\n\n{HG_CE} زمان باقی‌مانده: <b>{m:02d}:{s_:02d}</b>\n"
+               f"بعد از تعمیر می‌تونی ارتقا بدی و درآمد روزانه بگیری.")
+        kb = InlineKeyboardMarkup([[btn("بروزرسانی", "primary", icon=EID_HOURGLASS, callback_data=f"hm:ref:{uid}:x")]])
         return await _house_photo(False, set()), cap, kb
     items = _house_items_of(row)
     daily = _house_daily(items)
+    photo = await _house_photo(True, items)
+    if view == "up":
+        lines = [f"{HOUSE_CE} <b>ارتقای خونه</b>", "هر وسیله درآمد روزانه‌ی خونه رو بیشتر می‌کنه:", ""]
+        buttons: list[list[InlineKeyboardButton]] = []
+        pair: list[InlineKeyboardButton] = []
+        for k, it in HOUSE_ITEMS.items():
+            if k in items:
+                lines.append(f"✅ {it['ce']} {it['name']} — +{it['income']:,}")
+            else:
+                lines.append(f"🔒 {it['ce']} {it['name']} — <b>{it['price']:,}</b> (+{it['income']:,}/روز)")
+                pair.append(btn(f"{it['name']} | {_house_price_label(it['price'])}", "primary", icon=it["eid"], callback_data=f"hm:buy:{uid}:{k}"))
+                if len(pair) == 2:
+                    buttons.append(pair); pair = []
+        if pair:
+            buttons.append(pair)
+        if len(items) == len(HOUSE_ITEMS):
+            lines.append("\n🎉 همه‌ی وسایل رو خریدی؛ خونه‌ت کامله!")
+        lines += ["", f"{MONEY_CE} درآمد روزانه: <b>{daily:,}</b> / سقف {HOUSE_MAX_INCOME:,}", f"موجودی جیبت: <b>{bal:,}</b>"]
+        buttons.append([btn("برگشت به خونه", "primary", icon=EID_BACK, callback_data=f"hm:main:{uid}:x")])
+        return photo, "\n".join(lines), InlineKeyboardMarkup(buttons)
     pending = _house_pending(row, now)
-    lines = ["🏠 <b>خونه‌ی شما</b> ✨ تعمیرشده", ""]
-    buttons: list[list[InlineKeyboardButton]] = []
-    pair: list[InlineKeyboardButton] = []
-    for k, it in HOUSE_ITEMS.items():
-        if k in items:
-            lines.append(f"✅ {it['emoji']} {it['name']} — +{it['income']:,}")
-        else:
-            lines.append(f"🔒 {it['emoji']} {it['name']} — {it['price']:,} (+{it['income']:,}/روز)")
-            pair.append(btn(f"{it['emoji']} {it['name']} | {_house_price_label(it['price'])}", "primary", callback_data=f"hm:buy:{uid}:{k}"))
-            if len(pair) == 2:
-                buttons.append(pair); pair = []
-    if pair:
-        buttons.append(pair)
-    lines += ["", f"💰 درآمد روزانه: <b>{daily:,}</b> / سقف {HOUSE_MAX_INCOME:,}",
-              f"📥 آماده‌ی دریافت: <b>{pending:,}</b> تومان", f"موجودی جیبت: <b>{bal:,}</b>"]
-    buttons.append([btn(f"📥 دریافت درآمد | {pending:,}", "success", callback_data=f"hm:claim:{uid}:all"),
-                    btn("🔄", "primary", callback_data=f"hm:ref:{uid}:x")])
-    return await _house_photo(True, items), "\n".join(lines)[:1000], InlineKeyboardMarkup(buttons)
+    lines = [f"{HOUSE_CE} <b>خونه‌ی شما</b> ✨ تعمیرشده", ""]
+    if items:
+        lines.append("وسایل خریده‌شده:")
+        for k, it in HOUSE_ITEMS.items():
+            if k in items:
+                lines.append(f"{it['ce']} {it['name']}")
+    else:
+        lines.append("هنوز وسیله‌ای نخریدی؛ از «ارتقا» وسایل بخر تا درآمدت بره بالا.")
+    lines += ["", f"{MONEY_CE} درآمد روزانه: <b>{daily:,}</b> / سقف {HOUSE_MAX_INCOME:,}"]
+    if pending > 0:
+        lines.append(f"✅ درآمد امروزت آماده‌ست: <b>{pending:,}</b> تومان")
+        claim_btn = btn(f"دریافت درآمد | {pending:,}", "success", icon=EID_MONEY, callback_data=f"hm:claim:{uid}:all")
+    else:
+        w = _house_wait(row, now)
+        lines.append(f"{HG_CE} درآمد بعدی: <b>{_duration_fa(w)}</b> دیگه آماده می‌شه")
+        claim_btn = btn(f"دریافت بعدی: {_duration_fa(w)}", None, icon=EID_HOURGLASS, callback_data=f"hm:claim:{uid}:all")
+    lines.append(f"موجودی جیبت: <b>{bal:,}</b>")
+    kb = InlineKeyboardMarkup([
+        [claim_btn],
+        [btn("ارتقا", "primary", icon=EID_TROPHY, callback_data=f"hm:upg:{uid}:x"),
+         btn("بروزرسانی", "primary", icon=EID_HOURGLASS, callback_data=f"hm:ref:{uid}:x")],
+    ])
+    return photo, "\n".join(lines), kb
 
 
 async def show_homes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3357,6 +3394,14 @@ async def show_homes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         except Exception:
             log.warning("house photo send failed", exc_info=True)
+            cap = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", cap)
+            if photo is not None:
+                try:
+                    photo.seek(0)
+                    await msg.reply_photo(photo=photo, caption=cap, parse_mode="HTML", reply_markup=kb)
+                    return
+                except Exception:
+                    log.warning("house photo send failed again", exc_info=True)
     await msg.reply_text(cap, parse_mode="HTML", reply_markup=kb)
 
 
@@ -3382,7 +3427,7 @@ async def home_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("درخواست نامعتبر است.", show_alert=True); return
     if q.from_user.id != uid:
         await q.answer("این پنل خونه برای شما نیست.", show_alert=True); return
-    now = time.time(); message = ""; ok = False; started_repair = False
+    now = time.time(); message = ""; ok = False; started_repair = False; view = "main"
     async with pool.acquire() as conn:
         async with conn.transaction():
             bal = await conn.fetchval("SELECT balance FROM users WHERE user_id=$1 FOR UPDATE", uid) or 0
@@ -3396,7 +3441,11 @@ async def home_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", HOUSE_REPAIR_COST, uid)
                     await conn.execute("INSERT INTO user_house(user_id,repair_done_at,last_claim) VALUES($1,$2,$2)", uid, done)
                     message = "تعمیر خونه شروع شد! ۳۰ دقیقه دیگه آماده‌ست 🔧"; ok = True; started_repair = True
+            elif action == "upg":
+                if repaired: view = "up"; ok = True
+                else: message = "اول باید خونه تعمیر بشه."
             elif action == "buy":
+                view = "up"
                 it = HOUSE_ITEMS.get(key)
                 if not it: message = "این وسیله وجود نداره."
                 elif not row: message = "اول باید خونه رو تعمیر کنی."
@@ -3404,10 +3453,9 @@ async def home_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif key in _house_items_of(row): message = f"{it['name']} رو قبلاً خریدی."
                 elif bal < it["price"]: message = f"برای خرید {it['name']} به {it['price']:,} تومان نیاز داری."
                 else:
-                    stored = _house_pending(row, now)     # درآمد تا همین لحظه با نرخ قبلی ذخیره می‌شه
                     new_items = ",".join(sorted(_house_items_of(row) | {key}))
                     await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", it["price"], uid)
-                    await conn.execute("UPDATE user_house SET items=$2, stored_income=$3, last_claim=$4 WHERE user_id=$1", uid, new_items, stored, now)
+                    await conn.execute("UPDATE user_house SET items=$2 WHERE user_id=$1", uid, new_items)
                     message = f"{it['name']} خریداری شد! درآمد روزانه‌ات +{it['income']:,} شد ✨"; ok = True
             elif action == "claim":
                 if not repaired: message = "خونه هنوز تعمیر نشده."
@@ -3415,15 +3463,18 @@ async def home_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     payout = _house_pending(row, now)
                     if payout > 0:
                         await conn.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", payout, uid)
-                        await conn.execute("UPDATE user_house SET stored_income=0, last_claim=$2 WHERE user_id=$1", uid, now)
+                        await conn.execute("UPDATE user_house SET last_claim=$2 WHERE user_id=$1", uid, now)
                         message = f"+{payout:,} تومان درآمد خونه دریافت شد!"; ok = True
-                    else: message = "هنوز درآمدی جمع نشده."
-            elif action == "ref":
+                    else:
+                        message = f"درآمد روزانه هنوز آماده نشده؛ {_duration_fa(_house_wait(row, now))} دیگه مونده."
+            elif action in ("ref", "main"):
                 ok = True
             else:
                 message = "درخواست نامعتبر است."
+    if action == "ref":
+        view = "up" if "ارتقای خونه" in (q.message.caption or "") else "main"
     await q.answer(message[:180] if message else None, show_alert=bool(message) and not ok)
-    photo, cap, kb = await _house_panel(uid)
+    photo, cap, kb = await _house_panel(uid, view)
     try:
         if photo is not None:
             await q.edit_message_media(InputMediaPhoto(photo, caption=cap, parse_mode="HTML"), reply_markup=kb)
@@ -3434,7 +3485,8 @@ async def home_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.warning("house panel update failed, resending", exc_info=True)
             try: await q.message.delete()
             except Exception: pass
-            photo2, cap2, kb2 = await _house_panel(uid)
+            photo2, cap2, kb2 = await _house_panel(uid, view)
+            cap2 = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", cap2)
             if photo2 is not None:
                 await context.bot.send_photo(q.message.chat_id, photo=photo2, caption=cap2, parse_mode="HTML", reply_markup=kb2)
             else:
@@ -3459,7 +3511,14 @@ HAND_DONE_CE = f'<tg-emoji emoji-id="{EID_HAND_DONE}">⚡</tg-emoji>'
 CARS_BTN_ICON = "5323272789824654613"
 
 
-def self_panel_keyboard(uid: int) -> InlineKeyboardMarkup:
+# تو پی‌وی ربات فقط این بخش‌های پنل «خودم» کار می‌کنن؛ بقیه (ماشین، کازینو، خلاف، دست، خونه، ...) باید تو گروه انجام بشن.
+PM_ALLOWED_PANEL_ACTIONS = {"home", "settings", "gender", "guide", "transfer", "bank"}
+PM_GROUP_ONLY_TEXT = "این بخش فقط تو گروه کار می‌کنه؛ برو تو گروه و همونجا انجامش بده. تو پی‌وی فقط تنظیمات و بانک فعاله."
+
+
+def self_panel_keyboard(uid: int, private: bool = False) -> InlineKeyboardMarkup:
+    if private:
+        return InlineKeyboardMarkup([[btn("⚙️ تنظیمات", None, callback_data=f"sp:settings:{uid}"), btn("بانک", "primary", icon=BANK_ICON_ID, callback_data=f"sp:bank:{uid}")]])
     return InlineKeyboardMarkup([
         [btn("ماشینم", "primary", icon=CARS_BTN_ICON, callback_data=f"sp:cars:{uid}"), btn("کازینو", "primary", icon=DICE_EID, callback_data=f"sp:casino:{uid}")],
         [btn("خلاف", "danger", icon=EID_SWORDS, callback_data=f"sp:robbery:{uid}"), btn("دست", "success", icon=EID_HAND, callback_data=f"sp:hand:{uid}")],
@@ -3506,7 +3565,7 @@ async def send_self_panel(bot, chat_id: int, uid: int, name: str = "", reply_to:
     """پنل شخصی: عکس کاراکتر + کپشن + دکمه‌ها تو یه پیام."""
     row = await get_user(uid)
     text = await self_panel_text(uid, name)
-    kb = self_panel_keyboard(uid)
+    kb = self_panel_keyboard(uid, private=chat_id > 0)
     if row and row["gender"] in JOBS:
         await send_card(bot, chat_id, row, reply_to=reply_to, text=text, reply_markup=kb,
                         img_balance=int(row["balance"] or 0) + int(row["bank_balance"] or 0))
@@ -3546,6 +3605,8 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("این پنل برای شما نیست.", show_alert=True); return
     if action == "casino" and not CASINO_OPEN:
         await q.answer(CASINO_CLOSED_TEXT, show_alert=True); return
+    if q.message.chat.type == "private" and action not in PM_ALLOWED_PANEL_ACTIONS:
+        await q.answer(PM_GROUP_ONLY_TEXT, show_alert=True); return
     if action == "transfer" and q.message.chat.type != "private":
         await q.answer("انتقال اکانت فقط تو پی‌وی ربات ممکنه؛ بیا پی‌وی و بنویس «خودم».", show_alert=True); return
     await q.answer()
@@ -3555,7 +3616,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("acc_transfer", None)
     if action == "home":
         text = await self_panel_text(uid, q.from_user.full_name)
-        kb = self_panel_keyboard(uid)
+        kb = self_panel_keyboard(uid, private=q.message.chat.type == "private")
         if getattr(q.message, "photo", None):
             try:
                 await q.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=kb)
@@ -4447,6 +4508,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     low_en = float(row.get("energy", 0) or 0) < ENERGY_LOW
     if low_en:  # انرژی کم = پول کمتر
         amount = max(1, int(amount * JAGH_LOW_MULT))
+    base_amount = amount
     amount = max(1, int(amount * income_mult()))   # ایونت درآمد
 
     # آپدیت اتمیک: فقط اگه ۵ دقیقه گذشته باشه پول اضافه میشه
@@ -4466,7 +4528,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(B(f"{ce('jagh', 6, '⏳')} صبر کن! {m} دقیقه و {s} ثانیه دیگه می‌تونی دوباره بنویسی."), parse_mode="HTML")
         return
 
-    text = pick_reply(amount) + "\n\n" + energy_line(row.get("energy", 0))
+    text = pick_reply(amount, base_amount) + "\n\n" + energy_line(row.get("energy", 0))
     if low_en:
         text += "\n⚠️ انرژیت کمه؛ پول جق کمتر شد! با بغل، بوس یا هدیه انرژی بگیر."
     text += event_banner()
@@ -4832,6 +4894,21 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_card(context.bot, msg.chat_id, row, reply_to=msg.message_id)
 
 
+_PM_BLOCK_WORDS = {
+    "خونه", "خانه", "املاک", "دست", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جاسوسی",
+    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلجقی", "دوئلجق",
+}
+
+
+def _pm_group_only_text(text: str) -> bool:
+    """کلمه‌هایی که تو پی‌وی کار نمی‌کنن و باید تو گروه نوشته بشن."""
+    key = _word_key(text)
+    if key in _PM_BLOCK_WORDS or key in CAR_WORDS or key.startswith(("خریدجاسوسی",)):
+        return True
+    t = norm_word(text).translate(_DIG)
+    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
+
+
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تو پی‌وی ربات هم «خودم» کار می‌کنه."""
     msg = update.effective_message
@@ -4844,6 +4921,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await admin_input(update, context):
         return
     if await account_transfer_input(update, context):
+        return
+    if msg and msg.text and _pm_group_only_text(msg.text):
+        await msg.reply_text(B(PM_GROUP_ONLY_TEXT), parse_mode="HTML")
         return
     if await menu_text_router(update, context):
         return
