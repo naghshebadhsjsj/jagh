@@ -6067,8 +6067,8 @@ def panel_main(uid: int):
         btn("تاس", "primary", icon=DICE_EID, callback_data=f"cz:g:{uid}:dice"),
         btn("🎰 اسلات", "primary", callback_data=f"cz:g:{uid}:slot"),
         btn("مین", "primary", icon=MINES_BOMB_EID, callback_data=f"cz:g:{uid}:mines"),
-    ], [btn("🛩 موشک کاغذی", "success", callback_data=f"cz:g:{uid}:crash"),
-        btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")]])
+    ], ([btn("🛩 موشک کاغذی", "success", callback_data=f"cz:g:{uid}:crash")] if crash_allowed(uid) else [])
+       + [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")]])
     return text, kb
 
 
@@ -6080,8 +6080,8 @@ def panel_game(uid: int, game: str):
         rules = "☠️ سم یا خوراکی — فقط دو نفره\n\n۲۴ خانه وجود داره. هر نفر در ۶۰ ثانیه سم خودش رو پشت یک خانه مخفی می‌کنه. بعد به نوبت خانه‌های حریف رو انتخاب می‌کنید؛ پیدا کردن سم حریف یعنی بردن کل شرط! انتخاب هر مرحله ۶۰ ثانیه مهلت داره."
     elif game == "crash":
         rules = ("🛩 موشک کاغذی (کراش) — بازی تک‌نفره\n\nموشک کاغذی بعد از شرط‌بندی شروع به اوج گرفتن می‌کنه و ضریبت لحظه‌به‌لحظه بالا می‌ره. "
-                 "قبل از شروع یه ضریب هدف (حداقل ۱٫۲×) انتخاب می‌کنی و اگه موشک بهش برسه خودکار برداشت می‌شه؛ ولی هر لحظه ممکنه سقوط کنه و شرطت بسوزه!\n"
-                 "⚠️ لحظه‌ی سقوط غیرقابل پیش‌بینیه و حتی ممکنه همون ابتدا و تو ضریب ۱٫۰۰ یا ۱٫۲ اتفاق بیفته.")
+                 "ضریب از ‎−۱٫۰۰ شروع می‌شه و به سمت مثبت‌ها می‌ره. قبل از شروع یه ضریب هدف (حداقل ۱٫۲×) انتخاب می‌کنی و اگه موشک بهش برسه خودکار برداشت می‌شه؛ ولی هر لحظه ممکنه سقوط کنه و شرطت بسوزه!\n"
+                 "⚠️ سخته! لحظه‌ی سقوط غیرقابل پیش‌بینیه و خیلی وقت‌ها قبل از ۱٫۲ (حتی تو ضریب منفی) اتفاق می‌افته.\n🔒 فعلاً فقط برای پشتیبان‌ها فعاله.")
     elif game == "mines":
         rules = (f"{MINES_BOMB_CE} مین — بازی تک‌نفره\n\n۲۱ خانه وجود داره و ۳ خانه بمبه. هر خانه امن ضریب رو بیشتر می‌کنه. با پیدا کردن بمب شرطت از دست میره؛ هر زمان خواستی برداشت کن تا شرط × ضریب به حسابت برگرده. ضریب نهایی در خانه امن هجدهم ۳٫۰۵× است.")
     else:
@@ -6333,27 +6333,39 @@ async def slot_dice_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ───── موشک (کراش): ضریب بالا می‌ره، هر لحظه ممکنه منفجر بشه ─────
-CRASH_EDGE = 0.90      # امید ریاضی ۹۰٪ (سخت): ~۱۰٪ بازی‌ها همون ابتدا و تو ۱٫۰۰ می‌سوزن، ~۲۵٪ قبل از ۱٫۲
+CRASH_EDGE = 0.95      # بخش اصلی توزیع (۱/u) ضرب تو این؛ سخت‌گیری اصلی از انفجارهای زودهنگامه
+CRASH_EARLY = 0.22     # ~۲۲٪ بازی‌ها زودهنگام می‌سوزن: یه جایی بین -۱٫۰۰ تا ۱٫۱۹ (حتی قبل از ۱٫۲)
+CRASH_MIN = -1.0       # ضریب از -۱ شروع میشه
 CRASH_MAX = 100.0
-CRASH_RATE = 0.08      # ضریب = e^(RATE × ثانیه)
-CRASH_TICK = 1.5       # هر چند ثانیه پیام آپدیت میشه
+CRASH_RATE = 0.20      # ضریب = e^(RATE × ثانیه) − ۲  (تو ثانیه‌ی صفر دقیقاً -۱٫۰۰)
+CRASH_TICK = 2.0       # هر چند ثانیه تصویر (با ضریب جدید) آپدیت میشه
+
+
+def crash_allowed(uid: int) -> bool:
+    """فعلاً موشک فقط برای صاحب‌ها و پشتیبان‌هاست."""
+    return uid in OWNER_IDS or uid in STAFF
+
+
+CRASH_STAFF_MSG = "🛩 فعلاً موشک کاغذی فقط برای پشتیبان‌ها فعاله."
 
 
 def crash_point() -> float:
+    if random.random() < CRASH_EARLY:
+        return round(random.uniform(CRASH_MIN, 1.19), 2)
     u = max(random.random(), 1e-9)
-    return max(1.0, min(CRASH_MAX, math.floor(100 * CRASH_EDGE / u) / 100))
+    return max(CRASH_MIN, min(CRASH_MAX, math.floor(100 * CRASH_EDGE / u) / 100))
 
 
 def crash_mult_at(t: float) -> float:
-    return math.floor(math.exp(CRASH_RATE * max(0.0, t)) * 100) / 100
+    return math.floor((math.exp(CRASH_RATE * max(0.0, t)) - 2.0) * 100) / 100
 
 
 def crash_time_for(m: float) -> float:
-    return math.log(max(m, 1.0)) / CRASH_RATE
+    return math.log(max(m + 2.0, 1.0)) / CRASH_RATE
 
 
 def _crash_frame(st, m: float):
-    payout = int(st["bet"] * m)
+    payout = max(0, int(st["bet"] * m))
     tgt = f"\n🎯 ضریب هدف: <b>{st['target']:.2f}×</b> (خودکار برداشت می‌شه)" if st.get("target") else ""
     text = B(f"🛩 موشک کاغذی در حال اوج گرفتنه!\nشرط: {st['bet']:,} تومن{tgt}\n\nضریب: <b>{m:.2f}×</b>\nمبلغ فعلی: {payout:,} تومن")
     return text, None   # دکمه‌ی برداشت نداره؛ فقط خودکار تو ضریب هدف برداشت می‌شه
@@ -6431,6 +6443,56 @@ def _cg_gif(frames, ms, loop):
 
 
 _CRASH_GIFS: tuple | None = None
+_CG_FLY_BASE: list | None = None
+
+
+def _cg_text(im, m: float, target=None, crashed=False):
+    """ضریب رو روی خودِ تصویر می‌نویسه. فونت داخلی فقط رقم داره؛ «-» «.» «x» دستی کشیده میشن."""
+    d = ImageDraw.Draw(im, "RGBA")
+    txt = f"{m:.2f}"
+    f = load_font(56)
+    col = (255, 90, 90) if (crashed or m < 0) else ((255, 220, 90) if m < 1.2 else (120, 255, 150))
+    out = (0, 0, 0, 255)
+    adv = {}
+    for ch in txt:
+        if ch.isdigit():
+            adv[ch] = f.getlength(ch)
+    dw = max(adv.values()) if adv else 32
+    widths = [dw if c.isdigit() else (dw * 0.42 if c == "." else (dw * 0.6 if c == "-" else dw)) for c in txt] + [dw * 0.9]   # آخرش «x»
+    total = sum(widths)
+    x = (CG_W - total) / 2
+    y = 22
+    d.rounded_rectangle([x - 16, y - 8, x + total + 16, y + 72], radius=16, fill=(0, 0, 0, 130))
+    for ch, w in zip(txt + "x", widths):
+        if ch.isdigit():
+            d.text((x + (w - f.getlength(ch)) / 2, y), ch, font=f, fill=col, stroke_width=2, stroke_fill=out)
+        elif ch == ".":
+            cx, cy = x + w / 2, y + 60
+            d.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=col, outline=out)
+        elif ch == "-":
+            d.rectangle([x + 3, y + 33, x + w - 3, y + 43], fill=col, outline=out)
+        else:   # x
+            cx, cy = x + w / 2, y + 44
+            for sx in (1, -1):
+                d.line([cx - 14, cy - 14 * sx, cx + 14, cy + 14 * sx], fill=out, width=9)
+            for sx in (1, -1):
+                d.line([cx - 14, cy - 14 * sx, cx + 14, cy + 14 * sx], fill=col, width=5)
+        x += w
+    return im
+
+
+def crash_fly_gif(m: float, target=None) -> bytes:
+    """گیف پروازِ موشک با ضریب فعلی روی تصویر (هر آپدیت دوباره ساخته میشه)."""
+    global _CG_FLY_BASE
+    if _CG_FLY_BASE is None:
+        _CG_FLY_BASE = _cg_fly()
+    frames = [_cg_text(f.copy(), m, target) for f in _CG_FLY_BASE[::2]]
+    return _cg_gif(frames, 140, 0)
+
+
+def crash_fall_gif(m: float) -> bytes:
+    frames = [_cg_text(f.copy(), m, None, crashed=True) for f in _cg_fall()]
+    return _cg_gif(frames, 70, 1)
 
 
 def _crash_gifs():
@@ -6444,6 +6506,30 @@ def _crash_gifs():
 def _gif_file(data: bytes, name: str) -> BytesIO:
     b = BytesIO(data); b.name = name
     return b
+
+
+async def _crash_tick(bot, st, m: float, text: str, kb=None):
+    """آپدیت حین پرواز: تصویر با ضریب جدید + کپشن."""
+    if not st.get("anim"):
+        await _crash_edit(bot, st, text, kb); return
+    chat_id, mid = st["chat_id"], st["message_id"]
+    try:
+        data = await asyncio.to_thread(crash_fly_gif, m, st.get("target"))
+    except Exception:
+        log.warning("crash gif render failed", exc_info=True)
+        await _crash_edit(bot, st, text, kb); return
+    for t in (text, re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)):
+        try:
+            await bot.edit_message_media(chat_id=chat_id, message_id=mid,
+                                         media=InputMediaAnimation(_gif_file(data, "fly.gif"), caption=t, parse_mode="HTML"), reply_markup=kb)
+            return
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                return
+            ra = getattr(e, "retry_after", None)
+            if ra:
+                await asyncio.sleep(min(float(getattr(ra, "total_seconds", lambda: ra)()), 5)); return
+    log.warning("crash media tick failed")
 
 
 async def _crash_edit(bot, st, text: str, kb=None):
@@ -6487,7 +6573,7 @@ async def _crash_lose(bot, context, st):
     if st.get("anim"):      # گیف سقوط جایگزین گیف پرواز میشه
         try:
             await bot.edit_message_media(chat_id=st["chat_id"], message_id=st["message_id"],
-                                         media=InputMediaAnimation(_gif_file(_crash_gifs()[1], "fall.gif"), caption=text, parse_mode="HTML"), reply_markup=kb)
+                                         media=InputMediaAnimation(_gif_file(await asyncio.to_thread(crash_fall_gif, st["crash"]), "fall.gif"), caption=text, parse_mode="HTML"), reply_markup=kb)
             done = True
         except Exception:
             log.warning("crash media swap failed", exc_info=True)
@@ -6531,8 +6617,9 @@ async def _crash_loop(bot, context, st):
                 await _crash_win(bot, context, st, target, st["user"], True); return
             if elapsed >= t_crash or crash_mult_at(elapsed) >= st["crash"]:
                 await _crash_lose(bot, context, st); return
-            text, kb = _crash_frame(st, crash_mult_at(elapsed))
-            await _crash_edit(bot, st, text, kb)
+            mm = crash_mult_at(elapsed)
+            text, kb = _crash_frame(st, mm)
+            await _crash_tick(bot, st, mm, text, kb)
     except Exception:
         log.exception("crash loop failed")
         if not st["finished"]:
@@ -6563,6 +6650,8 @@ async def start_crash(bot, context, chat_id, user, bet, q=None, reply_to=None, t
         if q: await edit_html(q, text, kb)
         else: await send_html(bot, chat_id, text, reply_markup=kb, reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None)
     back = InlineKeyboardMarkup([[btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")]])
+    if not crash_allowed(user.id):
+        await out(BP(CRASH_STAFF_MSG), back); return
     if chat_id > 0:
         await out(BP("کازینو فقط تو گروه کار می‌کنه.")); return
     if bet < CASINO_MIN_BET or bet > CASINO_MAX_BET:
@@ -6588,11 +6677,11 @@ async def start_crash(bot, context, chat_id, user, bet, q=None, reply_to=None, t
           "crash": crash_point(), "start": time.monotonic(), "finished": False, "anim": False}
     context.application.bot_data.setdefault("crash_games", {})[gid] = st
     busy.add(user.id)
-    text, kb = _crash_frame(st, 1.0)
+    text, kb = _crash_frame(st, CRASH_MIN)
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
     sent = None
     try:
-        fly = (await asyncio.to_thread(_crash_gifs))[0]
+        fly = await asyncio.to_thread(crash_fly_gif, CRASH_MIN, target)
         if q:
             try: await q.message.delete()
             except Exception: pass
@@ -6649,6 +6738,9 @@ async def create_table(bot, chat_id: int, user, game: str, bet: int, reply_to: i
         return
     if bet > CASINO_MAX_BET:
         await say(BP(_CASINO_MAX_MSG))
+        return
+    if user.id in _busy(context):
+        await say(BP("اول کاری که دستته (بازی یا دوئل) رو تموم کن 😅"))
         return
     if (left := _cd_left(context, user.id)) > 0:
         await say(_cd_html(left))
@@ -6937,6 +7029,9 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id != uid:
         await q.answer("این پنل مال تو نیست؛ خودت بنویس «کازینو» 😅", show_alert=True)
         return
+    if (act in ("pc", "pt", "ptc") or (act in ("g", "a", "custom") and len(parts) > 3 and parts[3] == "crash")) and not crash_allowed(user.id):
+        await q.answer(CRASH_STAFF_MSG, show_alert=True)
+        return
     if act == "m":
         await q.answer()
         text, kb = panel_main(uid)
@@ -7032,6 +7127,9 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
         return
     if key in done:
         await q.answer("این میز دیگه فعال نیست", show_alert=True)
+        return
+    if user.id in _busy(context):
+        await q.answer("اول کاری که دستته (بازی یا دوئل) رو تموم کن 😅", show_alert=True)
         return
     if (left := _cd_left(context, user.id)) > 0:
         await q.answer(_cd_plain(left), show_alert=True)
@@ -7212,6 +7310,9 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
         else: await msg.reply_text(BP("مبلغ رو نفهمیدم. مثال: موشک 100هزار"), parse_mode="HTML")
         return True
     if re.fullmatch(r"موشک|کراش", t):
+        if not crash_allowed(user.id):
+            await send_html(bot, chat_id, BP(CRASH_STAFF_MSG), reply_parameters=rp)
+            return True
         ptext, kb = panel_amounts(user.id, "crash", "1")
         await send_html(bot, chat_id, ptext, reply_markup=kb, reply_parameters=rp)
         return True
@@ -7246,6 +7347,30 @@ DUEL_LINES = [
 ]
 
 
+def _duel_busy(context, uid: int) -> bool:
+    d = context.application.bot_data.setdefault("duel_busy", {})
+    ent = d.get(uid)
+    if ent and ent[0] < time.time():
+        d.pop(uid, None); ent = None
+    return ent is not None
+
+
+def _duel_hold(context, frm: int, to: int, secs: float):
+    d = context.application.bot_data.setdefault("duel_busy", {})
+    for u in (frm, to):
+        d[u] = (time.time() + secs, (frm, to))
+
+
+def _duel_release(context, frm: int, to: int):
+    d = context.application.bot_data.setdefault("duel_busy", {})
+    for u in (frm, to):
+        ent = d.get(u)
+        if ent and ent[1] == (frm, to):
+            d.pop(u, None)
+    busy = _busy(context)
+    busy.discard(frm); busy.discard(to)
+
+
 def _cd_text(left: float) -> str:
     m, s = divmod(int(max(left, 0)) + 1, 60)
     return f"{m} دقیقه و {s} ثانیه"
@@ -7266,6 +7391,15 @@ async def duel_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (rl := await rift_left(user.id, target.id)) > 0:
         await msg.reply_text(rift_block_html(rl), parse_mode="HTML")
         return
+    if _duel_busy(context, user.id):
+        await msg.reply_text(BP("تو الان یه دوئل در جریان یا منتظر جواب داری؛ اول اون تموم شه 😅"), parse_mode="HTML")
+        return
+    if _duel_busy(context, target.id):
+        await msg.reply_text(BP("حریفت الان درگیر یه دوئل دیگه‌ست؛ بعداً امتحان کن 😅"), parse_mode="HTML")
+        return
+    if user.id in _busy(context):
+        await msg.reply_text(BP("اول بازی کازینوت رو تموم کن 😅"), parse_mode="HTML")
+        return
     await upsert_user(user.id, user.full_name)
     row = await get_user(user.id)
     left = DUEL_COOLDOWN - (time.time() - row["last_duel"])
@@ -7276,6 +7410,7 @@ async def duel_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         btn("✅ قبول", "success", callback_data=f"du:ok:{user.id}:{target.id}"),
         btn("❌ رد", "danger", callback_data=f"du:no:{user.id}:{target.id}"),
     ]])
+    _duel_hold(context, user.id, target.id, DUEL_TTL + 30)
     await msg.reply_text(
         f'<b>{SWORDS_CE} دوئل جقی!\n\n{_ulink(user.id, user.full_name)} {_ulink(target.id, target.full_name)} رو به دوئل دعوت کرد.\n'
         f'برنده {DUEL_PRIZE:,} تومن می‌گیره. {_ulink(target.id, target.full_name)}، قبول می‌کنی؟</b>',
@@ -7297,6 +7432,13 @@ async def duel_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("این دوئل دیگه فعال نیست", show_alert=True)
         return
     done.add(key)
+    try:
+        await _duel_run(update, context, q, frm, to, act, key, done)
+    finally:
+        _duel_release(context, frm, to)
+
+
+async def _duel_run(update, context, q, frm, to, act, key, done):
     if act == "no":
         await q.answer()
         await q.edit_message_text("❌ دوئل رد شد.")
@@ -7312,6 +7454,12 @@ async def duel_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if age > DUEL_TTL:
         await q.answer("دعوت منقضی شده", show_alert=True)
         await q.edit_message_text("⌛ دعوت دوئل منقضی شد.")
+        return
+    busy = _busy(context)
+    if frm in busy or to in busy:
+        done.discard(key)
+        await q.answer("یکی از شما الان درگیر بازیه؛ بعد از تموم شدنش قبول کن.", show_alert=True)
+        _duel_hold(context, frm, to, DUEL_TTL)
         return
     await upsert_user(to, q.from_user.full_name)
     now = time.time()
@@ -7341,6 +7489,8 @@ async def duel_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("خطا، دوباره امتحان کن.", show_alert=True)
         return
     await q.answer("دوئل شروع شد!")
+    busy.add(frm); busy.add(to)
+    _duel_hold(context, frm, to, DUEL_WAIT + 60)
     fname = await pool.fetchval("SELECT name FROM users WHERE user_id = $1", frm) or "کاربر"
     a, b = _ulink(frm, fname), _ulink(to, q.from_user.full_name)
     try:
