@@ -394,7 +394,7 @@ async def init_db(app: Application):
         )
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS bank_balance BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS hand_level INT NOT NULL DEFAULT 0")
-        await c.execute("CREATE TABLE IF NOT EXISTS home_assets (asset_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE, house_type TEXT NOT NULL, upgrade_level INT NOT NULL DEFAULT 0, last_claim DOUBLE PRECISION NOT NULL DEFAULT 0, UNIQUE(user_id, house_type))")
+        await c.execute("CREATE TABLE IF NOT EXISTS user_house (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, repair_done_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_claim DOUBLE PRECISION NOT NULL DEFAULT 0, stored_income BIGINT NOT NULL DEFAULT 0, items TEXT NOT NULL DEFAULT '')")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until DOUBLE PRECISION NOT NULL DEFAULT 0")
@@ -3047,17 +3047,6 @@ async def bank_interest_loop():
             log.exception("bank interest loop failed")
             await asyncio.sleep(60)
 
-HOUSES = {
-    "room": {"name": "اتاق اجاره‌ای", "price": 500_000, "income": 30_000},
-    "small": {"name": "آپارتمان کوچک", "price": 2_000_000, "income": 100_000},
-    "lux": {"name": "آپارتمان لوکس", "price": 8_000_000, "income": 350_000},
-    "villa": {"name": "ویلای شخصی", "price": 20_000_000, "income": 800_000},
-    "mansion": {"name": "عمارت سلطنتی", "price": 75_000_000, "income": 2_000_000},
-}
-# هزینه ارتقا عمداً سنگین است؛ هر سطح درآمد پایه ملک را ۳۰٪ افزایش می‌دهد.
-HOUSE_UPGRADE_COSTS = (5_000_000, 15_000_000, 40_000_000, 100_000_000, 250_000_000)
-HOUSE_MAX_LEVEL = len(HOUSE_UPGRADE_COSTS)
-
 _FA_DIGITS_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _MONEY_ALL_WORDS = {"همه", "همش", "همهاش", "همه‌اش", "کل", "تمام", "تمامش", "all", "max"}
 
@@ -3145,80 +3134,314 @@ async def handle_bank_transfer(update: Update, context: ContextTypes.DEFAULT_TYP
         await task_event(context.bot, update.effective_chat.id, user.id, "bank", int(amount), name=user.full_name)
     return True
 
+# ───────────────────────── خونه (تعمیر + وسایل + درآمد روزانه) ─────────────────────────
+HOUSE_REPAIR_COST = 10_000            # هزینه‌ی تعمیر اولیه (10k)
+HOUSE_REPAIR_SECONDS = 30 * 60        # تعمیر ۳۰ دقیقه طول می‌کشه
+HOUSE_BASE_INCOME = 2_000_000         # درآمد روزانه‌ی خونه‌ی تعمیرشده (2m)
+HOUSE_MAX_INCOME = 50_000_000         # سقف درآمد روزانه وقتی همه‌ی وسایل خریده شده (50m)
+HOUSE_STORE_DAYS = 7                  # درآمد جمع‌نشده حداکثر تا چند روز ذخیره می‌شه
+# (کلید، ایموجی، اسم، قیمت)
+_HOUSE_ITEM_DEFS = (
+    ("tv", "📺", "تلویزیون", 35_000_000),
+    ("fridge", "🧊", "یخچال", 90_000_000),
+    ("carpet", "🧶", "فرش", 50_000_000),
+    ("sofa", "🛋", "مبل", 80_000_000),
+    ("bed", "🛏", "تخت", 100_000_000),
+    ("chandelier", "💡", "لوستر", 50_000_000),
+    ("window", "🪟", "پنجره رو به بیرون", 150_000_000),
+    ("wardrobe", "🚪", "کمد", 45_000_000),
+)
+_HOUSE_PRICE_SUM = sum(d[3] for d in _HOUSE_ITEM_DEFS)
+# درآمد هر وسیله متناسب با قیمتش؛ جمع کل با خرید همه‌ی وسایل دقیقاً می‌شه HOUSE_MAX_INCOME
+HOUSE_ITEMS = {
+    k: {"emoji": e, "name": n, "price": p,
+        "income": (p * (HOUSE_MAX_INCOME - HOUSE_BASE_INCOME)) // _HOUSE_PRICE_SUM}
+    for k, e, n, p in _HOUSE_ITEM_DEFS
+}
+_HOUSE_IMG_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
+_HOUSE_BASE_IMG: Image.Image | None = None
+_HOUSE_TASKS: set = set()
+
+
+def _house_daily(items: set) -> int:
+    return HOUSE_BASE_INCOME + sum(HOUSE_ITEMS[k]["income"] for k in items if k in HOUSE_ITEMS)
+
+
+def _house_items_of(row) -> set:
+    raw = (row["items"] if row else "") or ""
+    return {x for x in raw.split(",") if x in HOUSE_ITEMS}
+
+
+def _house_pending(row, now: float) -> int:
+    """درآمد آماده‌ی دریافت = ذخیره‌شده + درآمد از آخرین دریافت (تا سقف HOUSE_STORE_DAYS روز)."""
+    if not row or now < float(row["repair_done_at"] or 0):
+        return 0
+    daily = _house_daily(_house_items_of(row))
+    elapsed = max(0.0, now - float(row["last_claim"] or now))
+    total = int(row["stored_income"] or 0) + int(daily * elapsed / 86400)
+    return min(total, daily * HOUSE_STORE_DAYS)
+
+
+def _load_house_base():
+    global _HOUSE_BASE_IMG
+    if _HOUSE_BASE_IMG is None:
+        here = Path(__file__).resolve().parent
+        for p in (here / "house_room.jpg", here / "assets" / "house_room.jpg", here / "static" / "house_room.jpg"):
+            if p.exists():
+                _HOUSE_BASE_IMG = Image.open(p).convert("RGB")
+                break
+    return _HOUSE_BASE_IMG
+
+
+def _render_house(repaired: bool, items: frozenset) -> bytes | None:
+    """عکس اتاق: خراب (تعمیرنشده) یا تمیز + وسایل خریداری‌شده روی همون عکس کشیده می‌شه."""
+    from PIL import ImageEnhance
+    base = _load_house_base()
+    if base is None:
+        return None
+    img = base.copy()
+
+    def tint(im, color, a):
+        return Image.blend(im, Image.new("RGB", im.size, color), a)
+
+    def glow_region(im, box, bright):
+        m = Image.new("L", im.size, 0)
+        ImageDraw.Draw(m).rectangle(box, fill=255)
+        m = m.filter(ImageFilter.GaussianBlur(14))
+        lit = tint(ImageEnhance.Brightness(im).enhance(bright), (255, 205, 150), 0.12)
+        return Image.composite(lit, im, m)
+
+    if repaired:
+        soft = img.filter(ImageFilter.MedianFilter(5)).filter(ImageFilter.GaussianBlur(1.2))
+        img = Image.blend(img, soft, 0.65)
+        img = ImageEnhance.Brightness(img).enhance(1.35)
+        img = ImageEnhance.Contrast(img).enhance(0.92)
+        img = tint(img, (120, 110, 150), 0.10)
+    else:
+        img = ImageEnhance.Brightness(img).enhance(0.8)
+    if repaired and "wardrobe" in items:
+        img = glow_region(img, (150, 365, 385, 870), 1.45)
+    if repaired and "bed" in items:
+        img = glow_region(img, (840, 625, 1285, 945), 1.4)
+
+    over = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(over)
+    gold = (214, 170, 90)
+    if repaired:
+        if "window" not in items:      # تا پنجره رو نخری با تخته بسته‌ست
+            for y0 in (335, 440, 545, 640):
+                d.polygon([(578, y0 + 4), (738, y0 - 4), (738, y0 + 22), (578, y0 + 30)],
+                          fill=(70, 46, 34, 255), outline=(36, 22, 18, 255))
+        if "bed" in items:
+            d.ellipse([925, 708, 1025, 734], fill=(236, 232, 248, 235))
+        if "carpet" in items:
+            d.polygon([(470, 930), (900, 930), (1060, 1170), (300, 1170)], fill=(120, 38, 58, 235))
+            d.polygon([(500, 950), (872, 950), (1015, 1150), (345, 1150)], outline=gold + (255,), width=5)
+            d.polygon([(540, 975), (845, 975), (965, 1128), (395, 1128)], outline=gold + (200,), width=3)
+            for i in range(5):
+                cx, cy = 560 + i * 70, 1050
+                d.polygon([(cx, cy - 22), (cx + 26, cy), (cx, cy + 22), (cx - 26, cy)], fill=gold + (210,))
+        if "sofa" in items:
+            d.rounded_rectangle([470, 700, 800, 800], 24, fill=(46, 62, 120, 255))
+            d.rounded_rectangle([455, 760, 815, 860], 26, fill=(60, 80, 150, 255))
+            d.rounded_rectangle([440, 745, 500, 860], 18, fill=(40, 54, 108, 255))
+            d.rounded_rectangle([770, 745, 830, 860], 18, fill=(40, 54, 108, 255))
+            d.line([(635, 770), (635, 850)], fill=(36, 48, 98, 255), width=3)
+            d.rectangle([470, 860, 490, 880], fill=(30, 24, 30, 255))
+            d.rectangle([780, 860, 800, 880], fill=(30, 24, 30, 255))
+        if "fridge" in items:
+            d.rounded_rectangle([5, 520, 150, 930], 10, fill=(176, 188, 214, 255), outline=(110, 124, 160, 255), width=4)
+            d.line([(5, 690), (150, 690)], fill=(110, 124, 160, 255), width=4)
+            d.rounded_rectangle([122, 570, 134, 650], 5, fill=(70, 80, 110, 255))
+            d.rounded_rectangle([122, 710, 134, 800], 5, fill=(70, 80, 110, 255))
+            d.rectangle([14, 530, 60, 680], fill=(205, 216, 238, 120))
+        if "tv" in items:
+            d.rounded_rectangle([830, 300, 1110, 470], 8, fill=(14, 14, 20, 255), outline=(60, 64, 90, 255), width=5)
+            d.rectangle([845, 313, 1095, 457], fill=(70, 120, 220, 255))
+            d.polygon([(845, 313), (1000, 313), (900, 457), (845, 457)], fill=(120, 170, 255, 180))
+            d.rectangle([955, 470, 985, 492], fill=(40, 42, 56, 255))
+            d.rectangle([920, 490, 1020, 500], fill=(40, 42, 56, 255))
+        if "chandelier" in items:
+            cx = 650
+            d.line([(cx, 0), (cx, 58)], fill=(200, 170, 100, 255), width=6)
+            d.polygon([(cx - 20, 58), (cx + 20, 58), (cx + 60, 100), (cx - 60, 100)], fill=(214, 176, 96, 255))
+            d.arc([cx - 100, 70, cx + 100, 150], 0, 180, fill=(214, 176, 96, 255), width=8)
+            for k in (-95, -55, -15, 15, 55, 95):
+                x = cx + k
+                d.line([(x, 108), (x, 126)], fill=(214, 176, 96, 255), width=4)
+                d.ellipse([x - 9, 124, x + 9, 148], fill=(255, 236, 170, 255))
+    img = img.convert("RGBA")
+    img.alpha_composite(over)
+    if repaired and "chandelier" in items:
+        glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        g = ImageDraw.Draw(glow)
+        for k in (-95, -55, -15, 15, 55, 95):
+            g.ellipse([650 + k - 36, 120, 650 + k + 36, 180], fill=(255, 220, 140, 95))
+        img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(22)))
+    out = BytesIO()
+    img.convert("RGB").save(out, "JPEG", quality=88)
+    return out.getvalue()
+
+
+async def _house_photo(repaired: bool, items: set) -> BytesIO | None:
+    key = (bool(repaired), tuple(sorted(items)))
+    data = _HOUSE_IMG_CACHE.get(key)
+    if data is None:
+        data = await asyncio.to_thread(_render_house, bool(repaired), frozenset(items))
+        if data is None:
+            return None
+        _HOUSE_IMG_CACHE[key] = data
+        while len(_HOUSE_IMG_CACHE) > 40:
+            _HOUSE_IMG_CACHE.popitem(last=False)
+    else:
+        _HOUSE_IMG_CACHE.move_to_end(key)
+    bio = BytesIO(data)
+    bio.name = "house.jpg"
+    return bio
+
+
+def _house_price_label(p: int) -> str:
+    return f"{p // 1_000_000} میلیون" if p % 1_000_000 == 0 else f"{p:,}"
+
+
+async def _house_panel(uid: int):
+    """(عکس، کپشن، کیبورد) پنل خونه برای کاربر."""
+    now = time.time()
+    row = await pool.fetchrow("SELECT repair_done_at, last_claim, stored_income, items FROM user_house WHERE user_id=$1", uid)
+    bal = await pool.fetchval("SELECT balance FROM users WHERE user_id=$1", uid) or 0
+    if not row:
+        cap = (f"🏚 <b>خونه‌ی خراب</b>\n\nیه خونه‌ی ویرونه داری که باید تعمیرش کنی!\n"
+               f"🔧 هزینه‌ی تعمیر: <b>{HOUSE_REPAIR_COST:,} تومان</b>\n⏳ مدت تعمیر: <b>۳۰ دقیقه</b>\n"
+               f"💰 بعد از تعمیر روزانه <b>{HOUSE_BASE_INCOME:,}</b> تومان درآمد می‌ده و با خرید وسایل تا <b>{HOUSE_MAX_INCOME:,}</b> تومان در روز می‌ره بالا.\n\n"
+               f"موجودی جیبت: <b>{bal:,}</b>")
+        kb = InlineKeyboardMarkup([[btn(f"🔧 تعمیر خونه | {HOUSE_REPAIR_COST:,}", "success", callback_data=f"hm:repair:{uid}:x")]])
+        return await _house_photo(False, set()), cap, kb
+    if now < float(row["repair_done_at"]):
+        left = int(float(row["repair_done_at"]) - now)
+        m, s = divmod(left, 60)
+        cap = (f"🔧 <b>خونه در حال تعمیره...</b>\n\n⏳ زمان باقی‌مانده: <b>{m:02d}:{s:02d}</b>\n"
+               f"بعد از تعمیر می‌تونی وسایل بخری و درآمد روزانه بگیری.")
+        kb = InlineKeyboardMarkup([[btn("🔄 بروزرسانی", "primary", callback_data=f"hm:ref:{uid}:x")]])
+        return await _house_photo(False, set()), cap, kb
+    items = _house_items_of(row)
+    daily = _house_daily(items)
+    pending = _house_pending(row, now)
+    lines = ["🏠 <b>خونه‌ی شما</b> ✨ تعمیرشده", ""]
+    buttons: list[list[InlineKeyboardButton]] = []
+    pair: list[InlineKeyboardButton] = []
+    for k, it in HOUSE_ITEMS.items():
+        if k in items:
+            lines.append(f"✅ {it['emoji']} {it['name']} — +{it['income']:,}")
+        else:
+            lines.append(f"🔒 {it['emoji']} {it['name']} — {it['price']:,} (+{it['income']:,}/روز)")
+            pair.append(btn(f"{it['emoji']} {it['name']} | {_house_price_label(it['price'])}", "primary", callback_data=f"hm:buy:{uid}:{k}"))
+            if len(pair) == 2:
+                buttons.append(pair); pair = []
+    if pair:
+        buttons.append(pair)
+    lines += ["", f"💰 درآمد روزانه: <b>{daily:,}</b> / سقف {HOUSE_MAX_INCOME:,}",
+              f"📥 آماده‌ی دریافت: <b>{pending:,}</b> تومان", f"موجودی جیبت: <b>{bal:,}</b>"]
+    buttons.append([btn(f"📥 دریافت درآمد | {pending:,}", "success", callback_data=f"hm:claim:{uid}:all"),
+                    btn("🔄", "primary", callback_data=f"hm:ref:{uid}:x")])
+    return await _house_photo(True, items), "\n".join(lines)[:1000], InlineKeyboardMarkup(buttons)
+
+
 async def show_homes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user=update.effective_user
-    await upsert_user(user.id,user.full_name)
-    rows=await pool.fetch("SELECT house_type, upgrade_level, last_claim FROM home_assets WHERE user_id=$1 ORDER BY asset_id",user.id)
-    lines=[f"🏠 <b>املاک و مستغلات</b>","خونه بخر، ارتقاش بده و هر ۲۴ ساعت درآمد جمع کن.",""]
-    buttons=[]
-    now=time.time(); total_income=0
-    for r in rows:
-        cfg=HOUSES.get(r['house_type'])
-        if not cfg: continue
-        level=int(r['upgrade_level']); daily=int(cfg['income']*(1+0.30*level)); total_income+=daily
-        accrued=max(0,min(7*86400,now-float(r['last_claim'] or now)))
-        pending=int(daily*accrued/86400)
-        lines.append(f"🏡 <b>{cfg['name']}</b> | سطح ارتقا: <b>{level}/{HOUSE_MAX_LEVEL}</b>\nدرآمد روزانه: <b>{daily:,}</b> | درآمد ذخیره‌شده: <b>{pending:,}</b> تومان")
-        buttons.append([btn(f"ارتقای {cfg['name']} | {HOUSE_UPGRADE_COSTS[level]:,}" if level < HOUSE_MAX_LEVEL else f"{cfg['name']} (حداکثر ارتقا)","primary",icon=EID_TROPHY,callback_data=f"hm:up:{user.id}:{r['house_type']}")])
-    if rows:
-        buttons.append([btn("دریافت درآمد املاک","success",icon=EID_MONEY,callback_data=f"hm:claim:{user.id}:all")])
-    lines.append(f"\n{MONEY_CE} درآمد روزانه کل: <b>{total_income:,} تومان</b>")
-    lines.append("\n<b>فروشگاه خرید ملک</b>")
-    for key,cfg in HOUSES.items():
-        owned=any(r['house_type']==key for r in rows)
-        lines.append(f"• {cfg['name']}: <b>{cfg['price']:,} تومان</b> — درآمد پایه روزانه {cfg['income']:,}" + (" (خریداری شده)" if owned else ""))
-        if not owned: buttons.append([btn(f"خرید {cfg['name']} | {cfg['price']:,}","primary",icon=EID_MONEY,callback_data=f"hm:buy:{user.id}:{key}")])
-    await update.effective_message.reply_text(B("\n".join(lines)),parse_mode="HTML",reply_markup=InlineKeyboardMarkup(buttons) if buttons else None)
+    user = update.effective_user
+    await upsert_user(user.id, user.full_name)
+    photo, cap, kb = await _house_panel(user.id)
+    msg = update.effective_message
+    if photo is not None:
+        try:
+            await msg.reply_photo(photo=photo, caption=cap, parse_mode="HTML", reply_markup=kb)
+            return
+        except Exception:
+            log.warning("house photo send failed", exc_info=True)
+    await msg.reply_text(cap, parse_mode="HTML", reply_markup=kb)
+
+
+async def _house_repair_notify(bot, chat_id: int, reply_to: int | None, uid: int):
+    try:
+        await asyncio.sleep(HOUSE_REPAIR_SECONDS + 2)
+        rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+        await bot.send_message(chat_id, B("🏠 تعمیر خونه‌ات تموم شد! بنویس «خونه» و وسایلش رو بخر تا درآمدش بره بالا."),
+                               parse_mode="HTML", reply_parameters=rp)
+    except Exception:
+        log.warning("house repair notify failed", exc_info=True)
+
 
 async def home_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; parts=q.data.split(":")
-    if len(parts)!=4: await q.answer("درخواست نامعتبر است.",show_alert=True); return
-    _,action,uid_s,key=parts
-    try: uid=int(uid_s)
-    except ValueError: await q.answer("درخواست نامعتبر است.",show_alert=True); return
-    if q.from_user.id!=uid: await q.answer("این پنل املاک برای شما نیست.",show_alert=True); return
-    now=time.time(); message=""; ok=False
+    q = update.callback_query
+    parts = q.data.split(":")
+    if len(parts) != 4:
+        await q.answer("درخواست نامعتبر است.", show_alert=True); return
+    _, action, uid_s, key = parts
+    try:
+        uid = int(uid_s)
+    except ValueError:
+        await q.answer("درخواست نامعتبر است.", show_alert=True); return
+    if q.from_user.id != uid:
+        await q.answer("این پنل خونه برای شما نیست.", show_alert=True); return
+    now = time.time(); message = ""; ok = False; started_repair = False
     async with pool.acquire() as conn:
         async with conn.transaction():
-            row=await conn.fetchrow("SELECT balance FROM users WHERE user_id=$1 FOR UPDATE",uid)
-            if action=="buy" and key in HOUSES:
-                cfg=HOUSES[key]; owned=await conn.fetchval("SELECT 1 FROM home_assets WHERE user_id=$1 AND house_type=$2",uid,key)
-                if owned: message="این ملک رو قبلاً خریدی."
-                elif row['balance']<cfg['price']: message=f"برای خرید {cfg['name']} به {cfg['price']:,} تومان نیاز داری."
+            bal = await conn.fetchval("SELECT balance FROM users WHERE user_id=$1 FOR UPDATE", uid) or 0
+            row = await conn.fetchrow("SELECT * FROM user_house WHERE user_id=$1 FOR UPDATE", uid)
+            repaired = bool(row) and now >= float(row["repair_done_at"])
+            if action == "repair":
+                if row: message = "خونه رو قبلاً تعمیر کردی."
+                elif bal < HOUSE_REPAIR_COST: message = f"برای تعمیر خونه {HOUSE_REPAIR_COST:,} تومان لازم داری."
                 else:
-                    await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2",cfg['price'],uid)
-                    await conn.execute("INSERT INTO home_assets(user_id,house_type,last_claim) VALUES($1,$2,$3)",uid,key,now)
-                    message=f"ملک {cfg['name']} با موفقیت به نامت ثبت شد!"; ok=True
-            elif action=="up" and key in HOUSES:
-                asset=await conn.fetchrow("SELECT upgrade_level FROM home_assets WHERE user_id=$1 AND house_type=$2 FOR UPDATE",uid,key)
-                if not asset: message="این ملک رو نداری."
-                elif asset['upgrade_level']>=HOUSE_MAX_LEVEL: message="این ملک به آخرین سطح ارتقا رسیده."
+                    done = now + HOUSE_REPAIR_SECONDS
+                    await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", HOUSE_REPAIR_COST, uid)
+                    await conn.execute("INSERT INTO user_house(user_id,repair_done_at,last_claim) VALUES($1,$2,$2)", uid, done)
+                    message = "تعمیر خونه شروع شد! ۳۰ دقیقه دیگه آماده‌ست 🔧"; ok = True; started_repair = True
+            elif action == "buy":
+                it = HOUSE_ITEMS.get(key)
+                if not it: message = "این وسیله وجود نداره."
+                elif not row: message = "اول باید خونه رو تعمیر کنی."
+                elif not repaired: message = "خونه هنوز در حال تعمیره؛ بعد از تعمیر می‌تونی وسیله بخری."
+                elif key in _house_items_of(row): message = f"{it['name']} رو قبلاً خریدی."
+                elif bal < it["price"]: message = f"برای خرید {it['name']} به {it['price']:,} تومان نیاز داری."
                 else:
-                    level=int(asset['upgrade_level']); cost=HOUSE_UPGRADE_COSTS[level]
-                    if row['balance']<cost: message=f"برای ارتقای بعدی {cost:,} تومان لازم داری؛ موجودی جیبت کافى نیست."
-                    else:
-                        await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2",cost,uid)
-                        await conn.execute("UPDATE home_assets SET upgrade_level=upgrade_level+1 WHERE user_id=$1 AND house_type=$2",uid,key)
-                        message=f"ارتقای ملک انجام شد! سطح جدید: {level+1}/{HOUSE_MAX_LEVEL}؛ درآمد روزانه ۳۰٪ بیشتر شد."; ok=True
-            elif action=="claim" and key=="all":
-                assets=await conn.fetch("SELECT asset_id,house_type,upgrade_level,last_claim FROM home_assets WHERE user_id=$1 FOR UPDATE",uid)
-                payout=0
-                for a in assets:
-                    cfg=HOUSES[a['house_type']]; daily=int(cfg['income']*(1+0.30*int(a['upgrade_level'])))
-                    elapsed=max(0,min(7*86400,now-float(a['last_claim'] or now)))
-                    earned=int(daily*elapsed/86400); payout+=earned
-                    if earned>0: await conn.execute("UPDATE home_assets SET last_claim=$1 WHERE asset_id=$2",now,a['asset_id'])
-                if payout>0:
-                    await conn.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2",payout,uid)
-                    message=f"درآمد املاکت دریافت شد: +{payout:,} تومان!"; ok=True
-                else: message="هنوز درآمدی برای دریافت جمع نشده؛ درآمد هر ملک به مرور و تا سقف ۷ روز ذخیره می‌شه."
-            else: message="درخواست نامعتبر است."
-    await q.answer("انجام شد!" if ok else message[:180],show_alert=not ok)
-    # پنل را دوباره بساز تا موجودی، سطح و درآمد تازه دیده شود.
-    await q.message.reply_text(B(message),parse_mode="HTML")
-    class _Proxy: pass
-    proxy=_Proxy(); proxy.effective_user=q.from_user; proxy.effective_message=q.message
-    await show_homes(proxy,context)
+                    stored = _house_pending(row, now)     # درآمد تا همین لحظه با نرخ قبلی ذخیره می‌شه
+                    new_items = ",".join(sorted(_house_items_of(row) | {key}))
+                    await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", it["price"], uid)
+                    await conn.execute("UPDATE user_house SET items=$2, stored_income=$3, last_claim=$4 WHERE user_id=$1", uid, new_items, stored, now)
+                    message = f"{it['name']} خریداری شد! درآمد روزانه‌ات +{it['income']:,} شد ✨"; ok = True
+            elif action == "claim":
+                if not repaired: message = "خونه هنوز تعمیر نشده."
+                else:
+                    payout = _house_pending(row, now)
+                    if payout > 0:
+                        await conn.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", payout, uid)
+                        await conn.execute("UPDATE user_house SET stored_income=0, last_claim=$2 WHERE user_id=$1", uid, now)
+                        message = f"+{payout:,} تومان درآمد خونه دریافت شد!"; ok = True
+                    else: message = "هنوز درآمدی جمع نشده."
+            elif action == "ref":
+                ok = True
+            else:
+                message = "درخواست نامعتبر است."
+    await q.answer(message[:180] if message else None, show_alert=bool(message) and not ok)
+    photo, cap, kb = await _house_panel(uid)
+    try:
+        if photo is not None:
+            await q.edit_message_media(InputMediaPhoto(photo, caption=cap, parse_mode="HTML"), reply_markup=kb)
+        else:
+            await q.edit_message_text(cap, parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            log.warning("house panel update failed, resending", exc_info=True)
+            try: await q.message.delete()
+            except Exception: pass
+            photo2, cap2, kb2 = await _house_panel(uid)
+            if photo2 is not None:
+                await context.bot.send_photo(q.message.chat_id, photo=photo2, caption=cap2, parse_mode="HTML", reply_markup=kb2)
+            else:
+                await context.bot.send_message(q.message.chat_id, cap2, parse_mode="HTML", reply_markup=kb2)
+    if started_repair:
+        t = asyncio.create_task(_house_repair_notify(context.bot, q.message.chat_id, q.message.message_id, uid))
+        _HOUSE_TASKS.add(t); t.add_done_callback(_HOUSE_TASKS.discard)
 
 
 # ───────────────────────── پنل یکپارچه «خودم اینارو ببین» ─────────────────────────
@@ -3427,7 +3650,7 @@ async def _transfer_target_error(src: int, dst: int) -> str | None:
         return "این آیدی پیدا نشد یا هنوز ربات رو استارت نکرده. از اکانت مقصد تو پی‌وی ربات /start بزن و دوباره امتحان کن."
     if any(int(d[c] or 0) for c in ("balance", "bank_balance", "jaghs", "hand_level", "work_count")):
         return "اکانت مقصد باید تازه و خالی باشه (پول، جق، دست یا شغلش صفر نیست)."
-    extra = await pool.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM home_assets WHERE user_id=$1)", dst)
+    extra = await pool.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM user_house WHERE user_id=$1)", dst)
     if extra:
         return "اکانت مقصد باید تازه و خالی باشه (ماشین یا خونه داره)."
     return None
@@ -3482,7 +3705,7 @@ async def _do_account_transfer(src: int, dst: int) -> str | None:
                 return "یکی از اکانت‌ها تو دیتابیس پیدا نشد."
             if any(int(d_row[c] or 0) for c in ("balance", "bank_balance", "jaghs", "hand_level", "work_count")):
                 return "اکانت مقصد دیگه خالی نیست."
-            if await conn.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM home_assets WHERE user_id=$1)", dst):
+            if await conn.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM user_house WHERE user_id=$1)", dst):
                 return "اکانت مقصد دیگه خالی نیست."
             await conn.execute(
                 "UPDATE users SET balance=$2, bank_balance=$3, jaghs=$4, hand_level=$5, work_count=$6, gender=COALESCE($7, gender) WHERE user_id=$1",
@@ -3491,7 +3714,7 @@ async def _do_account_transfer(src: int, dst: int) -> str | None:
             )
             await conn.execute("UPDATE users SET balance=0, bank_balance=0, jaghs=0, hand_level=0, work_count=0, gender=NULL WHERE user_id=$1", src)
             await conn.execute("UPDATE cars SET user_id=$2 WHERE user_id=$1", src, dst)
-            await conn.execute("UPDATE home_assets SET user_id=$2 WHERE user_id=$1", src, dst)
+            await conn.execute("UPDATE user_house SET user_id=$2 WHERE user_id=$1", src, dst)
             # وضعیت خلاف (بازداشت/ردگیری/کول‌داون) هم همراه اکانت میره تا انتقال راه فرار نباشه
             await conn.execute("DELETE FROM robbery_state WHERE user_id=$1", dst)
             await conn.execute("UPDATE robbery_state SET user_id=$2 WHERE user_id=$1", src, dst)
@@ -4112,7 +4335,7 @@ async def spy_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
                 await c.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
                 row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,energy FROM users WHERE user_id=$1", target.id)
             spouse = await c.fetchrow("SELECT name FROM users WHERE user_id=$1", row["spouse_id"]) if row["spouse_id"] else None
-            acts = await c.fetchrow("SELECT (SELECT count(*) FROM group_msgs WHERE user_id=$1) AS messages, (SELECT count(*) FROM cars WHERE user_id=$1) AS cars, (SELECT count(*) FROM home_assets WHERE user_id=$1) AS homes, (SELECT count(*) FROM robbery_state WHERE user_id=$1) AS robberies", target.id)
+            acts = await c.fetchrow("SELECT (SELECT count(*) FROM group_msgs WHERE user_id=$1) AS messages, (SELECT count(*) FROM cars WHERE user_id=$1) AS cars, (SELECT count(*) FROM user_house WHERE user_id=$1) AS homes, (SELECT count(*) FROM robbery_state WHERE user_id=$1) AS robberies", target.id)
     job = current_job(row["gender"], int(row["jaghs"] or 0), int(row["work_count"] or 0)) if row["gender"] in JOBS else None
     job_name = job[1] if job else "بدون شغل"
     marital = f"متأهل با {html.escape(spouse['name'] or 'همسر') }" if spouse else "مجرد"
