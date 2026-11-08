@@ -76,7 +76,7 @@ import math
 from io import BytesIO
 from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
-from telegram import BotCommandScopeAllPrivateChats, InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InputMediaPhoto, MessageEntity, ReplyParameters, Update, WebAppInfo
+from telegram import InputMediaAnimation, BotCommandScopeAllPrivateChats, InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InputMediaPhoto, MessageEntity, ReplyParameters, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -397,6 +397,9 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS bank_balance BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS hand_level INT NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS user_house (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, repair_done_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_claim DOUBLE PRECISION NOT NULL DEFAULT 0, stored_income BIGINT NOT NULL DEFAULT 0, items TEXT NOT NULL DEFAULT '')")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS condoms INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pills INT NOT NULL DEFAULT 0")
+        await c.execute("CREATE TABLE IF NOT EXISTS couple_relation (pair_key TEXT PRIMARY KEY, relation INT NOT NULL DEFAULT 0, last_sex DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until DOUBLE PRECISION NOT NULL DEFAULT 0")
@@ -4894,6 +4897,7 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 _PM_BLOCK_WORDS = {
     "خونه", "خانه", "املاک", "دست", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جاسوسی",
     "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلجقی", "دوئلجق",
+    "فروشگاه", "سکس", "موشک", "کراش",
 }
 
 
@@ -4903,7 +4907,7 @@ def _pm_group_only_text(text: str) -> bool:
     if key in _PM_BLOCK_WORDS or key in CAR_WORDS or key.startswith(("خریدجاسوسی",)):
         return True
     t = norm_word(text).translate(_DIG)
-    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
+    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
 
 
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5921,7 +5925,7 @@ SLOT_SYMS = [
     '<tg-emoji emoji-id="5357158630091139922">7️⃣</tg-emoji>',
 ]
 GAME_EMOJI = {"dice": "🎲", "slot": "🎰"}  # ایموجی خودِ تلگرام برای sendDice
-GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "mines": f"مین {MINES_BOMB_CE}", "poison": "سم یا خوراکی ☠️"}
+GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "موشک کاغذی 🛩", "mines": f"مین {MINES_BOMB_CE}", "poison": "سم یا خوراکی ☠️"}
 
 
 async def send_html(bot, chat_id: int, text: str, **kw):
@@ -6018,6 +6022,13 @@ async def _give(uid: int, amt: int):
     await pool.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", amt, uid)
 
 
+def win_lines(profit: int, total: int, balance: int) -> str:
+    """بلوک نتیجه‌ی برد: سود، مبلغ کل برد از این بازی، دارایی کل (با ایموجی پرمیوم)."""
+    return (f"\n{MONEY_CE} سود: <b>{profit:,}</b> تومن"
+            f"\n{TROPHY_CE} مبلغ کل برد از این بازی: <b>{total:,}</b> تومن"
+            f"\n{ce('wallet', 1, '💰')} دارایی کل: <b>{balance:,}</b> تومن")
+
+
 def _uname(user) -> str:
     return html.escape(user.full_name)
 
@@ -6056,7 +6067,8 @@ def panel_main(uid: int):
         btn("تاس", "primary", icon=DICE_EID, callback_data=f"cz:g:{uid}:dice"),
         btn("🎰 اسلات", "primary", callback_data=f"cz:g:{uid}:slot"),
         btn("مین", "primary", icon=MINES_BOMB_EID, callback_data=f"cz:g:{uid}:mines"),
-    ], [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")]])
+    ], [btn("🛩 موشک کاغذی", "success", callback_data=f"cz:g:{uid}:crash"),
+        btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")]])
     return text, kb
 
 
@@ -6066,6 +6078,10 @@ def panel_game(uid: int, game: str):
                  f"۲ نفره: یه میز تو گروه باز می‌شه، نفر دوم میاد؛ هر کی تاس بالاتر بندازه کل پول رو می‌بره.")
     elif game == "poison":
         rules = "☠️ سم یا خوراکی — فقط دو نفره\n\n۲۴ خانه وجود داره. هر نفر در ۶۰ ثانیه سم خودش رو پشت یک خانه مخفی می‌کنه. بعد به نوبت خانه‌های حریف رو انتخاب می‌کنید؛ پیدا کردن سم حریف یعنی بردن کل شرط! انتخاب هر مرحله ۶۰ ثانیه مهلت داره."
+    elif game == "crash":
+        rules = ("🛩 موشک کاغذی (کراش) — بازی تک‌نفره\n\nموشک کاغذی بعد از شرط‌بندی شروع به اوج گرفتن می‌کنه و ضریبت لحظه‌به‌لحظه بالا می‌ره. "
+                 "قبل از شروع یه ضریب هدف (حداقل ۱٫۲×) انتخاب می‌کنی و اگه موشک بهش برسه خودکار برداشت می‌شه؛ ولی هر لحظه ممکنه سقوط کنه و شرطت بسوزه!\n"
+                 "⚠️ لحظه‌ی سقوط غیرقابل پیش‌بینیه و حتی ممکنه همون ابتدا و تو ضریب ۱٫۰۰ یا ۱٫۲ اتفاق بیفته.")
     elif game == "mines":
         rules = (f"{MINES_BOMB_CE} مین — بازی تک‌نفره\n\n۲۱ خانه وجود داره و ۳ خانه بمبه. هر خانه امن ضریب رو بیشتر می‌کنه. با پیدا کردن بمب شرطت از دست میره؛ هر زمان خواستی برداشت کن تا شرط × ضریب به حسابت برگرده. ضریب نهایی در خانه امن هجدهم ۳٫۰۵× است.")
     else:
@@ -6073,7 +6089,7 @@ def panel_game(uid: int, game: str):
                  "هر سه تا نماد تو یکی باشه ×۳ | دوتاش ×۱٫۷ | فقط یکیش ×۰٫۳ | هیچی نیاد می‌بازی.\n\n"
                  "۲ نفره: ربات اسلات می‌ندازه؛ نماد امتیاز داره (🔔 صفر | 🍇 ۱۰ | 🍋 ۱۵ | 7️⃣ ۲۱) و هر کی امتیاز بیشتر بیاره کل پول رو می‌بره.")
     kb = InlineKeyboardMarkup([
-        ([btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:mines:1")] if game == "mines"
+        ([btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1")] if game in ("mines", "crash")
          else [btn("👥 ۲ نفره", "success", callback_data=f"cz:a:{uid}:poison:2")] if game == "poison"
          else [btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1"),
                btn("👥 ۲ نفره", "success", callback_data=f"cz:a:{uid}:{game}:2")]),
@@ -6085,7 +6101,7 @@ def panel_game(uid: int, game: str):
 def panel_amounts(uid: int, game: str, mode: str):
     who = "۱ نفره" if mode == "1" else "۲ نفره"
     if mode == "1":
-        pre = "n" if game == "dice" else ("pm" if game == "mines" else "ps")
+        pre = "n" if game == "dice" else ("pm" if game == "mines" else ("pc" if game == "crash" else "ps"))
     else:
         pre = "sy" if game == "poison" else ("td" if game == "dice" else "ts")
     rows, row = [], []
@@ -6184,7 +6200,8 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
         profit = (bet * (1 + DICE_NET) if game == "dice" and v == pick else 0) if game == "dice" else payout
         record_line = await update_group_record(chat_id, game, user, profit)
         row = await get_user(user.id)
-        await say(B(text + ("\n" + record_line if record_line else "") + f"\n{ce('wallet', 1, '💰')} دارایی: {row['balance']:,}"))
+        tail = win_lines(profit - bet, profit, row['balance']) if profit > bet else f"\n{ce('wallet', 1, '💰')} دارایی: {row['balance']:,}"
+        await say(B(text + ("\n" + record_line if record_line else "") + tail))
         delete_later(bot, chat_id, [m.message_id])
         await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
     finally:
@@ -6195,6 +6212,7 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
 SLOT_PICK_SYMS = [("7️⃣", 3), ("🔔", 0), ("🍋", 2), ("🍇", 1)]   # (نمایش، اندیس نماد تو SLOT_SYMS)
 SLOT_BET_MULTS = {3: 3.0, 2: 1.7, 1: 0.3, 0: 0.0}                 # تعداد نمادِ درست → ضریب
 SLOT_PENDING_TTL = 120
+SLOT_USER_WAIT = 2.2     # ثانیه تا اعلام نتیجه‌ی اسلاتی که خود کاربر فرستاده (انیمیشن تلگرام ~۲ ثانیه‌ست)
 
 
 def _slot_pending(context) -> dict:
@@ -6286,8 +6304,7 @@ async def slot_dice_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     busy.add(user.id)
     try:
         v = msg.dice.value
-        await edit_panel(B(f"🎰 اسلات — شرط {bet:,} تومن\n\n{HG_CE} داره می‌چرخه..."))
-        await asyncio.sleep(CASINO_WAIT)
+        await asyncio.sleep(SLOT_USER_WAIT)   # فقط به‌اندازه‌ی تموم شدن انیمیشن؛ پیام «می‌چرخه» هم دیگه ادیت نمی‌شه
         _cd_set(context, user.id)
         reels = slot_reels(v)
         hits = sum(1 for r in reels if r == sym)
@@ -6307,11 +6324,310 @@ async def slot_dice_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"🎰 {slot_text(v)}\nشرطت روی {emo} بود: {hits} تا اومد (×{_mult_txt(mult)})\n{res}"
         record_line = await update_group_record(chat.id, "slot", user, payout)
         row = await get_user(user.id)
-        await edit_panel(B(text + ("\n" + record_line if record_line else "") + f"\n{ce('wallet', 1, '💰')} دارایی: {row['balance']:,}"), again_kb)
+        tail = win_lines(diff, payout, row['balance']) if diff > 0 else f"\n{ce('wallet', 1, '💰')} دارایی: {row['balance']:,}"
+        await edit_panel(B(text + ("\n" + record_line if record_line else "") + tail), again_kb)
         delete_later(bot, chat.id, [msg.message_id])
         await task_event(bot, chat.id, user.id, "casino", name=user.full_name)
     finally:
         busy.discard(user.id)
+
+
+# ───── موشک (کراش): ضریب بالا می‌ره، هر لحظه ممکنه منفجر بشه ─────
+CRASH_EDGE = 0.90      # امید ریاضی ۹۰٪ (سخت): ~۱۰٪ بازی‌ها همون ابتدا و تو ۱٫۰۰ می‌سوزن، ~۲۵٪ قبل از ۱٫۲
+CRASH_MAX = 100.0
+CRASH_RATE = 0.08      # ضریب = e^(RATE × ثانیه)
+CRASH_TICK = 1.5       # هر چند ثانیه پیام آپدیت میشه
+
+
+def crash_point() -> float:
+    u = max(random.random(), 1e-9)
+    return max(1.0, min(CRASH_MAX, math.floor(100 * CRASH_EDGE / u) / 100))
+
+
+def crash_mult_at(t: float) -> float:
+    return math.floor(math.exp(CRASH_RATE * max(0.0, t)) * 100) / 100
+
+
+def crash_time_for(m: float) -> float:
+    return math.log(max(m, 1.0)) / CRASH_RATE
+
+
+def _crash_frame(st, m: float):
+    payout = int(st["bet"] * m)
+    tgt = f"\n🎯 ضریب هدف: <b>{st['target']:.2f}×</b> (خودکار برداشت می‌شه)" if st.get("target") else ""
+    text = B(f"🛩 موشک کاغذی در حال اوج گرفتنه!\nشرط: {st['bet']:,} تومن{tgt}\n\nضریب: <b>{m:.2f}×</b>\nمبلغ فعلی: {payout:,} تومن")
+    return text, None   # دکمه‌ی برداشت نداره؛ فقط خودکار تو ضریب هدف برداشت می‌شه
+
+
+CG_W, CG_H = 360, 240
+
+def _cg_sky():
+    im = Image.new("RGB", (CG_W, CG_H))
+    d = ImageDraw.Draw(im)
+    for y in range(CG_H):
+        t = y / CG_H
+        d.line([(0, y), (CG_W, y)], fill=(int(40 + 110 * t), int(90 + 110 * t), int(170 + 70 * t)))
+    return im
+
+def _cg_plane(angle, scale=1.0):
+    S = 160
+    lay = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    c = S // 2
+    def P(x, y): return (c + x * scale, c + y * scale)
+    nose, tt, tb, fold = P(60, 0), P(-48, -24), P(-48, 20), P(-18, 4)
+    d.polygon([nose, tt, fold], fill=(255, 255, 255, 255), outline=(150, 165, 190, 255))
+    d.polygon([nose, fold, tb], fill=(205, 215, 235, 255), outline=(150, 165, 190, 255))
+    d.line([nose, fold], fill=(150, 165, 190, 255), width=2)
+    d.polygon([fold, P(-48, 2), tb], fill=(180, 192, 215, 255))
+    return lay.rotate(angle, resample=Image.BICUBIC, expand=False)
+
+def _cg_clouds(im, shift):
+    ov = Image.new("RGBA", im.size, (0, 0, 0, 0)); d = ImageDraw.Draw(ov)
+    for cx, cy, r in ((60, 50, 26), (210, 90, 20), (300, 40, 24), (150, 190, 22), (20, 170, 18)):
+        x = (cx - shift) % (CG_W + 120) - 60
+        for dx, dy, rr in ((0, 0, r), (r * .9, r * .2, r * .8), (-r * .9, r * .25, r * .7)):
+            d.ellipse([x + dx - rr, cy + dy - rr * .6, x + dx + rr, cy + dy + rr * .6], fill=(255, 255, 255, 150))
+    im.paste(ov, (0, 0), ov)
+
+def _cg_fly():
+    frames = []
+    N = 24
+    for i in range(N):
+        im = _cg_sky(); _cg_clouds(im, i * (CG_W + 120) / N)
+        d = ImageDraw.Draw(im)
+        ph = 2 * math.pi * i / N
+        x, y = 190 + 8 * math.sin(ph), 125 + 10 * math.sin(ph * 2 + 1)
+        for k in range(1, 9):   # رد نقطه‌چین
+            d.ellipse([x - 55 - k * 14, y + 6 + k * 3 - 2, x - 55 - k * 14 + 4, y + 6 + k * 3 + 2], fill=(255, 255, 255))
+        pl = _cg_plane(12 + 5 * math.sin(ph))
+        im.paste(pl, (int(x - 80), int(y - 80)), pl)
+        frames.append(im)
+    return frames
+
+def _cg_fall():
+    frames = []
+    N = 22
+    for i in range(N):
+        im = _cg_sky(); _cg_clouds(im, 0)
+        t = i / (N - 1)
+        x = 190 - 40 * t; y = 120 + 110 * t * t
+        pl = _cg_plane(12 - 560 * t, 1.0 - 0.15 * t)
+        im.paste(pl, (int(x - 80), int(y - 80)), pl)
+        d = ImageDraw.Draw(im)
+        if i > N - 6:   # پوف
+            r = (i - (N - 6)) * 9
+            d.ellipse([x - r, 225 - r / 2, x + r, 225 + r / 2], outline=(255, 255, 255), width=3)
+        frames.append(im)
+    frames += [frames[-1]] * 6
+    return frames
+
+def _cg_gif(frames, ms, loop):
+    out = BytesIO()
+    pal = [f.convert("P", palette=Image.ADAPTIVE, colors=64) for f in frames]
+    pal[0].save(out, "GIF", save_all=True, append_images=pal[1:], duration=ms, loop=loop, optimize=True, disposal=2)
+    return out.getvalue()
+
+
+
+_CRASH_GIFS: tuple | None = None
+
+
+def _crash_gifs():
+    """(گیف پرواز حلقه‌ای، گیف سقوط) موشک کاغذی؛ یه بار ساخته و کش میشه."""
+    global _CRASH_GIFS
+    if _CRASH_GIFS is None:
+        _CRASH_GIFS = (_cg_gif(_cg_fly(), 70, 0), _cg_gif(_cg_fall(), 70, 1))
+    return _CRASH_GIFS
+
+
+def _gif_file(data: bytes, name: str) -> BytesIO:
+    b = BytesIO(data); b.name = name
+    return b
+
+
+async def _crash_edit(bot, st, text: str, kb=None):
+    """کپشنِ گیف رو (یا متن پیام، اگه گیف نشد) ادیت می‌کنه."""
+    chat_id, mid = st["chat_id"], st["message_id"]
+    async def once(t):
+        if st.get("anim"):
+            await bot.edit_message_caption(chat_id=chat_id, message_id=mid, caption=t, parse_mode="HTML", reply_markup=kb)
+        else:
+            await bot.edit_message_text(t, chat_id=chat_id, message_id=mid, parse_mode="HTML", reply_markup=kb)
+    try:
+        await once(text)
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            return
+        ra = getattr(e, "retry_after", None)
+        if ra:
+            await asyncio.sleep(min(float(getattr(ra, "total_seconds", lambda: ra)()), 5)); return
+        try:
+            await once(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text))
+        except Exception:
+            log.warning("crash edit failed", exc_info=True)
+
+
+def _crash_end_kb(uid: int):
+    return InlineKeyboardMarkup([[btn("🔄 دوباره", "success", callback_data=f"cz:a:{uid}:crash:1")],
+                                 [btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:m:{uid}")]])
+
+
+async def _crash_lose(bot, context, st):
+    if st["finished"]:
+        return
+    st["finished"] = True
+    _busy(context).discard(st["uid"]); _cd_set(context, st["uid"])
+    rec = await update_group_record(st["chat_id"], "crash", st["user"], 0)
+    row = await get_user(st["uid"])
+    tgt = f"\n🎯 هدفت {st['target']:.2f}× بود و بهش نرسید." if st.get("target") else ""
+    text = B(f"💥 موشک کاغذی تو ضریب <b>{st['crash']:.2f}×</b> سقوط کرد!{tgt}\nشرط {st['bet']:,} تومن از دست رفت 😢\n{rec}\nموجودی: {row['balance']:,}")
+    kb = _crash_end_kb(st["uid"])
+    done = False
+    if st.get("anim"):      # گیف سقوط جایگزین گیف پرواز میشه
+        try:
+            await bot.edit_message_media(chat_id=st["chat_id"], message_id=st["message_id"],
+                                         media=InputMediaAnimation(_gif_file(_crash_gifs()[1], "fall.gif"), caption=text, parse_mode="HTML"), reply_markup=kb)
+            done = True
+        except Exception:
+            log.warning("crash media swap failed", exc_info=True)
+    if not done:
+        await _crash_edit(bot, st, text, kb)
+    context.application.bot_data.get("crash_games", {}).pop(st["gid"], None)
+
+
+async def _crash_win(bot, context, st, m: float, user, auto: bool):
+    """برداشت (دستی یا خودکار به ضریب هدف)."""
+    if st["finished"]:
+        return
+    st["finished"] = True
+    _busy(context).discard(st["uid"]); _cd_set(context, st["uid"])
+    payout = int(st["bet"] * m)
+    await _give(st["uid"], payout)
+    rec = await update_group_record(st["chat_id"], "crash", user, payout)
+    row = await get_user(st["uid"])
+    diff = payout - st["bet"]
+    res = f"🎉 +{diff:,} تومن سود" if diff > 0 else ("🤝 پولت برگشت" if diff == 0 else f"😢 {diff:,} تومن")
+    head = "🎯 به ضریب هدفت رسیدی و خودکار برداشت شد!" if auto else "💰 موشک کاغذی رو به‌موقع فرود آوردی!"
+    wl = win_lines(diff, payout, row['balance']) if diff > 0 else f"\nموجودی: {row['balance']:,}"
+    await _crash_edit(bot, st, B(f"{head}\nضریب برداشت: <b>{m:.2f}×</b>\nدریافتی: {payout:,} تومن ({res}){wl}\n(تا ضریب {st['crash']:.2f}× اوج می‌گرفت)\n{rec}"), _crash_end_kb(st["uid"]))
+    context.application.bot_data.get("crash_games", {}).pop(st["gid"], None)
+
+
+async def _crash_loop(bot, context, st):
+    try:
+        t_crash = crash_time_for(st["crash"])
+        target = st.get("target")
+        t_target = crash_time_for(target) if target else float("inf")
+        auto_win = bool(target) and st["crash"] >= target
+        t_end = min(t_crash, t_target) if auto_win else t_crash
+        while not st["finished"]:
+            elapsed = time.monotonic() - st["start"]
+            await asyncio.sleep(max(0.05, min(CRASH_TICK, t_end - elapsed)))
+            if st["finished"]:
+                return
+            elapsed = time.monotonic() - st["start"]
+            if auto_win and elapsed >= t_target:
+                await _crash_win(bot, context, st, target, st["user"], True); return
+            if elapsed >= t_crash or crash_mult_at(elapsed) >= st["crash"]:
+                await _crash_lose(bot, context, st); return
+            text, kb = _crash_frame(st, crash_mult_at(elapsed))
+            await _crash_edit(bot, st, text, kb)
+    except Exception:
+        log.exception("crash loop failed")
+        if not st["finished"]:
+            st["finished"] = True
+            _busy(context).discard(st["uid"])
+            await _give(st["uid"], st["bet"])   # خطای ربات: شرط برمی‌گرده
+
+
+CRASH_MIN_TARGET = 1.2
+CRASH_TARGET_CHOICES = (1.2, 1.5, 2.0, 3.0, 5.0, 10.0)
+
+
+def panel_crash_target(uid: int, bet: int):
+    rows, row = [], []
+    for m in CRASH_TARGET_CHOICES:
+        row.append(btn(f"{m:g}×", "primary", callback_data=f"cz:pt:{uid}:{bet}:{int(round(m * 100))}"))
+        if len(row) == 3:
+            rows.append(row); row = []
+    rows.append([btn("✏️ ضریب دلخواه", "success", callback_data=f"cz:ptc:{uid}:{bet}")])
+    rows.append([btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:a:{uid}:crash:1")])
+    text = B(f"🛩 موشک کاغذی — شرط {bet:,} تومن\n\nضریب هدفت رو انتخاب کن (حداقل {CRASH_MIN_TARGET:g}×).\n"
+             "اگه موشک به این ضریب برسه خودکار برداشت می‌شه و شرط × ضریب رو می‌گیری؛ اگه قبلش سقوط کنه، شرطت می‌سوزه.")
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def start_crash(bot, context, chat_id, user, bet, q=None, reply_to=None, target: float | None = None):
+    async def out(text, kb=None):
+        if q: await edit_html(q, text, kb)
+        else: await send_html(bot, chat_id, text, reply_markup=kb, reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None)
+    back = InlineKeyboardMarkup([[btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")]])
+    if chat_id > 0:
+        await out(BP("کازینو فقط تو گروه کار می‌کنه.")); return
+    if bet < CASINO_MIN_BET or bet > CASINO_MAX_BET:
+        await out(BP(f"حداقل شرط {CASINO_MIN_BET:,} و حداکثرش {CASINO_MAX_BET:,} تومنه."), back); return
+    if target is None:      # اول ضریب هدف رو انتخاب کنه
+        ptext, pkb = panel_crash_target(user.id, bet)
+        await out(ptext, pkb); return
+    target = round(float(target), 2)
+    if target < CRASH_MIN_TARGET or target > CRASH_MAX:
+        await out(BP(f"ضریب هدف باید بین {CRASH_MIN_TARGET:g} و {CRASH_MAX:g} باشه."), back); return
+    busy = _busy(context)
+    if user.id in busy:
+        await out(BP("اول بازی قبلیت رو تموم کن.")); return
+    if (left := _cd_left(context, user.id)) > 0:
+        await out(_cd_html(left), back); return
+    await upsert_user(user.id, user.full_name)
+    if await _take(user.id, bet) is None:
+        row = await get_user(user.id)
+        await out(B(f"موجودی کافی نیست؛ موجودی فعلی: {row['balance']:,} تومن")); return
+    import uuid
+    gid = uuid.uuid4().hex[:8]
+    st = {"gid": gid, "uid": user.id, "user": user, "bet": bet, "chat_id": chat_id, "message_id": None, "target": target,
+          "crash": crash_point(), "start": time.monotonic(), "finished": False, "anim": False}
+    context.application.bot_data.setdefault("crash_games", {})[gid] = st
+    busy.add(user.id)
+    text, kb = _crash_frame(st, 1.0)
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    sent = None
+    try:
+        fly = (await asyncio.to_thread(_crash_gifs))[0]
+        if q:
+            try: await q.message.delete()
+            except Exception: pass
+        try:
+            sent = await bot.send_animation(chat_id, animation=_gif_file(fly, "fly.gif"), caption=text, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+        except Exception:
+            sent = await bot.send_animation(chat_id, animation=_gif_file(fly, "fly.gif"), caption=re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+        st["anim"] = True
+    except Exception:
+        log.warning("crash gif failed; falling back to text", exc_info=True)
+        try:
+            sent = await send_html(bot, chat_id, text, reply_markup=kb, reply_parameters=rp)
+        except Exception:
+            log.exception("crash start failed")
+            st["finished"] = True; busy.discard(user.id); await _give(user.id, bet)
+            return
+    st["message_id"] = sent.message_id
+    st["start"] = time.monotonic()
+    asyncio.create_task(_crash_loop(bot, context, st))
+
+
+async def crash_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts):
+    q = update.callback_query
+    _, _, uid_s, gid = parts[:4]
+    if q.from_user.id != int(uid_s):
+        await q.answer("این بازی مال تو نیست.", show_alert=True); return
+    st = context.application.bot_data.get("crash_games", {}).get(gid)
+    if not st or st["finished"]:
+        await q.answer("این بازی تموم شده.", show_alert=True); return
+    m = crash_mult_at(time.monotonic() - st["start"])
+    if m >= st["crash"]:
+        await q.answer("دیر شد! موشک کاغذی سقوط کرد 💥", show_alert=True)
+        await _crash_lose(context.bot, context, st); return
+    await q.answer("برداشت انجام شد!")
+    await _crash_win(context.bot, context, st, m, q.from_user, False)
 
 
 # ───── میز دو نفره ─────
@@ -6451,7 +6767,7 @@ async def mines_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts):
             row = await get_user(uid)
             rec = await update_group_record(st["chat_id"], "mines", q.from_user, payout)
             await q.answer("همه خانه‌های امن باز شد!")
-            await edit_html(q, B(f"🏆 همه ۱۸ خانه امن رو باز کردی!\nضریب نهایی: ۳٫۰۵×\nپرداخت: {payout:,} تومن\nموجودی: {row['balance']:,}\n{rec}\nمحل بمب‌ها مشخص شد."), mines_keyboard(uid, game_id, st["opened"], st["bombs"], True, False))
+            await edit_html(q, B(f"🏆 همه ۱۸ خانه امن رو باز کردی!\nضریب نهایی: ۳٫۰۵×\nپرداخت: {payout:,} تومن{win_lines(payout - st['bet'], payout, row['balance'])}\n{rec}\nمحل بمب‌ها مشخص شد."), mines_keyboard(uid, game_id, st["opened"], st["bombs"], True, False))
             return
         await q.answer(f"خانه امن! ضریب {mult:g}×")
         await edit_html(q, B(f"{MINES_GEM_CE} مین\nشرط: {st['bet']:,} تومن\nخانه امن: {count} از ۱۸\nضریب برداشت: {mult:g}×\nمبلغ دریافتی: {int(st['bet']*mult):,} تومن"), mines_keyboard(uid, game_id, st["opened"], st["bombs"]))
@@ -6463,7 +6779,8 @@ async def mines_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts):
         row = await get_user(uid)
         rec = await update_group_record(st["chat_id"], "mines", q.from_user, payout)
         await q.answer("برداشت انجام شد.")
-        await edit_html(q, B(f"{MINES_CASHOUT_CE} برداشت موفق!\nخانه امن: {len(st['opened'])}\nضریب: {mult:g}×\nشرط: {st['bet']:,} تومن\nدریافتی: {payout:,} تومن\nموجودی: {row['balance']:,}\n{rec}\nمحل هر سه بمب مشخص شد."), mines_keyboard(uid, game_id, st["opened"], st["bombs"], True, False))
+        wl = win_lines(payout - st['bet'], payout, row['balance']) if payout > st['bet'] else f"\nموجودی: {row['balance']:,}"
+        await edit_html(q, B(f"{MINES_CASHOUT_CE} برداشت موفق!\nخانه امن: {len(st['opened'])}\nضریب: {mult:g}×\nشرط: {st['bet']:,} تومن\nدریافتی: {payout:,} تومن{wl}\n{rec}\nمحل هر سه بمب مشخص شد."), mines_keyboard(uid, game_id, st["opened"], st["bombs"], True, False))
 
 
 
@@ -6513,9 +6830,13 @@ async def _finish_poison(app, st, winner, loser, reason):
         await _give(winner,st["bet"]*2)
     gid=next((k for k,v in app.bot_data.setdefault("poison_games",{}).items() if v is st), "")
     kb=poison_board(gid,st,reveal=True) if gid else None
+    wl=""
+    if winner:
+        wrow=await get_user(winner)
+        wl=win_lines(st["bet"],st["bet"]*2,wrow["balance"] if wrow else 0)
     try:
         await app.bot.edit_message_text(
-            f"{POISON_CE} {reason}\n🏆 برنده: {_ulink(winner,st['names'].get(winner,'بازیکن')) if winner else '—'}\nبازنده: {_ulink(loser,st['names'].get(loser,'بازیکن')) if loser else '—'}\n{MONEY_CE} جایزه: {st['bet']*2:,} تومان\nهر دو سم مشخص شدند.",
+            f"{POISON_CE} {reason}\n🏆 برنده: {_ulink(winner,st['names'].get(winner,'بازیکن')) if winner else '—'}\nبازنده: {_ulink(loser,st['names'].get(loser,'بازیکن')) if loser else '—'}{wl}\nهر دو سم مشخص شدند.",
             chat_id=st["chat"], message_id=st["message"], parse_mode="HTML", reply_markup=kb)
     except Exception:
         log.exception("poison finish edit failed")
@@ -6578,7 +6899,8 @@ async def poison_cb(update,context,parts):
             st["phase"]="done"
             await _give(opponent,st["bet"]*2)
             await q.answer("سم حریف رو پیدا کردی؛ حریف برنده شد!",show_alert=True)
-            await q.edit_message_text(f"{POISON_CE} {_ulink(user.id,st['names'][user.id])} سم حریف رو پیدا کرد و باخت!\n🏆 برنده: {_ulink(opponent,st['names'][opponent])}\n{MONEY_CE} جایزه: {st['bet']*2:,} تومان\nسم هر دو بازیکن مشخص شد.",parse_mode="HTML",reply_markup=poison_board(gid,st,reveal=True)); return
+            wrow=await get_user(opponent)
+            await q.edit_message_text(f"{POISON_CE} {_ulink(user.id,st['names'][user.id])} سم حریف رو پیدا کرد و باخت!\n🏆 برنده: {_ulink(opponent,st['names'][opponent])}{win_lines(st['bet'],st['bet']*2,wrow['balance'] if wrow else 0)}\nسم هر دو بازیکن مشخص شد.",parse_mode="HTML",reply_markup=poison_board(gid,st,reveal=True)); return
         st["opened"].add(cell)
         st["turn"]=opponent; st["deadline"]=time.time()+60
         context.application.create_task(poison_timeout(context.application,gid,st["deadline"]))
@@ -6595,6 +6917,9 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await poison_cb(update, context, parts); return
     if act in ("mx", "mc"):  # بازی مینِ نیمه‌کاره می‌تونه تموم/برداشت بشه
         await mines_cb(update, context, parts)
+        return
+    if act == "cx":          # برداشت موشک (بازی نیمه‌کاره)
+        await crash_cb(update, context, parts)
         return
     if not CASINO_OPEN and act != "close":
         await q.answer(CASINO_CLOSED_TEXT, show_alert=True)
@@ -6626,8 +6951,8 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_html(q, text, kb)
     elif act == "custom":
         game, mode = parts[3], parts[4]
-        if game == "mines" and mode != "1":
-            await q.answer("مین فقط یک‌نفره است.", show_alert=True); return
+        if game in ("mines", "crash") and mode != "1":
+            await q.answer("این بازی فقط یک‌نفره است.", show_alert=True); return
         if game == "poison" and mode != "2":
             await q.answer("این بازی فقط دو نفره است.", show_alert=True); return
         context.user_data["casino_custom_bet"] = (game, mode)
@@ -6643,6 +6968,18 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif act == "pm":
         await q.answer()
         await start_mines(bot, context, chat_id, user, int(parts[3]), q=q)
+    elif act == "pc":
+        await q.answer()
+        context.user_data.pop("crash_target_custom", None)
+        await start_crash(bot, context, chat_id, user, int(parts[3]), q=q)
+    elif act == "pt":
+        await q.answer()
+        await start_crash(bot, context, chat_id, user, int(parts[3]), q=q, target=int(parts[4]) / 100)
+    elif act == "ptc":
+        await q.answer()
+        context.user_data["crash_target_custom"] = int(parts[3])
+        await edit_html(q, B(f"ضریب هدفت رو بفرست (عدد بین {CRASH_MIN_TARGET:g} تا {CRASH_MAX:g}). مثال: 2.5"),
+                        InlineKeyboardMarkup([[btn("لغو", None, callback_data=f"cz:pc:{uid}:{parts[3]}")]]))
     elif act == "ps":
         await q.answer()
         bet = int(parts[3])
@@ -6774,7 +7111,8 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
         win_name = cname if win_id == creator else user.full_name
         rec_user = type("CasinoUser", (), {"id": win_id, "full_name": win_name})()
         record_line = await update_group_record(chat_id, game, rec_user, bet * 2)
-        result = f"{TROPHY_CE} برنده: {win_link}\n{MONEY_CE} {bet * 2:,} تومن به حسابش رفت!" + (f"\n{record_line}" if record_line else "")
+        wrow = await get_user(win_id)
+        result = f"{TROPHY_CE} برنده: {win_link}{win_lines(bet, bet * 2, wrow['balance'] if wrow else 0)}" + (f"\n{record_line}" if record_line else "")
     await edit_html(q, f"<b>{GAME_FA[game]} — نتیجه\n\n{a}: {r1}\n{b}: {r2}\n\n{result}</b>")
     delete_later(bot, chat_id, [m1.message_id, m2.message_id])
     await task_event(bot, chat_id, creator, "casino")
@@ -6786,7 +7124,7 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     msg, user = update.effective_message, update.effective_user
     t = norm_word(text).translate(_DIG)
     if not CASINO_OPEN:
-        if re.fullmatch(r"کازینو|casino|(?:میز\s*)?(?:تاس|اسلات|مین)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I):
+        if re.fullmatch(r"کازینو|casino|(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I):
             await send_html(
                 context.bot, msg.chat_id,
                 B(f'<tg-emoji emoji-id="{CASINO_CLOSED_EID}">🔒</tg-emoji> {CASINO_CLOSED_TEXT}'),
@@ -6811,12 +7149,31 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
             await create_table(bot, chat_id, user, custom_game, amt, msg.message_id, context=context)
         elif custom_game == "mines":
             await start_mines(bot, context, chat_id, user, amt, reply_to=msg.message_id)
+        elif custom_game == "crash":
+            await start_crash(bot, context, chat_id, user, amt, reply_to=msg.message_id)
         elif custom_game == "dice":
             context.user_data["casino_custom_dice"] = amt
             await msg.reply_text(BP("حالا عدد حدسیت رو بفرست: ۱ تا ۶"), parse_mode="HTML")
         else:
             await send_slot_picker(bot, chat_id, user, amt, msg.message_id)
         return True
+    ctb = context.user_data.get("crash_target_custom")
+    if ctb:
+        raw = t.replace("٫", ".").replace("،", ".").replace("×", "").replace("x", "").replace("X", "").strip()
+        try:
+            val = float(raw)
+        except ValueError:
+            val = None
+        if val is None:
+            if re.fullmatch(r"[\d.\s]+", raw or "x"):
+                pass
+            context.user_data.pop("crash_target_custom", None)
+        elif val < CRASH_MIN_TARGET or val > CRASH_MAX:
+            await msg.reply_text(BP(f"ضریب باید بین {CRASH_MIN_TARGET:g} و {CRASH_MAX:g} باشه. دوباره بفرست."), parse_mode="HTML"); return True
+        else:
+            context.user_data.pop("crash_target_custom", None)
+            await start_crash(bot, context, chat_id, user, int(ctb), reply_to=msg.message_id, target=val)
+            return True
     if context.user_data.get("casino_custom_dice") and re.fullmatch(r"[1-6]", t):
         amt = context.user_data.pop("casino_custom_dice")
         await play_single(bot, context, chat_id, user, "dice", amt, int(t), msg.message_id)
@@ -6841,6 +7198,22 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
             await msg.reply_text(BP("مبلغ رو نفهمیدم. مثلا: تاس 3 100هزار"), parse_mode="HTML")
         else:
             await play_single(bot, context, chat_id, user, "dice", amt, int(m.group(1)), msg.message_id)
+        return True
+    m = re.fullmatch(r"(?:موشک|کراش)\s+(.+?)\s+(?:[x×]\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*[x×]|(\d+\.\d+))", t)
+    if m:
+        amt = parse_amount(m.group(1)); tg = next((float(g) for g in m.groups()[1:] if g), None)
+        if amt > 0 and tg is not None: await start_crash(bot, context, chat_id, user, amt, reply_to=msg.message_id, target=tg)
+        else: await msg.reply_text(BP("مبلغ رو نفهمیدم. مثال: موشک 100هزار x2.5"), parse_mode="HTML")
+        return True
+    m = re.fullmatch(r"(?:موشک|کراش)\s+(.+)", t)
+    if m:
+        amt = parse_amount(m.group(1))
+        if amt > 0: await start_crash(bot, context, chat_id, user, amt, reply_to=msg.message_id)
+        else: await msg.reply_text(BP("مبلغ رو نفهمیدم. مثال: موشک 100هزار"), parse_mode="HTML")
+        return True
+    if re.fullmatch(r"موشک|کراش", t):
+        ptext, kb = panel_amounts(user.id, "crash", "1")
+        await send_html(bot, chat_id, ptext, reply_markup=kb, reply_parameters=rp)
         return True
     m = re.fullmatch(r"مین\s+(.+)", t)
     if m:
@@ -8447,7 +8820,7 @@ def _is_bot_text_command(text: str) -> bool:
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
         "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده",
         "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلجقی", "دوئلجق",
-        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "کازینو", "casino",
+        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
     if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
@@ -8455,7 +8828,7 @@ def _is_bot_text_command(text: str) -> bool:
     if key.startswith(("واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
         return True
     t = norm_word(raw).translate(_DIG)
-    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
+    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
 
 
 async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9511,7 +9884,18 @@ async def marriage_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
         spouse=await get_user(int(row["spouse_id"]))
         if not spouse:
             await msg.reply_text("اطلاعات همسرت پیدا نشد."); return True
-        await msg.reply_text(B(f"💍 <b>خانواده‌ی تو</b>\nهمسر: {_ulink(spouse['user_id'],spouse['name'] or 'همسر')}\n{energy_line(spouse['energy'])}"),parse_mode="HTML"); return True
+        rel, _ = await couple_info(user.id, int(spouse['user_id']))
+        kb = None
+        if update.effective_chat.type != "private":
+            kb = InlineKeyboardMarkup([[btn("سکس", "danger", icon=SEX_EIDS[0], callback_data=f"sx:ask:{user.id}")],
+                                       [btn("فروشگاه", "primary", icon=SHOP_EID, callback_data=f"shp:no:{user.id}:condom")]])
+        await send_html(context.bot, msg.chat_id, B(f"💍 <b>خانواده‌ی تو</b>\nهمسر: {_ulink(spouse['user_id'],spouse['name'] or 'همسر')}\n{energy_line(spouse['energy'])}\n💞 میزان رابطه: <b>{rel}</b>"),
+                        reply_markup=kb, reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)); return True
+    if key == "سکس":
+        await upsert_user(user.id, user.full_name)
+        await sex_request(context.bot, context, msg.chat_id, user.id, reply_to=msg.message_id); return True
+    if key == "فروشگاه":
+        await show_shop(update, context); return True
     if key not in ("ازدواج","خواستگاری"):
         return False
     target=msg.reply_to_message.from_user if msg.reply_to_message else None
@@ -9570,6 +9954,7 @@ async def affair_cb(update,context):
             from_bank=min(int(row['bank_balance']),amount); from_pocket=amount-from_bank
             await c.execute("UPDATE users SET bank_balance=bank_balance-$1,balance=balance-$2,spouse_id=NULL WHERE user_id=$3",from_bank,from_pocket,cheater)
             await c.execute("UPDATE users SET spouse_id=NULL,balance=balance+$1 WHERE user_id=$2",amount,spouse)
+            await c.execute("DELETE FROM couple_relation WHERE pair_key=$1",_pair_key(cheater,spouse))
     await q.answer("طلاق ثبت شد."); await q.edit_message_text(f"💔 طلاق ثبت شد. {amount:,} تومان (۱۰٪ دارایی همسر سابقت) به حسابت منتقل شد.")
 
 async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> bool:
@@ -9597,13 +9982,17 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
             await c.execute("INSERT INTO affection_cooldowns(actor_id,target_id,last_ts) VALUES($1,$2,$3) ON CONFLICT(actor_id,target_id) DO UPDATE SET last_ts=EXCLUDED.last_ts",user.id,target.id,now)
             s_en=await c.fetchval("UPDATE users SET balance=balance+$1,energy=LEAST(energy+$2,$3) WHERE user_id=$4 RETURNING energy",money,energy_gain,ENERGY_MAX,user.id)
             t_en=await c.fetchval("UPDATE users SET balance=balance+$1,energy=LEAST(energy+$2,$3) WHERE user_id=$4 RETURNING energy",money,energy_gain,ENERGY_MAX,target.id)
+    rel_note=""
+    if kind=="kiss" and me['spouse_id'] and int(me['spouse_id'])==target.id:
+        _rel=await add_relation(pool,user.id,target.id,KISS_RELATION)
+        rel_note=f"\n\n💞 میزان رابطه: {_rel} (+{KISS_RELATION})"
     a=_ltr_name(user.id,user.full_name); b=_ltr_name(target.id,target.full_name)
     pct=lambda e: f"{_fmt_en(float(e)/ENERGY_MAX*100)}٪"
     RLM="\u200f"
     line=RLM+random.choice(HUG_LINES[kind]).format(a=a,b=b)
     en=RLM+random.choice(HUG_ENERGY_LINES).format(ea=pct(s_en),eb=pct(t_en))
     mn=RLM+random.choice(HUG_MONEY_LINES).format(m=f"{GIFT_MONEY_CE}{GIFT_MONEY_CE}",n=f"{money:,}")
-    text=f"<b>{line}\n\n{en}\n\n{mn}</b>"
+    text=f"<b>{line}\n\n{en}\n\n{mn}{rel_note}</b>"
     await msg.reply_text(text,parse_mode="HTML")
     await task_event(context.bot, msg.chat_id, user.id, "hug", name=user.full_name)
     if poach:
@@ -9620,6 +10009,214 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
         except Exception:
             await msg.reply_text(f"پیام به همسر ارسال نشد؛ { _ulink(spouse_id, 'همسر') }، {cheater_name} به {affair_target} نزدیک شد.",parse_mode="HTML",reply_markup=kb)
     return True
+
+
+# ───────────────────────── فروشگاه، سکس و میزان رابطه‌ی زوجین ─────────────────────────
+SHOP_EID = "5294385600000956892"
+CONDOM_EID = "5211074985489092120"
+PILL_EID = "5372902640168482479"
+SEX_EIDS = ("5927155469498978151", "5927257496447093992", "5834455158829879029")
+SHOP_CE = f'<tg-emoji emoji-id="{SHOP_EID}">🛍</tg-emoji>'
+CONDOM_CE = f'<tg-emoji emoji-id="{CONDOM_EID}">🛡</tg-emoji>'
+PILL_CE = f'<tg-emoji emoji-id="{PILL_EID}">💊</tg-emoji>'
+SEX_CE = "".join(f'<tg-emoji emoji-id="{e}">💞</tg-emoji>' for e in SEX_EIDS)
+CONDOM_PRICE = 15_000
+PILL_PRICE = 15_000
+SEX_COOLDOWN = 120 * 60       # هر زوج هر ۱۲۰ دقیقه یه بار
+SEX_ENERGY = 15.0             # انرژی هر دو نفر
+SEX_RELATION = 5              # میزان رابطه‌ی هر سکس
+KISS_RELATION = 2             # میزان رابطه‌ی هر بوس بین زوجین
+SEX_REQ_TTL = 300
+SHOP_QTYS = (1, 5, 10)
+# (کلید، ستون موجودی، اسم، قیمت، ایموجی پرمیوم، جنسیت خریدار)
+SHOP_ITEMS = {
+    "condom": ("condoms", "کاندوم", CONDOM_PRICE, CONDOM_EID, "m"),
+    "pill": ("pills", "قرص ضدبارداری", PILL_PRICE, PILL_EID, "f"),
+}
+
+
+def _pair_key(a: int, b: int) -> str:
+    return f"{min(a, b)}:{max(a, b)}"
+
+
+async def couple_info(a: int, b: int):
+    row = await pool.fetchrow("SELECT relation, last_sex FROM couple_relation WHERE pair_key=$1", _pair_key(a, b))
+    return (int(row["relation"]), float(row["last_sex"])) if row else (0, 0.0)
+
+
+async def add_relation(conn_or_pool, a: int, b: int, amount: int) -> int:
+    return await conn_or_pool.fetchval(
+        "INSERT INTO couple_relation(pair_key, relation) VALUES($1,$2) ON CONFLICT(pair_key) DO UPDATE SET relation=couple_relation.relation+EXCLUDED.relation RETURNING relation",
+        _pair_key(a, b), amount)
+
+
+# ───── فروشگاه ─────
+async def _shop_panel(uid: int):
+    row = await get_user(uid)
+    g = row["gender"] if row else None
+    if g not in ("m", "f"):
+        return B("اول باید جنسیتت رو از تنظیمات انتخاب کنی تا فروشگاه برات باز بشه."), None
+    key = "condom" if g == "m" else "pill"
+    col, name, price, eid, _ = SHOP_ITEMS[key]
+    ce_ = CONDOM_CE if key == "condom" else PILL_CE
+    text = B(f"{SHOP_CE} <b>فروشگاه</b>\n\n{ce_} {name} — {price:,} تومان (هر عدد)\n"
+             f"برای هر سکس یک عدد از این وسیله مصرف می‌شه؛ اگه درخواست سکس از طرف تو باشه، مال تو مصرف می‌شه.\n\n"
+             f"داشته‌ی تو: <b>{int(row[col] or 0)}</b> عدد\nموجودی جیبت: <b>{int(row['balance']):,}</b>")
+    kb = InlineKeyboardMarkup([[btn(f"خرید {name}", "primary", icon=eid, callback_data=f"shp:ask:{uid}:{key}:1")]])
+    return text, kb
+
+
+async def show_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    await upsert_user(user.id, user.full_name)
+    text, kb = await _shop_panel(user.id)
+    await send_html(context.bot, update.effective_message.chat_id, text, reply_markup=kb,
+                    reply_parameters=ReplyParameters(message_id=update.effective_message.message_id, allow_sending_without_reply=True))
+
+
+async def shop_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    parts = q.data.split(":")
+    try:
+        act, uid, key = parts[1], int(parts[2]), parts[3]
+        qty = int(parts[4]) if len(parts) > 4 else 1
+    except (IndexError, ValueError):
+        await q.answer("درخواست نامعتبره.", show_alert=True); return
+    if q.from_user.id != uid:
+        await q.answer("این فروشگاه برای تو نیست؛ خودت بنویس «فروشگاه».", show_alert=True); return
+    if act == "no":
+        await q.answer()
+        text, kb = await _shop_panel(uid)
+        await edit_html(q, text, kb); return
+    item = SHOP_ITEMS.get(key)
+    if not item or qty not in SHOP_QTYS:
+        await q.answer("درخواست نامعتبره.", show_alert=True); return
+    col, name, price, eid, need_gender = item
+    row = await get_user(uid)
+    if not row or row["gender"] != need_gender:
+        await q.answer(f"{name} فقط برای {'آقایون' if need_gender == 'm' else 'خانم‌ها'}ست.", show_alert=True); return
+    if act == "ask":
+        await q.answer()
+        rows = [[btn(f"✅ تایید خرید {n} عدد | {price * n:,}", "success", callback_data=f"shp:ok:{uid}:{key}:{n}")] for n in SHOP_QTYS]
+        rows.append([btn("❌ انصراف", "danger", callback_data=f"shp:no:{uid}:{key}")])
+        await edit_html(q, B(f"{SHOP_CE} <b>تاییدیه خرید</b>\n\n{name} — هر عدد {price:,} تومان\nتعداد رو انتخاب و خرید رو تایید کن 👇\nموجودی جیبت: {int(row['balance']):,}"), InlineKeyboardMarkup(rows)); return
+    if act == "ok":
+        total = price * qty
+        async with pool.acquire() as c:
+            async with c.transaction():
+                bal = await c.fetchval(f"UPDATE users SET balance=balance-$1::bigint, {col}={col}+$3 WHERE user_id=$2::bigint AND balance>=$1::bigint RETURNING balance", total, uid, qty)
+        if bal is None:
+            await q.answer(f"برای خرید {qty} عدد {name} به {total:,} تومان نیاز داری.", show_alert=True); return
+        await q.answer(f"{qty} عدد {name} خریداری شد ✅")
+        text, kb = await _shop_panel(uid)
+        await edit_html(q, text.replace("<b>فروشگاه</b>", "<b>فروشگاه</b>\n✅ خرید انجام شد!", 1), kb); return
+    await q.answer("درخواست نامعتبره.", show_alert=True)
+
+
+# ───── سکس ─────
+async def _sex_check(uid: int):
+    """(خطا یا None، ردیف خودم، ردیف همسر)."""
+    me = await get_user(uid)
+    if not me or not me["spouse_id"]:
+        return "برای این کار باید ازدواج کرده باشی.", None, None
+    if me["gender"] not in ("m", "f"):
+        return "اول جنسیتت رو از تنظیمات انتخاب کن.", None, None
+    sp = await get_user(int(me["spouse_id"]))
+    if not sp or not sp["spouse_id"] or int(sp["spouse_id"]) != uid:
+        return "اطلاعات همسرت پیدا نشد.", None, None
+    _, last = await couple_info(uid, int(sp["user_id"]))
+    left = SEX_COOLDOWN - (time.time() - last)
+    if left > 0:
+        return f"زوج شما تازه با هم بوده؛ {_duration_fa(int(left) + 1)} دیگه می‌تونید دوباره.", me, sp
+    if me["gender"] == "m" and int(me["condoms"] or 0) < 1:
+        return "کاندوم نداری! اول با نوشتن «فروشگاه» کاندوم بخر.", me, sp
+    if me["gender"] == "f" and int(me["pills"] or 0) < 1:
+        return "قرص ضدبارداری نداری! اول با نوشتن «فروشگاه» قرص بخر.", me, sp
+    return None, me, sp
+
+
+async def sex_request(bot, context, chat_id: int, user_id: int, reply_to: int | None = None, q=None):
+    """درخواست سکس به همسر. q = اگه از دکمه اومده برای جواب دادن به callback."""
+    async def fail(text):
+        if q: await q.answer(text[:190], show_alert=True)
+        else: await send_html(bot, chat_id, B(html.escape(text)), reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None)
+    if chat_id > 0:
+        await fail("این بخش فقط تو گروه کار می‌کنه؛ برو تو گروه و همونجا انجامش بده."); return
+    err, me, sp = await _sex_check(user_id)
+    if err:
+        await fail(err); return
+    if q: await q.answer()
+    a = _ulink(me["user_id"], me["name"] or "همسر"); b = _ulink(sp["user_id"], sp["name"] or "همسر")
+    item = f"{CONDOM_CE} کاندومِ" if me["gender"] == "m" else f"{PILL_CE} قرصِ"
+    kb = InlineKeyboardMarkup([[btn("قبول می‌کنم", "success", icon=SEX_EIDS[0], callback_data=f"sx:yes:{me['user_id']}:{sp['user_id']}"),
+                               btn("الان نه", "danger", callback_data=f"sx:no:{me['user_id']}:{sp['user_id']}")]])
+    m = await send_html(bot, chat_id, f"<b>{SEX_CE}\n{a} از {b} درخواست یه شب عاشقانه داده 💞\n({item} {a} مصرف می‌شه)\n\n{b}، جواب بده 👇</b>",
+                        reply_markup=kb)
+    context.application.bot_data.setdefault("sex_req", {})[(chat_id, m.message_id)] = time.time()
+
+
+async def sex_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    parts = q.data.split(":")
+    try:
+        act, a_id = parts[1], int(parts[2])
+        b_id = int(parts[3]) if len(parts) > 3 else 0
+    except (IndexError, ValueError):
+        await q.answer("درخواست نامعتبره.", show_alert=True); return
+    if act == "ask":       # از دکمه‌ی پنل خانواده؛ فقط صاحب پنل
+        if q.from_user.id != a_id:
+            await q.answer("این پنل مال تو نیست.", show_alert=True); return
+        await sex_request(context.bot, context, q.message.chat_id, a_id, q=q); return
+    if q.from_user.id != b_id:
+        await q.answer("فقط همسرت می‌تونه جواب بده.", show_alert=True); return
+    reqs = context.application.bot_data.setdefault("sex_req", {})
+    key = (q.message.chat_id, q.message.message_id)
+    ts = reqs.pop(key, None)
+    if ts is None or time.time() - ts > SEX_REQ_TTL:
+        await q.answer("این درخواست منقضی شده.", show_alert=True)
+        try: await q.edit_message_text("⌛ این درخواست منقضی شد.")
+        except Exception: pass
+        return
+    if act == "no":
+        await q.answer("رد شد.")
+        await edit_html(q, B("🚫 درخواست رد شد؛ شاید یه وقت دیگه 😅")); return
+    # قبول: همه‌چیز دوباره و اتمیک چک میشه
+    now = time.time()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            rows = await c.fetch("SELECT * FROM users WHERE user_id=ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", [a_id, b_id])
+            by = {int(r["user_id"]): r for r in rows}
+            me, sp = by.get(a_id), by.get(b_id)
+            err = None
+            if not me or not sp or not me["spouse_id"] or int(me["spouse_id"]) != b_id or not sp["spouse_id"] or int(sp["spouse_id"]) != a_id:
+                err = "شما دیگه زوج نیستید."
+            elif me["gender"] not in ("m", "f"):
+                err = "جنسیت درخواست‌دهنده مشخص نیست."
+            else:
+                relrow = await c.fetchrow("SELECT last_sex FROM couple_relation WHERE pair_key=$1 FOR UPDATE", _pair_key(a_id, b_id))
+                left = SEX_COOLDOWN - (now - float(relrow["last_sex"] if relrow else 0))
+                col = "condoms" if me["gender"] == "m" else "pills"
+                if left > 0:
+                    err = f"هنوز {_duration_fa(int(left) + 1)} مونده."
+                elif int(me[col] or 0) < 1:
+                    err = "دیگه وسیله‌ی محافظتش تموم شده؛ از «فروشگاه» بخر."
+            if err is None:
+                await c.execute(f"UPDATE users SET {col}={col}-1 WHERE user_id=$1", a_id)
+                en_a = await c.fetchval("UPDATE users SET energy=LEAST(energy+$1,$2) WHERE user_id=$3 RETURNING energy", SEX_ENERGY, ENERGY_MAX, a_id)
+                en_b = await c.fetchval("UPDATE users SET energy=LEAST(energy+$1,$2) WHERE user_id=$3 RETURNING energy", SEX_ENERGY, ENERGY_MAX, b_id)
+                rel = await add_relation(c, a_id, b_id, SEX_RELATION)
+                await c.execute("UPDATE couple_relation SET last_sex=$2 WHERE pair_key=$1", _pair_key(a_id, b_id), now)
+    if err:
+        await q.answer(err[:190], show_alert=True)
+        await edit_html(q, B(f"❌ {html.escape(err)}")); return
+    await q.answer("💞")
+    an = _ulink(a_id, me["name"] or "همسر"); bn = _ulink(b_id, sp["name"] or "همسر")
+    prot = (f"{CONDOM_CE} {an} از کاندومش استفاده کرد" if me["gender"] == "m" else f"{PILL_CE} {an} قرص ضدبارداریش رو مصرف کرد")
+    pct = lambda e: f"{_fmt_en(float(e) / ENERGY_MAX * 100)}٪"
+    text = (f"<b>{SEX_CE}\n{an} و {bn} یه شب پر از عشق و آرامش کنار هم گذروندن 🌙💞\n\n{prot}\n"
+            f"{ce('energy', 1, '⚡')} انرژی هر دو +{_fmt_en(SEX_ENERGY)} شد ({pct(en_a)} | {pct(en_b)})\n"
+            f"💞 میزان رابطه: {rel} (+{SEX_RELATION})\n{HG_CE} دفعه‌ی بعد {SEX_COOLDOWN // 60} دقیقه دیگه</b>")
+    await edit_html(q, text)
 
 
 # ───────────────────────── گی و لز (بین کاراکترهای هم‌جنس، با ریپلای) ─────────────────────────
@@ -10253,6 +10850,8 @@ def main():
     app.add_handler(CallbackQueryHandler(marriage_cb, pattern=r"^mar:(yes|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(affair_cb, pattern=r"^af:(divorce|forgive):\d+:\d+:\-?\d+$"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
+    app.add_handler(CallbackQueryHandler(sex_cb, pattern=r"^sx:"))
+    app.add_handler(CallbackQueryHandler(shop_cb, pattern=r"^shp:"))
     app.add_handler(MessageHandler(filters.Dice.SLOT_MACHINE & filters.ChatType.GROUPS, slot_dice_msg))
     app.add_handler(CallbackQueryHandler(duel_answer, pattern=r"^du:(ok|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
