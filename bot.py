@@ -420,6 +420,9 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS casino_records (chat_id BIGINT NOT NULL, game TEXT NOT NULL, user_id BIGINT NOT NULL, name TEXT, record BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(chat_id, game))")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_state (user_id BIGINT NOT NULL, robbery_type TEXT NOT NULL, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, blocked_until DOUBLE PRECISION NOT NULL DEFAULT 0, PRIMARY KEY (user_id, robbery_type))")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_profile (user_id BIGINT PRIMARY KEY, trace INTEGER NOT NULL DEFAULT 0, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, arrest_until DOUBLE PRECISION NOT NULL DEFAULT 0, trace_until DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS bail_amount BIGINT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_cost BIGINT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_step INT NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS tasks (task_id BIGSERIAL PRIMARY KEY, period TEXT NOT NULL CHECK(period IN ('daily', 'weekly')), title TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
         await c.execute("CREATE TABLE IF NOT EXISTS task_completions (task_id BIGINT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, period_key TEXT NOT NULL, completed BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(task_id, user_id, period_key))")
         await c.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS metric TEXT")
@@ -3636,14 +3639,8 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
               f"واریز: <code>واریز 100m</code>\nبرداشت: <code>برداشت 100m</code>\nکارمزد هر واریز: <b>۵٬۰۰۰ تومان</b>؛ برداشت بدون کارمزد.\n{bank_interest_note()}")
         await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back)); return
     if action == "robbery":
-        await pool.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", uid)
-        profile=await pool.fetchrow("SELECT trace,cooldown_until,arrest_until,trace_until FROM robbery_profile WHERE user_id=$1",uid)
-        now=time.time(); text=(f"{SWORDS_CE} <b>بازار خلاف</b>\n\nرد خلاف: <b>{profile['trace']}٪</b>\n")
-        if profile['cooldown_until']>now: text += f"زمان تا عملیات بعدی: <b>{_duration_fa(profile['cooldown_until']-now)}</b>\n"
-        if profile['arrest_until']>now: text += f"بازداشت: <b>{_duration_fa(profile['arrest_until']-now)}</b>\n"
-        if profile['trace_until']>now: text += f"ردت لو رفته: <b>{_duration_fa(profile['trace_until']-now)}</b>\n"
-        rows=robbery_keyboard(uid, profile['trace_until']>now).inline_keyboard
-        await _sp_edit_text(q, B(text+"\nیکی از عملیات‌ها رو انتخاب کن:"),parse_mode="HTML",reply_markup=InlineKeyboardMarkup(rows)); return
+        text, kb = rob_view(uid, await _rob_profile(uid), time.time())
+        await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=kb); return
     if action == "cars":
         owned=await _owned_cars(uid)
         car_rows=[]
@@ -6072,9 +6069,9 @@ def panel_game(uid: int, game: str):
     elif game == "mines":
         rules = (f"{MINES_BOMB_CE} مین — بازی تک‌نفره\n\n۲۱ خانه وجود داره و ۳ خانه بمبه. هر خانه امن ضریب رو بیشتر می‌کنه. با پیدا کردن بمب شرطت از دست میره؛ هر زمان خواستی برداشت کن تا شرط × ضریب به حسابت برگرده. ضریب نهایی در خانه امن هجدهم ۳٫۰۵× است.")
     else:
-        rules = ("🎰 اسلات\n\nهر نماد امتیاز داره: 🔔 صفر | 🍇 ۱۰ | 🍋 ۱۵ | 7️⃣ ۲۱\n"
-                 "جمع امتیاز سه چرخ نتیجه‌ی بازی رو تعیین می‌کنه. اگه چرخ سمت راست 🔔 بیاد می‌بازی.\n\n"
-                 "۲ نفره: هر کی امتیاز بیشتر بیاره کل پول رو می‌بره.")
+        rules = ("🎰 اسلات\n\n۱ نفره: روی یکی از نمادها (7️⃣ 🔔 🍋 🍇) شرط می‌بندی و بعد خودت روی پیام ربات ریپلای می‌کنی و 🎰 می‌فرستی.\n"
+                 "هر سه تا نماد تو یکی باشه ×۳ | دوتاش ×۱٫۷ | فقط یکیش ×۰٫۳ | هیچی نیاد می‌بازی.\n\n"
+                 "۲ نفره: ربات اسلات می‌ندازه؛ نماد امتیاز داره (🔔 صفر | 🍇 ۱۰ | 🍋 ۱۵ | 7️⃣ ۲۱) و هر کی امتیاز بیشتر بیاره کل پول رو می‌بره.")
     kb = InlineKeyboardMarkup([
         ([btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:mines:1")] if game == "mines"
          else [btn("👥 ۲ نفره", "success", callback_data=f"cz:a:{uid}:poison:2")] if game == "poison"
@@ -6190,6 +6187,129 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
         await say(B(text + ("\n" + record_line if record_line else "") + f"\n{ce('wallet', 1, '💰')} دارایی: {row['balance']:,}"))
         delete_later(bot, chat_id, [m.message_id])
         await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
+    finally:
+        busy.discard(user.id)
+
+
+# ───── اسلات ۱ نفره: روی یه نماد شرط می‌بنده و خودش 🎰 می‌فرسته ─────
+SLOT_PICK_SYMS = [("7️⃣", 3), ("🔔", 0), ("🍋", 2), ("🍇", 1)]   # (نمایش، اندیس نماد تو SLOT_SYMS)
+SLOT_BET_MULTS = {3: 3.0, 2: 1.7, 1: 0.3, 0: 0.0}                 # تعداد نمادِ درست → ضریب
+SLOT_PENDING_TTL = 120
+
+
+def _slot_pending(context) -> dict:
+    return context.application.bot_data.setdefault("slot_pending", {})
+
+
+def panel_slot_symbol(uid: int, bet: int):
+    row = [btn(e, "primary", callback_data=f"cz:sp:{uid}:{bet}:{idx}") for e, idx in SLOT_PICK_SYMS]
+    kb = InlineKeyboardMarkup([row[:2], row[2:], [btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:a:{uid}:slot:1")]])
+    text = B(f"🎰 اسلات ۱ نفره — شرط {bet:,} تومن\n\nروی کدوم نماد شرط می‌بندی؟ 👇\n\n"
+             "سه تا نمادت بیاد (مثلاً 🍇🍇🍇) ← ×۳\nدوتاش بیاد (مثلاً 🍇🍇🍋) ← ×۱٫۷\nفقط یکیش بیاد (مثلاً 🍇🍋🔔) ← ×۰٫۳\nهیچی نیاد ← می‌بازی")
+    return text, kb
+
+
+async def send_slot_picker(bot, chat_id: int, user, bet: int, reply_to: int | None = None):
+    """از دستور متنی «اسلات 100هزار» یا مبلغ دلخواه: پیام انتخاب نماد رو می‌فرسته."""
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    if chat_id > 0:
+        await send_html(bot, chat_id, BP("کازینو فقط تو گروه کار می‌کنه."), reply_parameters=rp); return
+    if bet < CASINO_MIN_BET:
+        await send_html(bot, chat_id, BP(f"حداقل شرط {CASINO_MIN_BET:,} تومنه."), reply_parameters=rp); return
+    if bet > CASINO_MAX_BET:
+        await send_html(bot, chat_id, BP(_CASINO_MAX_MSG), reply_parameters=rp); return
+    text, kb = panel_slot_symbol(user.id, bet)
+    await send_html(bot, chat_id, text, reply_markup=kb, reply_parameters=rp)
+
+
+async def slot_choose(bot, context, q, user, bet: int, sym: int):
+    """بعد از انتخاب نماد: پیام رو آماده‌ی ریپلای 🎰 می‌کنه."""
+    if bet < CASINO_MIN_BET or bet > CASINO_MAX_BET or sym not in (0, 1, 2, 3):
+        await q.answer("مبلغ یا نماد نامعتبره.", show_alert=True); return
+    row = await get_user(user.id)
+    if not row or int(row["balance"] or 0) < bet:
+        await q.answer("دارایی‌ت برای این شرط کافی نیست!", show_alert=True); return
+    await q.answer()
+    pend = _slot_pending(context)
+    for k in [k for k, v in pend.items() if v["uid"] == user.id]:
+        pend.pop(k, None)
+    key = (q.message.chat_id, q.message.message_id)
+    pend[key] = {"uid": user.id, "bet": bet, "sym": sym, "ts": time.time()}
+    emo = next(e for e, i in SLOT_PICK_SYMS if i == sym)
+    text = B(f"🎰 اسلات ۱ نفره — شرط {bet:,} تومن روی {emo}\n\n"
+             f"حالا روی همین پیام <u>ریپلای</u> کن و ایموجی 🎰 رو خودت بفرست!\n{HG_CE} تا {SLOT_PENDING_TTL // 60} دقیقه وقت داری.")
+    await edit_html(q, text, InlineKeyboardMarkup([[btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")]]))
+
+
+async def slot_dice_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """کاربر 🎰 رو ریپلای روی پیام شرط فرستاده → نتیجه حساب میشه."""
+    msg, user, chat = update.effective_message, update.effective_user, update.effective_chat
+    if not msg or not msg.dice or msg.dice.emoji != "🎰" or not msg.reply_to_message or not user or user.is_bot:
+        return
+    if getattr(msg, "forward_origin", None) or getattr(msg, "forward_date", None):
+        return   # اسلات فورواردی قبول نیست
+    key = (chat.id, msg.reply_to_message.message_id)
+    pend = _slot_pending(context)
+    info = pend.get(key)
+    if not info or info["uid"] != user.id:
+        return
+    pend.pop(key, None)
+    bot, bet, sym = context.bot, info["bet"], info["sym"]
+    target_id = msg.reply_to_message.message_id
+
+    async def edit_panel(text, kb=None):
+        try:
+            await bot.edit_message_text(text, chat_id=chat.id, message_id=target_id, parse_mode="HTML", reply_markup=kb)
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                return
+            try:
+                await bot.edit_message_text(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), chat_id=chat.id, message_id=target_id, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                log.warning("slot panel edit failed", exc_info=True)
+
+    again_kb = InlineKeyboardMarkup([
+        [btn("🔄 دوباره", "success", callback_data=f"cz:a:{user.id}:slot:1")],
+        [btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")],
+    ])
+    if time.time() - info["ts"] > SLOT_PENDING_TTL:
+        await edit_panel(B("⌛ زمانت تموم شد؛ دوباره شرط ببند."), again_kb); return
+    busy = _busy(context)
+    if user.id in busy:
+        return
+    if (left := _cd_left(context, user.id)) > 0:
+        await edit_panel(_cd_html(left), again_kb); return
+    await upsert_user(user.id, user.full_name)
+    if await _take(user.id, bet) is None:
+        row = await get_user(user.id)
+        await edit_panel(B(f"{ce('wallet', 1, '💰')} دارایی‌ت کافی نیست! موجودی: {row['balance']:,} تومن"), again_kb); return
+    busy.add(user.id)
+    try:
+        v = msg.dice.value
+        await edit_panel(B(f"🎰 اسلات — شرط {bet:,} تومن\n\n{HG_CE} داره می‌چرخه..."))
+        await asyncio.sleep(CASINO_WAIT)
+        _cd_set(context, user.id)
+        reels = slot_reels(v)
+        hits = sum(1 for r in reels if r == sym)
+        mult = SLOT_BET_MULTS[hits]
+        payout = int(bet * mult)
+        if payout > 0:
+            await _give(user.id, payout)
+        diff = payout - bet
+        name = _uname(user)
+        emo = next(e for e, i in SLOT_PICK_SYMS if i == sym)
+        if diff > 0:
+            res = f"🎉 {name} بردی! +{diff:,} تومن سود"
+        elif diff == 0:
+            res = f"🤝 {name} پولت برگشت"
+        else:
+            res = f"😢 {name} باختی! {diff:,} تومن"
+        text = f"🎰 {slot_text(v)}\nشرطت روی {emo} بود: {hits} تا اومد (×{_mult_txt(mult)})\n{res}"
+        record_line = await update_group_record(chat.id, "slot", user, payout)
+        row = await get_user(user.id)
+        await edit_panel(B(text + ("\n" + record_line if record_line else "") + f"\n{ce('wallet', 1, '💰')} دارایی: {row['balance']:,}"), again_kb)
+        delete_later(bot, chat.id, [msg.message_id])
+        await task_event(bot, chat.id, user.id, "casino", name=user.full_name)
     finally:
         busy.discard(user.id)
 
@@ -6525,7 +6645,14 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start_mines(bot, context, chat_id, user, int(parts[3]), q=q)
     elif act == "ps":
         await q.answer()
-        await play_single(bot, context, chat_id, user, "slot", int(parts[3]), None, q.message.message_id, q=q)
+        bet = int(parts[3])
+        if bet < CASINO_MIN_BET or bet > CASINO_MAX_BET:
+            await edit_html(q, BP(f"مبلغ شرط باید بین {CASINO_MIN_BET:,} و {CASINO_MAX_BET:,} تومن باشه."), InlineKeyboardMarkup([[btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:a:{uid}:slot:1")]]))
+        else:
+            text, kb = panel_slot_symbol(uid, bet)
+            await edit_html(q, text, kb)
+    elif act == "sp":
+        await slot_choose(bot, context, q, user, int(parts[3]), int(parts[4]))
     elif act == "sy":
         await q.answer()
         await create_poison_table(bot, context, chat_id, user, int(parts[3]), q.message.message_id)
@@ -6688,7 +6815,7 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
             context.user_data["casino_custom_dice"] = amt
             await msg.reply_text(BP("حالا عدد حدسیت رو بفرست: ۱ تا ۶"), parse_mode="HTML")
         else:
-            await play_single(bot, context, chat_id, user, "slot", amt, None, msg.message_id)
+            await send_slot_picker(bot, chat_id, user, amt, msg.message_id)
         return True
     if context.user_data.get("casino_custom_dice") and re.fullmatch(r"[1-6]", t):
         amt = context.user_data.pop("casino_custom_dice")
@@ -6725,7 +6852,7 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     if m and re.match(r"[\d\u06f0-\u06f9]|صد|یک|دو|ده", m.group(1)):
         amt = parse_amount(m.group(1))
         if amt > 0:
-            await play_single(bot, context, chat_id, user, "slot", amt, None, msg.message_id)
+            await send_slot_picker(bot, chat_id, user, amt, msg.message_id)
             return True
     return False
 
@@ -8090,35 +8217,61 @@ def _duration_fa(seconds: int) -> str:
     return " و ".join(parts) if parts else "کمتر از یک ثانیه"
 
 
+ROBBERY_CLEAN_PCT = 0.30   # هزینه‌ی «پاک‌کردن ردِ همین خلاف» = ۳۰٪ غنیمتی که همین الان گرفتی
+
+
 def robbery_keyboard(uid: int, trace_available: bool = False) -> InlineKeyboardMarkup:
+    """منوی انتخاب سرقت (فقط وقتی هیچ قفلی نداری نشون داده میشه)."""
     rows = [
         [btn("سرقت از کلاب", "primary", icon=EID_SWORDS, callback_data=f"rb:pick:{uid}:club")],
         [btn("سرقت از سینما", "primary", icon=EID_TROPHY, callback_data=f"rb:pick:{uid}:cinema")],
         [btn("سرقت از سوپری", "primary", icon=EID_MONEY, callback_data=f"rb:pick:{uid}:shop")],
         [btn("سرقت از بانک مرکزی", "danger", icon=EID_SWORDS, callback_data=f"rb:pick:{uid}:bank")],
     ]
-    if trace_available:
-        rows.append([btn(f"ردگم‌کن | {ROBBERY_TRACE_CLEAN_COST:,} تومان", "danger", icon=EID_SWORDS, callback_data=f"rb:trace:{uid}:club")])
     rows.append([btn("🔙 برگشت به پنل شخصی", "primary", icon=EID_BACK, callback_data=f"sp:home:{uid}")])
     return InlineKeyboardMarkup(rows)
+
+
+def rob_view(owner: int, profile, now: float):
+    """(متن، کیبورد) درست بر اساس وضعیت: بازداشت → فقط وثیقه | محرومیت رد → ردگم‌کن+تایمر | تایمر فعال → تایمر (+پاک‌کردن ردِ آخرین خلاف) | آزاد → گزینه‌های خلاف."""
+    trace = int(profile['trace'] or 0)
+    head = f"{SWORDS_CE} <b>بازار خلاف</b>\n\n{HG_CE} رد خلاف: <b>{trace}٪</b> از ۱۰۰٪\n"
+    lock = f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji>"
+    timer_btn = btn("تایمر", "primary", icon=EID_HOURGLASS, callback_data=f"rb:timer:{owner}:club")
+    if profile['arrest_until'] > now:
+        bail = int(profile['bail_amount'] or 0) or ROBBERIES['club']['bail']
+        text = (head + f"\n{lock} بازداشتی! تا آزادی یا پرداخت وثیقه نمی‌تونی خلاف کنی.\n"
+                f"{HG_CE} زمان باقی‌مانده از بازداشت: <b>{_duration_fa(profile['arrest_until']-now)}</b>\nوثیقه آزادی: <b>{bail:,} تومان</b>")
+        kb = [[btn(f"پرداخت وثیقه ({bail:,}) و آزادی", "success", icon=EID_MONEY, callback_data=f"rb:bail:{owner}:club")]]
+        return text, InlineKeyboardMarkup(kb)
+    if profile['trace_until'] > now:
+        text = (head + f"\n{lock} ردت لو رفته؛ <b>{_duration_fa(profile['trace_until']-now)}</b> از همه‌ی خلاف‌ها محرومی؛ یا ردگم‌کن بخر.")
+        kb = [[btn(f"ردگم‌کن | {ROBBERY_TRACE_CLEAN_COST:,} تومان", "danger", icon=EID_SWORDS, callback_data=f"rb:trace:{owner}:club")], [timer_btn]]
+        return text, InlineKeyboardMarkup(kb)
+    if profile['cooldown_until'] > now:
+        text = head + f"\n{HG_CE} زمان باقی‌مانده تا خلاف بعدی: <b>{_duration_fa(profile['cooldown_until']-now)}</b>"
+        kb = []
+        cc = int(profile['clean_cost'] or 0)
+        if cc > 0 and int(profile['clean_step'] or 0) > 0:
+            text += f"\n\nمی‌تونی ردِ همین خلافت رو پاک کنی ({profile['clean_step']}٪ از رد کم می‌شه)."
+            kb.append([btn(f"پاک‌کردن ردِ خودت | {cc:,} تومان", "danger", icon=EID_SWORDS, callback_data=f"rb:clean:{owner}:club")])
+        kb.append([timer_btn])
+        return text, InlineKeyboardMarkup(kb)
+    text = (head + "\nیکی از سرقت‌ها رو انتخاب کن، بعد سطح ریسکش رو (کم‌ریسک / متوسط / پرریسک) خودت تعیین می‌کنی؛ هر اقدام به رد خلاف اضافه می‌کنه.\n"
+            "بعد از هر عملیات، تایمر مشترک همه‌ی سرقت‌ها فعال می‌شه.")
+    return text, robbery_keyboard(owner)
+
+
+async def _rob_profile(uid: int):
+    await pool.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", uid)
+    return await pool.fetchrow("SELECT * FROM robbery_profile WHERE user_id=$1", uid)
 
 
 async def show_robbery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await upsert_user(user.id, user.full_name)
-    await pool.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", user.id)
-    profile = await pool.fetchrow("SELECT trace, cooldown_until, arrest_until, trace_until FROM robbery_profile WHERE user_id=$1", user.id)
-    now = time.time()
-    text = (f"{SWORDS_CE} <b>بازار خلاف</b>\n\nیکی از سرقت‌ها رو انتخاب کن، بعد سطح ریسکش رو (کم‌ریسک / متوسط / پرریسک) خودت تعیین می‌کنی؛ هر اقدام به رد خلاف اضافه می‌کنه.\n"
-            f"{HG_CE} رد خلاف: <b>{profile['trace']}٪</b> از ۱۰۰٪\n"
-            "بعد از هر عملیات، تایمر مشترک همه‌ی سرقت‌ها فعال می‌شه. اگر دستگیر یا ردت کامل بشه، تا آزادی یا پاک‌کردن رد نمی‌تونی خلاف کنی.")
-    if profile['cooldown_until'] > now:
-        text += f"\n\n{HG_CE} زمان باقی‌مانده تا خلاف بعدی: <b>{_duration_fa(profile['cooldown_until']-now)}</b>"
-    if profile['arrest_until'] > now:
-        text += f"\n{f'<tg-emoji emoji-id="{CASINO_CLOSED_EID}">🔒</tg-emoji>'} بازداشت: <b>{_duration_fa(profile['arrest_until']-now)}</b>"
-    if profile['trace_until'] > now:
-        text += f"\n{f'<tg-emoji emoji-id="{CASINO_CLOSED_EID}">🔒</tg-emoji>'} ردت لو رفته؛ تا <b>{_duration_fa(profile['trace_until']-now)}</b> محرومی یا می‌تونی ردگم‌کن بخری."
-    await update.effective_message.reply_text(B(text), parse_mode="HTML", reply_markup=robbery_keyboard(user.id, profile['trace_until'] > now))
+    text, kb = rob_view(user.id, await _rob_profile(user.id), time.time())
+    await update.effective_message.reply_text(B(text), parse_mode="HTML", reply_markup=kb)
 
 
 async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -8144,9 +8297,10 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += ["", "⚠️ حتی کم‌ریسک هم صددرصد امن نیست؛ ممکنه یهو گیر بیفتی!"]
         rows.append([btn("بازگشت به خلاف", "primary", icon=EID_BACK, callback_data=f"rb:menu:{owner}:{kind}")])
         await edit_html(q, B("\n".join(lines)), InlineKeyboardMarkup(rows)); return
-    if action == "menu":
-        prof = await pool.fetchrow("SELECT trace_until FROM robbery_profile WHERE user_id=$1", owner)
-        await q.answer(); await edit_html(q, B(f"{SWORDS_CE} <b>بازار خلاف</b>\nیکی از عملیات‌ها رو انتخاب کن:"), robbery_keyboard(owner, bool(prof and prof['trace_until'] > time.time()))); return
+    if action in ("menu", "timer"):
+        text, kb = rob_view(owner, await _rob_profile(owner), time.time())
+        await q.answer()
+        await edit_html(q, B(text), kb); return
 
     now = time.time(); await upsert_user(owner, q.from_user.full_name)
     async with pool.acquire() as conn:
@@ -8163,14 +8317,25 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_trace = max(0, profile['trace'] - ROBBERY_TRACE_CLEAN_AMOUNT)
                 await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", ROBBERY_TRACE_CLEAN_COST, owner)
                 await conn.execute("UPDATE robbery_profile SET trace=$1, trace_until=0 WHERE user_id=$2", new_trace, owner)
+            elif action == "clean":
+                cc, cs = int(profile['clean_cost'] or 0), int(profile['clean_step'] or 0)
+                if cc <= 0 or cs <= 0:
+                    await q.answer("ردی برای پاک‌کردن نمونده.", show_alert=True); return
+                if bal < cc:
+                    await q.answer(f"برای پاک‌کردن رد {cc:,} تومان لازم داری.", show_alert=True); return
+                new_balance = bal - cc
+                new_trace = max(0, profile['trace'] - cs)
+                await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", cc, owner)
+                await conn.execute("UPDATE robbery_profile SET trace=$1, clean_cost=0, clean_step=0, trace_until=CASE WHEN $1 < $3 THEN 0 ELSE trace_until END WHERE user_id=$2", new_trace, owner, ROBBERY_TRACE_LIMIT)
             elif action == "bail":
                 if profile['arrest_until'] <= now:
                     await q.answer("در بازداشت نیستی.", show_alert=True); return
-                if bal < cfg['bail']:
-                    await q.answer(f"وثیقه {cfg['bail']:,} تومنه؛ موجودیت کافی نیست.", show_alert=True); return
-                new_balance = bal - cfg['bail']
-                await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", cfg['bail'], owner)
-                await conn.execute("UPDATE robbery_profile SET arrest_until=0 WHERE user_id=$1", owner)
+                bail_cost = int(profile['bail_amount'] or 0) or cfg['bail']
+                if bal < bail_cost:
+                    await q.answer(f"وثیقه {bail_cost:,} تومنه؛ موجودیت کافی نیست.", show_alert=True); return
+                new_balance = bal - bail_cost
+                await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", bail_cost, owner)
+                await conn.execute("UPDATE robbery_profile SET arrest_until=0, bail_amount=0 WHERE user_id=$1", owner)
             elif action == "do":
                 if profile['trace'] >= ROBBERY_TRACE_LIMIT and profile['trace_until'] <= now:
                     await conn.execute("UPDATE robbery_profile SET trace=0 WHERE user_id=$1", owner)
@@ -8194,43 +8359,48 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if success:
                     payout = random.randint(*cfg['payout']); new_balance = bal + payout
                     await conn.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", payout, owner)
+                    await conn.execute("UPDATE robbery_profile SET clean_cost=$2, clean_step=$3, bail_amount=0 WHERE user_id=$1",
+                                       owner, max(1, int(payout * ROBBERY_CLEAN_PCT)), cfg['trace_step'])
                 else:
                     payout = 0; penalty = min(bal, int(bal * cfg['penalty'] / 100)); new_balance = bal - penalty
                     await conn.execute("UPDATE users SET balance=GREATEST(0,balance-$1) WHERE user_id=$2", penalty, owner)
+                    await conn.execute("UPDATE robbery_profile SET bail_amount=$2, clean_cost=0, clean_step=0 WHERE user_id=$1", owner, cfg['bail'])
             else:
                 await q.answer("درخواست نامعتبره.", show_alert=True); return
 
+    prof_now = await _rob_profile(owner)
+    _, view_kb = rob_view(owner, prof_now, time.time())
     if action == "trace":
         await q.answer("ردگم‌کن خریدی؛ ۱۲٪ از ردت پاک شد.", show_alert=True)
         text = (f"{SWORDS_CE} <b>ردگم‌کن فعال شد!</b>\n\n{MONEY_CE} هزینه: <b>{ROBBERY_TRACE_CLEAN_COST:,} تومان</b>\n"
                 f"رد خلاف: <b>{new_trace}٪</b>\nموجودی جدید: <b>{new_balance:,} تومان</b>\n{HG_CE} تایمر انتظار قبلی همچنان پابرجاست.")
-        await edit_html(q, B(text), robbery_keyboard(owner)); return
+        await edit_html(q, B(text), view_kb); return
+    if action == "clean":
+        await q.answer("ردت پاک شد.", show_alert=True)
+        text = (f"{SWORDS_CE} <b>ردت گم شد!</b>\n\n{MONEY_CE} هزینه: <b>{cc:,} تومان</b>\n"
+                f"رد خلاف: <b>{new_trace}٪</b>\nموجودی جدید: <b>{new_balance:,} تومان</b>")
+        await edit_html(q, B(text), view_kb); return
     if action == "bail":
         await q.answer("وثیقه پرداخت شد؛ از بازداشت آزاد شدی!", show_alert=True)
-        text = (f"{ce('lock',2,'🔓')} <b>آزادی با وثیقه</b>\nوثیقه پرداختی: <b>{cfg['bail']:,} تومان</b>\n"
+        text = (f"{ce('lock',2,'🔓')} <b>آزادی با وثیقه</b>\nوثیقه پرداختی: <b>{bail_cost:,} تومان</b>\n"
                 f"موجودی جدید: <b>{new_balance:,} تومان</b>\nرد خلاف و تایمر عمومی همچنان پابرجاست.")
-        await edit_html(q, B(text), robbery_keyboard(owner)); return
+        await edit_html(q, B(text), view_kb); return
     if success:
         result = (f"{TROPHY_CE} <b>عملیات {html.escape(cfg['op'])} موفق بود!</b>\n\n<blockquote>{html.escape(cfg['win_text'])}</blockquote>\n\n"
                   f"{MONEY_CE} غنیمت: <b>+{payout:,} تومان</b>\nموجودی جدید: <b>{new_balance:,} تومان</b>\n"
-                  f"{HG_CE} قفل مشترک تمام خلاف‌ها: <b>{_duration_fa(cfg['cooldown'])}</b>\nرد خلاف: <b>{new_trace}٪</b>")
+                  f"{HG_CE} قفل مشترک تمام خلاف‌ها: <b>{_duration_fa(cfg['cooldown'])}</b>\nرد خلاف: <b>{new_trace}٪</b>\n\n"
+                  f"ردِ خودت رو پاک کن تا لو نری!")
         if new_trace >= ROBBERY_TRACE_LIMIT:
-            result += f"\n\n{f'<tg-emoji emoji-id="{CASINO_CLOSED_EID}">🔒</tg-emoji>'} ردت به ۱۰۰٪ رسید؛ ۲ ساعت محرومی یا ردگم‌کن ۱٫۳ میلیونی بخر و ۱۲٪ از رد رو پاک کن."
+            result += f"\n\n<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji> ردت به ۱۰۰٪ رسید؛ ۲ ساعت محرومی مگه اینکه ردت رو پاک کنی."
         await q.answer("عملیات موفق بود؛ جایزه به حسابت نشست.")
-        await edit_html(q, B(result), robbery_keyboard(owner, new_trace >= ROBBERY_TRACE_LIMIT))
+        await edit_html(q, B(result), view_kb)
         await task_event(context.bot, q.message.chat_id, owner, "robbery")
     else:
         result = (f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji> <b>عملیات {html.escape(cfg['op'])} لو رفت؛ دستگیر شدی!</b>\n\n<blockquote>{html.escape(cfg['fail'])}</blockquote>\n\n"
                   f"جریمه: <b>{cfg['penalty']}٪</b> موجودی ({penalty:,} تومان)\nموجودی باقی‌مانده: <b>{new_balance:,} تومان</b>\n"
                   f"مدت بازداشت: <b>{_duration_fa(cfg['lock'])}</b>\nوثیقه آزادی: <b>{cfg['bail']:,} تومان</b>\nرد خلاف: <b>{new_trace}٪</b>")
-        rows = [[btn(f"پرداخت وثیقه ({cfg['bail']:,}) و آزادی", "success", icon=EID_MONEY, callback_data=f"rb:bail:{owner}:{kind}:{tier}")]]
-        if new_trace >= ROBBERY_TRACE_LIMIT:
-            rows.append([btn(f"ردگم‌کن ({ROBBERY_TRACE_CLEAN_COST:,} تومان)", "danger", icon=EID_SWORDS, callback_data=f"rb:trace:{owner}:{kind}")])
-            result += f"\n\nردت به ۱۰۰٪ رسیده؛ ۲ ساعت از همه‌ی خلاف‌ها محرومی یا با ردگم‌کن ۱٫۳ میلیونی، ۱۲٪ از رد رو پاک کن."
-        rows.append([btn("بازگشت به خلاف", "primary", icon=EID_BACK, callback_data=f"rb:menu:{owner}:{kind}")])
-        kb = InlineKeyboardMarkup(rows)
         await q.answer("گیر افتادی! پلیس دستگیرت کرد.", show_alert=True)
-        await edit_html(q, B(result), kb)
+        await edit_html(q, B(result), view_kb)
 
 
 async def is_channel_member(bot, uid: int):
@@ -10083,6 +10253,7 @@ def main():
     app.add_handler(CallbackQueryHandler(marriage_cb, pattern=r"^mar:(yes|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(affair_cb, pattern=r"^af:(divorce|forgive):\d+:\d+:\-?\d+$"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
+    app.add_handler(MessageHandler(filters.Dice.SLOT_MACHINE & filters.ChatType.GROUPS, slot_dice_msg))
     app.add_handler(CallbackQueryHandler(duel_answer, pattern=r"^du:(ok|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
     app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\d+)$"))
