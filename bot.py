@@ -815,12 +815,12 @@ textarea.inp{min-height:130px;resize:vertical}
 <div id="app">
   <div id="views"></div>
   <nav id="tabs">
-    <button data-k="games" class="on"><i>✦</i><span>بازی‌ها</span></button>
-    <button data-k="room"><i>◉</i><span>چت‌روم</span></button>
-    <button data-k="myself"><i>♟</i><span>خودم</span></button>
-    <button data-k="chats"><i>▤</i><span>گپ‌ها</span></button>
-    <button data-k="users"><i>⌕</i><span>کاربران</span></button>
-    <button data-k="panel"><i>⚙</i><span>پشتیبانی</span></button>
+    <button data-k="games" class="on"><i data-ce="5123323069850452850"></i><span>بازی‌ها</span></button>
+    <button data-k="room"><i data-ce="5769289093221454192"></i><span>چت‌روم</span></button>
+    <button data-k="myself"><i data-ce="6233367447789899509"></i><span>خودم</span></button>
+    <button data-k="chats"><i data-ce="5805161437466726782"></i><span>گپ‌ها</span></button>
+    <button data-k="users"><i data-ce="6213060666320754449"></i><span>کاربران</span></button>
+    <button data-k="panel"><i data-ce="5204118276635892650"></i><span>پشتیبانی</span></button>
   </nav>
 </div>
 <div id="toast"></div>
@@ -900,6 +900,16 @@ function avatar(kind,id,name,size,big){
   blob((c?'c':'u')+id+(big?'b':'s'),(c?'/api/avatar?chat=':'/api/avatar?uid=')+id+(big?'&big=1':'')).then(u=>{if(u){d.style.background='none';d.replaceChildren(h('img',{src:u,draggable:'false'}))}});
   return d;
 }
+
+/* ───── ایموجی پرمیوم و آیکن‌های برداری (بدون ایموجی معمولی) ───── */
+const CE_MISS='data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#7b2ff7"/></svg>');
+function ceI(id,size){size=size||22;const im=h('img',{class:'cei',draggable:'false',alt:'',style:'width:'+size+'px;height:'+size+'px'});blob('ce'+id,'/api/social/emoji?id='+encodeURIComponent(id)).then(u=>{im.src=u||CE_MISS});return im}
+const SVGS={
+ rocket:'<svg viewBox="0 0 64 64"><path d="M32 4c9 8 13 20 10 34H22C19 24 23 12 32 4z" fill="#e8eef8"/><circle cx="32" cy="24" r="5" fill="#2c8bd8"/><path d="M22 38l-9 10 3-14zm20 0l9 10-3-14z" fill="#e0334f"/><path d="M27 40h10l-5 16z" fill="#ffb347"/></svg>',
+ roach:'<svg viewBox="0 0 40 40"><ellipse cx="20" cy="22" rx="9" ry="13" fill="#6b3a1e"/><ellipse cx="20" cy="22" rx="5" ry="9" fill="#8b5a2b"/><circle cx="20" cy="8" r="4" fill="#3b2010"/><path d="M11 16L3 11M11 22L2 22M11 28L3 34M29 16l8-5M29 22l9 0M29 28l8 6M17 5L12 0M23 5l5-5" stroke="#3b2010" stroke-width="2" fill="none"/></svg>',
+ gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>'
+};
+function svgIc(name,size){size=size||24;const d=h('span',{class:'svgic',style:'width:'+size+'px;height:'+size+'px'});d.innerHTML=SVGS[name]||'';return d}
 
 /* ───── ناوبری ───── */
 const views=$('#views'),stack=[];
@@ -1817,7 +1827,7 @@ const gameCss=document.createElement('style');gameCss.textContent=`
 .rk-res-t{font-weight:900;font-size:18px}.rk-res-d{font-size:13px;margin-top:6px;color:#dbe6f7;line-height:1.7}
 .rk-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .rk-st{background:#ffffff10;border-radius:14px;padding:10px;text-align:center}.rk-st b{display:block;font-size:15px;direction:ltr}.rk-st span{font-size:11px;color:#9fb0cc}
-.rk-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:12px 0}
+.rk-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:12px 0}
 .rk-cell{aspect-ratio:1;border:0;border-radius:11px;background:linear-gradient(#2b3d63,#202e4d);font-size:20px;color:#fff;padding:0}
 @keyframes rkpop{0%{transform:scale(.55)}60%{transform:scale(1.14)}100%{transform:scale(1)}}@keyframes rkshk{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 .rk-cell.pop{animation:rkpop .28s}.rk-cell.boom{animation:rkshk .35s}
@@ -1840,20 +1850,77 @@ const chatCss=document.createElement('style');chatCss.textContent=`
 .ecell:active{background:#b12bd522}.ecell img{width:100%;height:100%;object-fit:contain;pointer-events:none}
 .enote{font-size:12.5px;color:var(--hint);padding:6px 4px;line-height:1.7}
 `;document.head.append(chatCss);
+const coolCss=document.createElement('style');coolCss.textContent=`
+.cei{object-fit:contain;vertical-align:middle;flex:none;display:inline-block}
+.svgic{display:inline-flex;align-items:center;justify-content:center;flex:none}.svgic svg{width:100%;height:100%}
+.gk{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.tt{display:inline-flex;align-items:center;gap:6px}
+#tabs button i{display:flex;align-items:center;justify-content:center;height:28px;font-style:normal;filter:grayscale(.85) opacity(.65);transition:.18s}
+#tabs button.on i{filter:none;transform:translateY(-3px) scale(1.18)}
+button.pb{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:16px;padding:13px 14px;font-weight:900;font-size:14.5px;color:#fff;cursor:pointer;width:100%;margin-top:10px;background:linear-gradient(135deg,#3b82ff,#7c3aed);box-shadow:0 7px 20px rgba(80,70,240,.45),inset 0 1px 0 rgba(255,255,255,.38);transition:transform .12s,filter .12s}
+button.pb::after{content:'';position:absolute;top:0;left:-70%;width:45%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.38),transparent);transform:skewX(-20deg);animation:pbshine 3.8s infinite}
+@keyframes pbshine{0%,55%{left:-70%}100%{left:135%}}
+button.pb:active{transform:scale(.96);filter:brightness(1.15)}
+button.pb .cei{filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}
+button.pb.green{background:linear-gradient(135deg,#10b981,#047857);box-shadow:0 7px 20px rgba(16,185,129,.42),inset 0 1px 0 rgba(255,255,255,.38)}
+button.pb.red{background:linear-gradient(135deg,#f43f5e,#9f1239);box-shadow:0 7px 20px rgba(244,63,94,.42),inset 0 1px 0 rgba(255,255,255,.38)}
+button.pb.gold{background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 7px 20px rgba(245,158,11,.42),inset 0 1px 0 rgba(255,255,255,.4)}
+button.pb.pink{background:linear-gradient(135deg,#ec4899,#7c3aed);box-shadow:0 7px 20px rgba(236,72,153,.42),inset 0 1px 0 rgba(255,255,255,.38)}
+button.pb.blue{background:linear-gradient(135deg,#0ea5e9,#4f46e5)}
+button.pb.dark{background:linear-gradient(135deg,#334155,#1e293b);box-shadow:0 5px 14px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.18)}
+button.pb.sm{width:auto;margin:0;padding:7px 12px;font-size:12px;border-radius:12px}
+button.pb.wide{grid-column:1/-1}
+button.pb:disabled{opacity:.5}
+.self-grid .pb{margin:0}.self-grid .gdesc.wide{grid-column:1/-1;display:flex;align-items:center;gap:6px;justify-content:center}
+.rk-cdl{display:inline-block;margin:8px 0 2px;padding:5px 12px;border-radius:20px;background:linear-gradient(135deg,#3b82ff55,#7c3aed55);border:1px solid #7c8cff66;font-size:12.5px;font-weight:800;color:#cfe0ff}
+.rk-mult.cd{font-size:30px;color:#fbbf24;text-shadow:0 0 22px #f59e0baa;top:30px}
+button.rk-main{position:relative;overflow:hidden;background:linear-gradient(135deg,#3b82ff,#7c3aed);box-shadow:0 8px 22px rgba(80,70,240,.5),inset 0 1px 0 rgba(255,255,255,.35);transition:transform .12s}
+button.rk-main::after{content:'';position:absolute;top:0;left:-70%;width:45%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent);transform:skewX(-20deg);animation:pbshine 3.8s infinite}
+button.rk-main.green{background:linear-gradient(135deg,#10b981,#047857);box-shadow:0 8px 22px rgba(16,185,129,.45),inset 0 1px 0 rgba(255,255,255,.35)}
+button.rk-main:active{transform:scale(.97)}
+button.rk-opt{background:linear-gradient(#233155,#18233f);border:1px solid rgba(93,124,255,.35);box-shadow:0 3px 10px rgba(0,0,0,.35)}
+button.rk-opt.on{background:linear-gradient(135deg,#3b82ff,#7c3aed);border-color:transparent;box-shadow:0 0 16px rgba(91,91,255,.55)}
+button.rk-step{background:linear-gradient(#2f3f6b,#1f2b4d);box-shadow:0 3px 10px rgba(0,0,0,.35)}
+button.rk-back{display:flex;align-items:center;gap:6px;background:linear-gradient(#26345a,#182244);box-shadow:0 3px 10px rgba(0,0,0,.35)}
+.rk-bal{display:flex;align-items:center;gap:6px}
+button.rk-cell{display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#35497a,#1d2a4d);box-shadow:0 4px 0 #0f1830,0 6px 12px rgba(0,0,0,.4)}
+button.rk-cell:active{transform:translateY(3px)}
+button.rk-cell.safe{background:linear-gradient(160deg,#16a34a,#14532d);box-shadow:0 0 14px rgba(34,197,94,.45)}
+button.rk-cell.bomb{background:linear-gradient(160deg,#9f1239,#450a1a)}
+button.rk-cell.boom{background:linear-gradient(160deg,#ef4444,#991b1b);box-shadow:0 0 18px rgba(239,68,68,.65)}
+.swatches{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+button.swatch{width:42px;height:42px;border-radius:50%;border:3px solid rgba(255,255,255,.3);padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.4)}
+button.swatch.on{border-color:#fff;box-shadow:0 0 0 3px #7c3aed}
+.car-part .cpn{display:flex;align-items:center;gap:6px}.car-part .cpmax{display:inline-flex}
+.gtitle.sm{font-size:15px;margin-top:14px}
+`;document.head.append(coolCss);
 function GamesScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
- function home(){box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),...[
-  ['🚀','موشک','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن، ضریب خروج رو انتخاب کن یا خودت قبل از انفجار برداشت بزن.','crash'],
-  ['🔨','سوسک‌کش','سوسک‌ها رو قبل از فرار با چکش بزن!','roach'],
-  ['💣','مین','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن، خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.','mines']
- ].map(([ico,title,desc,key])=>h('div',{class:'gcard', 'data-game':key},h('div',{class:'gvisual'},ico),h('div',{class:'gtitle'},title),h('div',{class:'gdesc'},desc),h('button',{onclick:()=>play(key)},'شروع بازی'))))}
- function play(k){
+ let cdT=null;
+ function home(){
+  clearInterval(cdT);
+  const G=[
+   [z=>svgIc('rocket',z),'موشک','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن؛ ۷ ثانیه شمارش معکوس و بعدش موشک خودکار پرواز می‌کنه. ضریب خروج رو انتخاب کن یا قبل از انفجار برداشت بزن.','crash','blue'],
+   [z=>svgIc('roach',z),'سوسک‌کش','سوسک‌ها رو قبل از فرار با چکش بزن!','roach','green'],
+   [z=>ceI('5256147609243889028',z),'مین','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن؛ ۲۵ خانه و ۳ مین. خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.','mines','red']];
+  let lbl=null;
+  box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),...G.map(([ic,t,d,key,cls])=>{
+   const v=h('div',{class:'gvisual'},ic(key==='roach'?80:90));
+   if(key==='crash')v.style.animationDelay='-'+((Date.now()/1000)%7).toFixed(2)+'s';
+   const kids=[v,h('div',{class:'gtitle'},t)];
+   if(key==='crash'){lbl=h('div',{class:'rk-cdl'});kids.push(lbl)}
+   kids.push(h('div',{class:'gdesc'},d),h('button',{class:'pb '+cls,onclick:()=>play(key)},ic(24),h('span',{},'شروع بازی')));
+   return h('div',{class:'gcard','data-game':key},kids)}));
+  const tickCd=()=>{if(!lbl||!lbl.isConnected){clearInterval(cdT);return}const p=(Date.now()/1000)%7;const left=Math.ceil((5.46-p+7)%7)||7;lbl.textContent='پرواز بعدی موشک: '+num(left)+' ثانیه'};
+  tickCd();cdT=setInterval(tickCd,250);
+ }
+ function play(k){clearInterval(cdT);
   if(k==='crash')crash(); if(k==='roach')roach(); if(k==='mines')mines();
  }
  function frame(title,content){box.replaceChildren(h('div',{class:'ghead'},title),h('button',{class:'ib',style:'color:white',onclick:home},'← بازگشت'),content)}
  function roach(){
   let score=0,left=25,timer=null;const sc=h('b',{},'امتیاز: ۰'),tm=h('b',{},'زمان: ۲۵');
-  const area=h('div',{class:'roach-area'}),bug=h('button',{class:'roach',onclick:()=>{score++;sc.textContent='امتیاز: '+score;move()}},'🪳');
+  const area=h('div',{class:'roach-area'}),bug=h('button',{class:'roach',onclick:()=>{score++;sc.textContent='امتیاز: '+score;move()}},svgIc('roach',40));
   function move(){bug.style.left=Math.floor(Math.random()*78)+'%';bug.style.top=Math.floor(Math.random()*72)+'%'}
   move();area.append(bug);
   const start=h('button',{onclick:()=>{score=0;left=25;sc.textContent='امتیاز: ۰';clearInterval(timer);if(!bug.isConnected)area.append(bug);score=0;left=25;sc.textContent='امتیاز: ۰';tm.textContent='زمان: ۲۵';timer=setInterval(()=>{left--;tm.textContent='زمان: '+left;if(left<=0){clearInterval(timer);toast('پایان بازی؛ امتیاز '+score)}},1000);move()}},'شروع مجدد');
@@ -2007,7 +2074,7 @@ function GamesScreen(){
  const fx=m=>'x'+Number(m).toFixed(2);
  const toEn=s=>String(s).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
  function starField(){const f=h('div',{class:'rk-stars'});for(let i=0;i<26;i++)f.append(h('i',{class:'rk-star',style:'left:'+Math.random()*100+'%;top:'+Math.random()*100+'%;animation-delay:'+(Math.random()*3).toFixed(2)+'s'}));return f}
- function topBar(title,balEl){return h('div',{class:'rk-top'},h('button',{class:'rk-back',onclick:leave},'بازگشت ←'),h('div',{class:'rk-title'},title),h('div',{class:'rk-bal'},'💰 ',balEl))}
+ function topBar(title,balEl){return h('div',{class:'rk-top'},h('button',{class:'rk-back',onclick:leave},ceI('5816895683256390576',18),'بازگشت'),h('div',{class:'rk-title'},title),h('div',{class:'rk-bal'},ceI('6233367447789899509',20),balEl))}
  /* انتخاب مبلغ شرط (حداقل ۵۰٬۰۰۰ تومان) */
  function betPicker(st,onNext,btnText){
   const min=st.min_bet||50000,max=Math.min(st.max_bet||1e12,st.balance||0);
@@ -2045,8 +2112,8 @@ function GamesScreen(){
   const tgtB=h('div',{class:'rk-tgt hid'});
   const hist=h('div',{class:'rk-hist'});
   const panel=h('div',{class:'rk-panel'});
-  const drawHist=l=>hist.replaceChildren(h('span',{class:'rk-hl'},'🚀 پروازها'),...((l&&l.length)?l.map((m,i)=>h('div',{class:'rk-chip '+(i===0?'first':m>=10?'top':m>=3?'hi':m>=1.5?'mid':'lo')},fx(m))):[h('span',{class:'rk-hl'},'هنوز پروازی ثبت نشده')]));
-  box.replaceChildren(h('div',{class:'rk-wrap'},topBar('🚀 موشک',balEl),hist,h('div',{class:'rk-stage'},cv,tgtB,mult),panel));
+  const drawHist=l=>hist.replaceChildren(h('span',{class:'rk-hl'},'پروازها'),...((l&&l.length)?l.map((m,i)=>h('div',{class:'rk-chip '+(i===0?'first':m>=10?'top':m>=3?'hi':m>=1.5?'mid':'lo')},fx(m))):[h('span',{class:'rk-hl'},'هنوز پروازی ثبت نشده')]));
+  box.replaceChildren(h('div',{class:'rk-wrap'},topBar(h('span',{class:'tt'},svgIc('rocket',22),'موشک'),balEl),hist,h('div',{class:'rk-stage'},cv,tgtB,mult),panel));
   drawHist(st.hist);scene.setRate(rate);
   function phaseBet(){
    over=false;scene.reset();mult.textContent='x1.00';mult.className='rk-mult';tgtB.classList.add('hid');
@@ -2068,7 +2135,7 @@ function GamesScreen(){
     try{const r=await api('/api/game/crash/start',{bet,target:tgt});st.balance=r.balance;balEl.textContent=num(r.balance);fly(r)}
     catch(e){toast(e.message,1);go.disabled=false}
    }},'شرط بندی کنید');
-   panel.replaceChildren(h('div',{class:'rk-lbl'},'۲. ضریب خروج را انتخاب کن یا دستی برداشت بزن'),row,cust,info,go,
+   panel.replaceChildren(h('div',{class:'rk-lbl'},'۲. ضریب خروج را انتخاب کن یا دستی برداشت بزن'),row,cust,info,h('div',{class:'rk-hint'},'بعد از شرط‌بندی ۷ ثانیه شمارش معکوس نشون داده میشه و بعدش موشک خودکار پرواز می‌کنه.'),go,
     h('button',{class:'rk-link',onclick:phaseBet},'← تغییر مبلغ شرط ('+num(bet)+' تومان)'));
    draw();
   }
@@ -2082,7 +2149,7 @@ function GamesScreen(){
    hap(win?'success':'error');
    panel.replaceChildren(
     h('div',{class:'rk-res '+(win?'win':'lose')},
-     h('div',{class:'rk-res-t'},win?'🎉 برداشت موفق!':'💥 موشک منفجر شد!'),
+     h('div',{class:'rk-res-t'},win?'برداشت موفق!':'موشک منفجر شد!'),
      h('div',{class:'rk-res-d'},win?('ضریب '+fx(s.mult)+' • دریافتی '+num(s.payout)+' تومان • سود '+num(s.profit)+' تومان'):('موشک در '+fx(s.crash)+' منفجر شد و شرط '+num(s.bet)+' تومانی‌ات سوخت.'))),
     h('button',{class:'rk-main',onclick:phaseBet},'بازی جدید'));
   }
@@ -2090,7 +2157,7 @@ function GamesScreen(){
    over=false;bet=r.bet;target=r.target;off=r.now-Date.now()/1000;rate=r.rate||rate;scene.setRate(rate);
    const t0=r.t0;let busy=false,cur=1;
    scene.reset();scene.go();mult.className='rk-mult run';
-   if(target){tgtB.textContent='🎯 خروج خودکار x'+target.toFixed(2);tgtB.classList.remove('hid')}else tgtB.classList.add('hid');
+   if(target){tgtB.textContent='خروج خودکار x'+target.toFixed(2);tgtB.classList.remove('hid')}else tgtB.classList.add('hid');
    const cash=h('button',{class:'rk-main green',onclick:doCash},'برداشت');
    panel.replaceChildren(h('div',{class:'rk-lbl'},'شرط: '+num(bet)+' تومان'),cash,
     h('div',{class:'rk-hint'},target?('ضریب هدف: x'+target.toFixed(2)+' (خودکار برداشت می‌شود)'):'هر لحظه ممکن است منفجر شود؛ به‌موقع برداشت بزن!'));
@@ -2100,6 +2167,8 @@ function GamesScreen(){
     if(stopped||over)return;
     const el=Date.now()/1000+off-t0;cur=el<=0?1:Math.floor(Math.exp(rate*el)*100)/100;
     scene.setEl(el);
+    if(el<0){const sc=Math.ceil(-el);mult.textContent='پرواز در '+num(sc);mult.className='rk-mult cd';cash.disabled=true;cash.textContent='پرواز خودکار تا '+num(sc)+' ثانیه دیگه';raf=requestAnimationFrame(tick);return}
+    if(mult.className!=='rk-mult run'){mult.className='rk-mult run';if(!busy)cash.disabled=false}
     mult.textContent=fx(cur);cash.textContent='برداشت  '+num(Math.floor(bet*cur))+' تومان';
     if(target&&cur>=target&&!busy){busy=true;check()}
     raf=requestAnimationFrame(tick);
@@ -2115,18 +2184,18 @@ function GamesScreen(){
   if(st.other==='crash'){toast('اول بازی موشکِ نیمه‌کاره‌ات رو تموم کن.',1);crash();return}
   rkCleanup=()=>{};
   let playing=false,busy=false,g=null;
-  const CELLS=st.cells||21,MINES=st.mines||3;
+  const CELLS=st.cells||25,MINES=st.mines||3;
   const balEl=h('b',{},num(st.balance));
   const sMult=h('b',{},'x1.00'),sWin=h('b',{},'—'),sNext=h('b',{},'—');
   const stats=h('div',{class:'rk-stats'},h('div',{class:'rk-st'},sMult,h('span',{},'ضریب فعلی')),h('div',{class:'rk-st'},sWin,h('span',{},'برد فعلی')),h('div',{class:'rk-st'},sNext,h('span',{},'ضریب بعدی')));
   const grid=h('div',{class:'rk-grid'});
   const panel=h('div',{class:'rk-panel'});
-  box.replaceChildren(h('div',{class:'rk-wrap'},topBar('💣 مین',balEl),stats,grid,panel));
+  box.replaceChildren(h('div',{class:'rk-wrap'},topBar(h('span',{class:'tt'},ceI('5256147609243889028',22),'مین'),balEl),stats,grid,panel));
   function drawGrid(opened,bombs,boom){
    const pop=opened.length?opened[opened.length-1]:-1;
    grid.replaceChildren(...Array.from({length:CELLS},(_,i)=>{
     const o=opened.includes(i),b=!!bombs&&bombs.includes(i);
-    return h('button',{class:'rk-cell'+(o?' safe':'')+(b?' bomb':'')+(i===boom?' boom':'')+(i===pop&&playing?' pop':'')+(playing?'':' off'),onclick:()=>openCell(i)},b?'💣':o?'💎':'')}));
+    return h('button',{class:'rk-cell'+(o?' safe':'')+(b?' bomb':'')+(i===boom?' boom':'')+(i===pop&&playing?' pop':'')+(playing?'':' off'),onclick:()=>openCell(i)},b?ceI('5256147609243889028',26):o?ceI('6170417452162225096',26):null)}));
   }
   function setStats(v){
    sMult.textContent=v?fx(v.mult):'x1.00';sWin.textContent=v?num(v.payout):'—';sNext.textContent=v&&v.next?fx(v.next):'—';
@@ -2149,7 +2218,7 @@ function GamesScreen(){
    if(!win)setStats(null);
    panel.replaceChildren(
     h('div',{class:'rk-res '+(win?'win':'lose')},
-     h('div',{class:'rk-res-t'},win?(r.auto?'🏆 همه‌ی خانه‌های امن را باز کردی!':'🎉 برداشت موفق!'):'💥 مین خوردی!'),
+     h('div',{class:'rk-res-t'},win?(r.auto?'همه‌ی خانه‌های امن را باز کردی!':'برداشت موفق!'):'مین خوردی!'),
      h('div',{class:'rk-res-d'},win?('ضریب '+fx(r.mult)+' • دریافتی '+num(r.payout)+' تومان • سود '+num(r.profit)+' تومان'):('شرط '+num(r.bet)+' تومانی‌ات سوخت.'))),
     h('button',{class:'rk-main',onclick:phaseBet},'بازی جدید'));
   }
@@ -2174,38 +2243,65 @@ function GamesScreen(){
 }
 function MyselfScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});let data=null;
- const moneyInput=(ph)=>h('input',{class:'inp',type:'number',inputmode:'numeric',min:'1',placeholder:ph});
- function btn(label,fn,cls=''){return h('button',{class:'btn '+cls,onclick:fn},label)}
+ const E={money:'6233367447789899509',bank:'5445355530111437729',cars:'5323272789824654613',powers:'5204118276635892650',spy:'5805161437466726782',theft:'5316700038162817675',hand:'5388881284309195257',back:'5816895683256390576',trophy:'5413566144986503832',jm:'5190526908462292507',vs:'6213060666320754449',wallet:'5334806881548379091',engine:'5775888804392996347',body:'5037414171923186776',tires:'5377521684221815300',glass:'5037614751190879049',energy:'5400280896311944960',hg:'5787432469598835099'};
+ const pb=(label,fn,cls,icon)=>h('button',{class:'pb '+(cls||''),onclick:fn},icon?(icon.nodeType?icon:ceI(icon,24)):null,h('span',{},label));
+ const title=t=>h('div',{class:'ghead'},t);
+ const moneyInput=ph=>h('input',{class:'inp',type:'number',inputmode:'numeric',min:'1',placeholder:ph});
  async function load(){data=await api('/api/myself');home()}
  function home(){
-  const av=data.photo?h('img',{class:'self-avatar',alt:'کاراکتر'}):h('div',{class:'self-avatar self-fallback'},'🎖');
-  if(data.photo)blob('my-character-photo',data.photo).then(u=>{if(u)av.src=u});
-  box.replaceChildren(h('div',{class:'ghead'},'♟ خودم'),h('div',{class:'gcard self-card'},h('div',{class:'selfhero'},av,h('div',{},h('div',{class:'gtitle'},data.character),h('div',{class:'gdesc'},data.name+' • سطح '+data.level))),
-   h('div',{class:'gstats'},...[[ '💵 جیب',num(data.pocket)+' تومان'],['🏦 بانک',num(data.bank)+' تومان'],['💎 دارایی کل',num(data.total_assets)+' تومان'],['⚡ انرژی',data.energy+'٪'],['🤛 تعداد',num(data.jaghs)],['🆔 شناسه',String(data.id)]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v),h('span',{class:'gdesc'},k))))),
-   h('div',{class:'self-grid'},
-    btn('🏦 بانک',bank,'self-action'),btn('🚗 ماشین من',cars,'self-action'),btn('💪 قدرت‌ها',powers,'self-action'),btn('⚙️ تنظیمات',settings,'self-action'),h('div',{class:'gdesc wide'},'🎰 موجودی دستگاه: '+num(data.jagh_machine)+' / 1,200,000 تومان'),btn('🎰 برداشت دستگاه جق · ۲ برابر',machine,'self-action wide')));
+  const av=h('div',{class:'self-avatar self-fallback'},ceI(E.trophy,52));
+  if(data.photo)blob(data.photo,data.photo).then(u=>{if(u)av.replaceWith(h('img',{class:'self-avatar',alt:'',src:u}))});
+  const st=[[E.money,'جیب',num(data.pocket)+' تومان'],[E.bank,'بانک',num(data.bank)+' تومان'],[E.wallet,'دارایی کل',num(data.total_assets)+' تومان'],[E.energy,'انرژی',data.energy+'٪'],[E.hand,'تعداد جق',num(data.jaghs)],[E.vs,'شناسه',String(data.id)]];
+  box.replaceChildren(title('خودم'),h('div',{class:'gcard self-card'},
+   h('div',{class:'selfhero'},av,h('div',{},h('div',{class:'gtitle'},data.character),h('div',{class:'gdesc'},data.name+' • سطح '+data.level+(data.job?' • '+data.job:'')))),
+   h('div',{class:'gstats'},st.map(([ic,k,v])=>h('div',{class:'gstat'},h('div',{class:'gk'},ceI(ic,18),h('span',{class:'gdesc'},k)),h('b',{},v))))),
+   h('div',{class:'self-grid'},pb('بانک',bank,'',E.bank),pb('ماشین من',()=>cars(),'gold',E.cars),pb('قدرت‌ها',powers,'green',E.powers),pb('تنظیمات',settings,'dark',svgIc('gear',22)),
+    h('div',{class:'gdesc wide'},ceI(E.jm,18),'موجودی دستگاه جق: '+num(data.jagh_machine)+' / ۱٬۲۰۰٬۰۰۰ تومان'),
+    pb('برداشت دستگاه جق · ۲ برابر',machine,'pink wide',E.jm)));
  }
  function bank(){
   const amount=moneyInput('مبلغ به تومان');
-  box.replaceChildren(h('div',{class:'ghead'},'🏦 بانک مرکزی'),h('div',{class:'gcard'},h('div',{class:'gstats'},...[[ 'موجودی بانک',num(data.bank)],['موجودی جیب',num(data.pocket)]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v+' تومان'),h('span',{class:'gdesc'},k)))),amount,
-   btn('واریز به بانک (کارمزد ۵٬۰۰۰)',async()=>{await bankAction('deposit',amount)},'self-action'),btn('برداشت از بانک',async()=>{await bankAction('withdraw',amount)},'self-action'),
-   h('div',{class:'gdivider'}),h('div',{class:'gtitle'},'🔁 انتقال پول با شناسه کاربر'),h('input',{class:'inp',id:'truid',type:'number',placeholder:'شناسه عددی گیرنده'}),h('input',{class:'inp',id:'tramt',type:'number',placeholder:'مبلغ انتقال'}),
-   btn('ارسال انتقال',transfer,'self-action'),btn('← برگشت',home,'self-back')));
+  box.replaceChildren(title('بانک مرکزی'),h('div',{class:'gcard'},
+   h('div',{class:'gstats'},[['موجودی بانک',data.bank],['موجودی جیب',data.pocket]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},num(v)+' تومان'),h('span',{class:'gdesc'},k)))),
+   amount,pb('واریز به بانک (کارمزد ۵٬۰۰۰)',()=>bankAction('deposit',amount),'green',E.bank),pb('برداشت از بانک',()=>bankAction('withdraw',amount),'',E.money),
+   h('div',{class:'gdivider'}),h('div',{class:'gtitle'},'انتقال پول با شناسه کاربر'),
+   h('input',{class:'inp',id:'truid',type:'number',placeholder:'شناسه عددی گیرنده'}),h('input',{class:'inp',id:'tramt',type:'number',placeholder:'مبلغ انتقال'}),
+   pb('ارسال انتقال',transfer,'pink',E.vs),pb('برگشت',home,'dark',E.back)));
  }
- async function bankAction(action,input){const amount=Number(input.value);if(!amount||amount<=0)return toast('مبلغ معتبر وارد کن',1);try{const r=await api('/api/myself/bank',{action,amount});toast('عملیات بانکی انجام شد ✅');await load()}catch(e){toast(e.message,1)}}
- async function transfer(){const user_id=Number(box.querySelector('#truid').value),amount=Number(box.querySelector('#tramt').value);if(!user_id||!amount||amount<=0)return toast('شناسه و مبلغ رو وارد کن',1);if(!await ask('انتقال '+num(amount)+' تومان به شناسه '+user_id+' انجام بشه؟'))return;try{await api('/api/myself/transfer',{user_id,amount});toast('انتقال با موفقیت انجام شد ✅');await load()}catch(e){toast(e.message,1)}}
+ async function bankAction(action,input){const amount=Number(input.value);if(!amount||amount<=0)return toast('مبلغ معتبر وارد کن',1);try{await api('/api/myself/bank',{action,amount});toast('عملیات بانکی انجام شد');await load();bank()}catch(e){toast(e.message,1)}}
+ async function transfer(){const user_id=Number(box.querySelector('#truid').value),amount=Number(box.querySelector('#tramt').value);if(!user_id||!amount||amount<=0)return toast('شناسه و مبلغ رو وارد کن',1);if(!await ask('انتقال '+num(amount)+' تومان به شناسه '+user_id+' انجام بشه؟'))return;try{await api('/api/myself/transfer',{user_id,amount});toast('انتقال با موفقیت انجام شد');await load();bank()}catch(e){toast(e.message,1)}}
  async function machine(){if(Number(data.jagh_machine)<50000)return toast('موجودی دستگاه هنوز به ۵۰ هزار تومان نرسیده',1);if(!await ask('موجودی '+num(data.jagh_machine)+' تومانی دستگاه دو برابر و به کیف پول واریز شود؟'))return;try{const r=await api('/api/myself/machine',{});toast('برداشت دوبرابر شد: '+num(r.payout)+' تومان');await load()}catch(e){toast(e.message,1)}}
- function cars(){
-  const items=data.cars||[];const cards=items.map(c=>{const img=h('img',{class:'car-photo',alt:c.name});blob('my-car-'+c.idx,'/api/myself/car-photo?idx='+c.idx).then(u=>{if(u)img.src=u});
-   const parts=Object.entries(c.parts||{}).map(([k,v])=>h('div',{class:'car-part'},h('span',{},({engine:'⚙️ موتور',body:'🛡️ بدنه',tires:'🛞 لاستیک',glass_rims:'🪟 شیشه و رینگ'})[k]||k),h('b',{},v+'/5'),btn('ارتقا',()=>upgrade(c.idx,k),'tiny')));
-   return h('div',{class:'gcard car-card'},img,h('div',{class:'gtitle'},c.emoji+' '+c.name),h('div',{class:'gdesc'},'سطح '+c.level+' • صندوق درآمد: '+num(c.pending)+' تومان'),h('div',{class:'car-parts'},...parts),btn('💰 جمع‌آوری درآمد',()=>collectCar(c.idx),'self-action'));
-  });
-  box.replaceChildren(h('div',{class:'ghead'},'🚗 ماشین‌های من'),...(cards.length?cards:[h('div',{class:'gcard'},'هنوز ماشینی نخریدی. برای خرید ماشین از بخش گاراژ ربات استفاده کن.')]),btn('← برگشت',home,'self-back'));
+ function cars(prev){
+  const items=data.cars||[];
+  if(!items.length){box.replaceChildren(title('ماشین من'),h('div',{class:'gcard'},h('div',{class:'gdesc'},'هنوز ماشینی نخریدی. تو گروه بنویس «گاراژ» و اولین ماشینت رو بخر.')),pb('برگشت',home,'dark',E.back));return}
+  const c=items.reduce((a,b)=>b.idx>a.idx?b:a);
+  const col=prev==null?c.color:prev;
+  const img=h('img',{class:'car-photo',alt:c.name});
+  blob('mycar-'+c.idx+'-'+col,'/api/myself/car-photo?idx='+c.idx+'&color='+col).then(u=>{if(u)img.src=u});
+  const L={engine:['موتور',E.engine],body:['بدنه',E.body],tires:['لاستیک‌ها',E.tires],glass_rims:['شیشه و رینگ',E.glass]};
+  const parts=Object.keys(c.parts||{}).map(k=>{const lv=c.parts[k],cost=(c.costs||{})[k],m=L[k]||[k,E.engine];
+   return h('div',{class:'car-part'},h('span',{class:'cpn'},ceI(m[1],20),m[0]),h('b',{},lv+'/'+data.car_max),cost?pb(num(cost)+' ارتقا',()=>upgrade(c.idx,k),'green sm'):h('span',{class:'cpmax'},ceI(E.trophy,22)))});
+  const cols=data.car_colors||[];
+  const sw=cols.map((cc,i)=>h('button',{class:'swatch'+(i===col?' on':''),style:'background:rgb('+cc.rgb.join(',')+')',title:cc.name,onclick:()=>cars(i)},i===c.color?ceI(E.trophy,16):null));
+  const confirmBox=(prev!=null&&prev!==c.color)?h('div',{},h('div',{class:'gdesc'},'پیش‌نمایش رنگ «'+cols[prev].name+'» • هزینه: '+num(data.car_color_price)+' تومان'),pb('تایید و پرداخت',()=>buyColor(c.idx,prev),'green',E.money),pb('انصراف',()=>cars(),'dark',E.back)):null;
+  box.replaceChildren(title('ماشین من'),h('div',{class:'gcard car-card'},img,h('div',{class:'gtitle'},c.name),
+   h('div',{class:'gdesc'},'سطح '+c.level+' • درآمد ساعتی: '+num(c.hourly)+' تومان • رنگ: '+(cols[c.color]?cols[c.color].name:'')),
+   h('div',{class:'gtitle sm'},'ارتقای قطعات'),h('div',{class:'car-parts'},parts),
+   h('div',{class:'gtitle sm'},'رنگ ماشین'),h('div',{class:'swatches'},sw),confirmBox,
+   pb('جمع‌آوری درآمد · '+num(c.pending)+' تومان',()=>collectCar(c.idx),'gold',E.money)),
+   pb('برگشت',home,'dark',E.back));
  }
  async function collectCar(idx){try{const r=await api('/api/myself/car/collect',{idx});toast('درآمد '+num(r.amount)+' تومان جمع شد');await load();cars()}catch(e){toast(e.message,1)}}
  async function upgrade(idx,part){if(!await ask('این قطعه ارتقا داده شود؟ هزینه از کیف پول کم می‌شود.'))return;try{await api('/api/myself/car/upgrade',{idx,part});toast('ارتقا انجام شد');await load();cars()}catch(e){toast(e.message,1)}}
- function powers(){box.replaceChildren(h('div',{class:'ghead'},'💪 قدرت‌ها'),h('div',{class:'gcard'},h('div',{class:'gtitle'},'🕵️ جاسوسی'),h('div',{class:'gdesc'},'با خرید قابلیت جاسوسی، اطلاعات و فعالیت کاربر را در گروه بررسی کن.'),h('div',{class:'gtitle'},'🤛 قدرت دست'),h('div',{class:'gdesc'},'دستت را تا ۵ سطح ارتقا بده تا زمان انتظار جق کمتر شود.'),h('div',{class:'gtitle'},'🥷 دزدی'),h('div',{class:'gdesc'},'در گروه روی پیام کاربر ریپلای کن و «دزدی» را بفرست.'),btn('📋 کپی دستور خرید جاسوسی',()=>copy('خرید جاسوسی'),'self-action'),btn('📋 کپی دستور دست',()=>copy('دست'),'self-action'),btn('📋 کپی دستور دزدی',()=>copy('دزدی'),'self-action'),btn('← برگشت',home,'self-back')))}
- function settings(){box.replaceChildren(h('div',{class:'ghead'},'⚙️ تنظیمات'),h('div',{class:'gcard'},h('div',{class:'gtitle'},'انتخاب جنسیت کاراکتر'),btn('🧔 مرد',()=>gender('m'),'self-action'),btn('👩 زن',()=>gender('f'),'self-action'),h('div',{class:'gdivider'}),btn('📖 راهنما',()=>toast('راهنمای کامل در بخش راهنمای ربات موجود است'),'self-action'),btn('← برگشت',home,'self-back')))}
+ async function buyColor(idx,color){try{await api('/api/myself/car/color',{idx,color});toast('رنگ جدید خریداری و اعمال شد');await load();cars()}catch(e){toast(e.message,1)}}
+ function powers(){box.replaceChildren(title('قدرت‌ها'),h('div',{class:'gcard'},
+  h('div',{class:'gk'},ceI(E.spy,22),h('div',{class:'gtitle'},'جاسوسی')),h('div',{class:'gdesc'},'با خرید قابلیت جاسوسی، اطلاعات و فعالیت کاربر را در گروه بررسی کن.'),
+  h('div',{class:'gk',style:'margin-top:12px'},ceI(E.hand,22),h('div',{class:'gtitle'},'قدرت دست')),h('div',{class:'gdesc'},'دستت را تا ۵ سطح ارتقا بده تا زمان انتظار جق کمتر شود.'),
+  h('div',{class:'gk',style:'margin-top:12px'},ceI(E.theft,22),h('div',{class:'gtitle'},'دزدی')),h('div',{class:'gdesc'},'در گروه روی پیام کاربر ریپلای کن و «دزدی» را بفرست.'),
+  pb('کپی دستور خرید جاسوسی',()=>copy('خرید جاسوسی'),'blue',E.spy),pb('کپی دستور دست',()=>copy('دست'),'green',E.hand),pb('کپی دستور دزدی',()=>copy('دزدی'),'red',E.theft),pb('برگشت',home,'dark',E.back)))}
+ function settings(){box.replaceChildren(title('تنظیمات'),h('div',{class:'gcard'},h('div',{class:'gtitle'},'انتخاب جنسیت کاراکتر'),
+  pb('مرد',()=>gender('m'),'blue'),pb('زن',()=>gender('f'),'pink'),h('div',{class:'gdivider'}),
+  pb('راهنما',()=>toast('راهنمای کامل در بخش راهنمای ربات موجود است'),'green',svgIc('gear',22)),pb('برگشت',home,'dark',E.back)))}
  async function gender(g){try{await api('/api/myself/gender',{gender:g});toast('تنظیمات ذخیره شد');await load()}catch(e){toast(e.message,1)}}
  load().catch(e=>box.replaceChildren(h('div',{class:'empty err'},e.message)));
  root.append(box);return root;
@@ -2234,6 +2330,7 @@ async function bootTabs(){
   openTab('games');
  }
 }
+document.querySelectorAll('#tabs i[data-ce]').forEach(i=>i.append(ceI(i.dataset.ce,26)));
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>openTab(b.dataset.k));
 bootTabs();
 </script></body></html>
@@ -3272,32 +3369,39 @@ async def _social_room_react(b,user):
 
 
 
+async def _myself_cars(uid):
+    out = []
+    for i, car in (await _owned_cars(uid)).items():
+        i = int(i)
+        parts, costs = {}, {}
+        for k, (_l, _ic, col) in CAR_PARTS.items():
+            lv = int(car[col] or 0)
+            parts[k] = lv
+            costs[k] = car_upgrade_cost(i, lv) if lv < CAR_MAX_LEVEL else None
+        out.append({"idx": i, "name": CARS[i][0], "emoji": CARS[i][2], "color": int(car["color"] or 0),
+                    "level": int(car["level"] or 1), "pending": int(car["pending_profit"] or 0),
+                    "hourly": car_profit(i, car), "parts": parts, "costs": costs})
+    return out
+
+
 async def _g_myself(qs, user):
     uid = int(user["id"])
     r = await pool.fetchrow(
-        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender "
+        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count "
         "FROM users u WHERE u.user_id=$1", uid)
     if not r:
         raise _ApiError("اول ربات رو استارت کن تا پروفایلت ساخته بشه")
-    gender = r["gender"] or "m"
-    lvl = level_for(int(r["jaghs"] or 0))
-    photo = CHAR_PHOTOS.get((gender, lvl))
-    photo_url = None
-    if photo and BOT_REF is not None:
-        try:
-            photo_url = await _ttl(f"charphoto:{gender}:{lvl}", 300, lambda: _download(photo))
-            if photo_url:
-                # endpoint serves the downloaded bytes; keep only a stable URL in JSON
-                photo_url = f"/api/myself/photo?g={gender}&l={lvl}"
-        except Exception:
-            photo_url = None
+    gender = r["gender"] if r["gender"] in ("m", "f") else "m"
+    job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0))
+    lvl = JOBS[gender][job[0]][1] if job else level_for(int(r["jaghs"] or 0))
+    photo_url = f"/api/myself/photo?l={lvl}&v={int(time.time() // 300)}"
     pocket = int(r["balance"] or 0)
     bank = int(r["bank_balance"] or 0)
     return _j({"id":uid,"name":r["name"] or user.get("first_name") or "کاربر",
-               "gender":gender,"level":lvl,"character":CHARACTERS.get(gender,CHARACTERS["m"])[lvl-1][0],
+               "gender":gender,"level":lvl,"job":(job[1] if job else "بیکار"),"character":CHARACTERS.get(gender,CHARACTERS["m"])[lvl-1][0],
                "energy":round(float(r["energy"] or 0),1),"bank":bank,"pocket":pocket,
                "total_assets":pocket+bank,"jaghs":int(r["jaghs"] or 0),"jagh_machine":int(await pool.fetchval("SELECT jagh_machine FROM users WHERE user_id=$1",uid) or 0),"photo":photo_url,
-               "cars":[{"idx":int(i),"name":CARS[int(i)][0],"emoji":CARS[int(i)][2],"color":int(car["color"] or 0),"level":int(car["level"] or 1),"pending":int(car["pending_profit"] or 0),"parts":{k:int(car[col] or 0) for k,(_label,_ico,col) in CAR_PARTS.items()}} for i,car in (await _owned_cars(uid)).items()]})
+               "cars":await _myself_cars(uid),"car_colors":[{"name":n,"rgb":list(rgb)} for n,_i,rgb in CAR_COLORS],"car_color_price":CAR_COLOR_PRICE,"car_max":CAR_MAX_LEVEL})
 
 
 async def _p_myself_bank(b, user):
@@ -3390,23 +3494,51 @@ async def _p_myself_gender(b, user):
     return _j({"ok":True,"gender":gender})
 
 
+async def _p_myself_car_color(b, user):
+    uid=int(user["id"]); idx=_int(b.get("idx"),None,0,len(CARS)-1); color=_int(b.get("color"),None,0,len(CAR_COLORS)-1)
+    if idx is None or color is None: raise _ApiError("رنگ یا ماشین نامعتبره")
+    async with pool.acquire() as c:
+        async with c.transaction():
+            car=await c.fetchrow("SELECT color FROM cars WHERE user_id=$1 AND car_idx=$2 FOR UPDATE",uid,idx)
+            if not car: raise _ApiError("این ماشین رو نداری")
+            if int(car["color"] or 0)==color: raise _ApiError("ماشینت همین رنگ رو داره")
+            paid=await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance",CAR_COLOR_PRICE,uid)
+            if paid is None: raise _ApiError(f"موجودی کافی نیست؛ هزینه {CAR_COLOR_PRICE:,} تومان")
+            await c.execute("UPDATE cars SET color=$1 WHERE user_id=$2 AND car_idx=$3",color,uid,idx)
+    return _j({"ok":True,"balance":int(paid),"color":color})
+
+
 async def _g_myself_car_photo(qs, user):
     uid=int(user["id"]); idx=_int(qs.get("idx"),None,0,len(CARS)-1)
     if idx is None: return 404,"text/plain",b"not found",{}
     row=await pool.fetchrow("SELECT color FROM cars WHERE user_id=$1 AND car_idx=$2",uid,idx)
     if not row: return 404,"text/plain",b"not found",{}
-    photo=await _car_photo(idx,int(row["color"] or 0))
+    pc=_int(qs.get("color"),None,0,len(CAR_COLORS)-1)
+    photo=await _car_photo(idx,pc if pc is not None else int(row["color"] or 0))
     if not photo: return 404,"text/plain",b"not found",{}
     data=photo.getvalue(); return 200,"image/jpeg",data,{"Cache-Control":"private, max-age=300"}
 
 
 async def _g_myself_photo(qs, user):
     uid=int(user["id"])
-    r=await pool.fetchrow("SELECT gender,jaghs FROM users WHERE user_id=$1",uid)
+    r=await pool.fetchrow("SELECT gender,jaghs,work_count,balance,bank_balance FROM users WHERE user_id=$1",uid)
     if not r: return 404,"text/plain",b"not found",{}
-    gender=r["gender"] or "m"; lvl=level_for(int(r["jaghs"] or 0)); fid=CHAR_PHOTOS.get((gender,lvl))
-    if not fid or BOT_REF is None: return 404,"text/plain",b"not found",{}
-    data=await _download(fid); typ=_sniff_image(data) if data else None
+    gender=r["gender"] if r["gender"] in ("m","f") else "m"
+    job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0))
+    lvl=JOBS[gender][job[0]][1] if job else level_for(int(r["jaghs"] or 0))
+    data,typ=b"",None
+    fid=CHAR_PHOTOS.get((gender,lvl))
+    if fid and BOT_REF is not None:
+        try:
+            data=await _download(fid); typ=_sniff_image(data) if data else None
+        except Exception:
+            data,typ=b"",None
+    if not typ:
+        try:
+            bio=await asyncio.to_thread(render_card_image,gender,lvl,int(r["balance"] or 0)+int(r["bank_balance"] or 0))
+            if bio: data=bio.getvalue(); typ="image/jpeg"
+        except Exception:
+            log.warning("myself card render failed",exc_info=True)
     if not typ: return 404,"text/plain",b"not found",{}
     return 200,typ,data,{"Cache-Control":"private, max-age=300"}
 
@@ -3433,8 +3565,8 @@ MINI_CRASH_RATE = 0.12         # ضریب = e^(RATE × ثانیه)؛ از x1.00 
 MINI_CRASH_EDGE = 0.95         # بخش اصلی توزیع انفجار؛ پایین‌تر = سخت‌تر
 MINI_CRASH_EARLY = 0.08        # احتمال انفجار زودهنگام (بین x1.00 تا x1.19)
 MINI_CRASH_MAX = 100.0
-MINI_CRASH_DELAY = 0.8         # ثانیه‌ی آماده‌باش قبل از پرواز
-MINI_MINES_CELLS = 21          # دقیقاً مثل خودِ ربات (MINES_CELLS)
+MINI_CRASH_DELAY = 7.0         # ثانیه‌ی آماده‌باش قبل از پرواز
+MINI_MINES_CELLS = 25          # دقیقاً مثل خودِ ربات (MINES_CELLS)
 MINI_MINES_COUNT = 3           # دقیقاً مثل خودِ ربات (MINES_COUNT)
 MINI_MINES_MAXMULT = 3.05      # ضریب خانه‌ی امن هجدهم؛ بهش برسه خودکار برداشت میشه
 _MINI_LOCKS: dict[int, asyncio.Lock] = {}
@@ -3595,6 +3727,8 @@ async def _p_game_crash_cashout(b, user):
         if not row or row["kind"] != "crash":
             raise _ApiError("بازی فعالی نداری.")
         st, bet = json.loads(row["state"]), int(row["bet"])
+        if time.time() < st["t0"]:
+            raise _ApiError("موشک هنوز پرواز نکرده؛ صبر کن شمارش ۷ ثانیه‌ای تموم شه.")
         res, m = _mini_crash_eval(st, True)
         return _j(await _mini_crash_finish(uid, bet, st, res, m))
 
@@ -3713,7 +3847,7 @@ _POST = {
     "/api/bc/start": _p_bc_start,
     "/api/myself/bank": _p_myself_bank, "/api/myself/transfer": _p_myself_transfer,
     "/api/myself/machine": _p_myself_machine, "/api/myself/car/collect": _p_myself_car_collect,
-    "/api/myself/car/upgrade": _p_myself_car_upgrade, "/api/myself/gender": _p_myself_gender,
+    "/api/myself/car/upgrade": _p_myself_car_upgrade, "/api/myself/car/color": _p_myself_car_color, "/api/myself/gender": _p_myself_gender,
 }
 
 
@@ -7081,7 +7215,7 @@ DICE_DELETE_AFTER = 5  # چند ثانیه بعد از اعلام نتیجه، �
 TABLE_TTL = 600       # میز بعد از ۱۰ دقیقه منقضی میشه
 BET_CHOICES = [10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000]
 MINES_COUNT = 3
-MINES_CELLS = 21
+MINES_CELLS = 25
 MINES_BOMB_EID = "5256147609243889028"
 MINES_TILE_EID = "5256156224948284902"
 MINES_GEM_EID = "6170417452162225096"
@@ -7267,7 +7401,7 @@ def panel_game(uid: int, game: str):
                  "ضریب از ‎−۱٫۰۰ شروع می‌شه و به سمت مثبت‌ها می‌ره. قبل از شروع یه ضریب هدف (حداقل ۱٫۲×) انتخاب می‌کنی و اگه موشک بهش برسه خودکار برداشت می‌شه؛ ولی هر لحظه ممکنه سقوط کنه و شرطت بسوزه!\n"
                  "⚠️ سخته! لحظه‌ی سقوط غیرقابل پیش‌بینیه و خیلی وقت‌ها قبل از ۱٫۲ (حتی تو ضریب منفی) اتفاق می‌افته.\n🔒 فعلاً فقط برای پشتیبان‌ها فعاله.")
     elif game == "mines":
-        rules = (f"{MINES_BOMB_CE} مین — بازی تک‌نفره\n\n۲۱ خانه وجود داره و ۳ خانه بمبه. هر خانه امن ضریب رو بیشتر می‌کنه. با پیدا کردن بمب شرطت از دست میره؛ هر زمان خواستی برداشت کن تا شرط × ضریب به حسابت برگرده. ضریب نهایی در خانه امن هجدهم ۳٫۰۵× است.")
+        rules = (f"{MINES_BOMB_CE} مین — بازی تک‌نفره\n\n۲۵ خانه وجود داره و ۳ خانه بمبه. هر خانه امن ضریب رو بیشتر می‌کنه. با پیدا کردن بمب شرطت از دست میره؛ هر زمان خواستی برداشت کن تا شرط × ضریب به حسابت برگرده. ضریب نهایی در آخرین خانه امن (بیست‌ودوم) ۳٫۰۵× است.")
     else:
         rules = ("🎰 اسلات\n\n۱ نفره: روی یکی از نمادها (7️⃣ 🔔 🍋 🍇) شرط می‌بندی و بعد خودت روی پیام ربات ریپلای می‌کنی و 🎰 می‌فرستی.\n"
                  "هر سه تا نماد تو یکی باشه ×۳ | دوتاش ×۱٫۷ | فقط یکیش ×۰٫۳ | هیچی نیاد می‌بازی.\n\n"
@@ -7947,7 +8081,7 @@ async def create_table(bot, chat_id: int, user, game: str, bet: int, reply_to: i
 
 
 def mines_multiplier(safe_count: int) -> float:
-    """ضریب پلکانی تا ۳٫۰۵ برابر در خانه امن هجدهم؛ ۳ بمب در ۲۱ خانه."""
+    """ضریب پلکانی تا ۳٫۰۵ برابر در آخرین خانه امن؛ ۳ بمب در ۲۵ خانه."""
     if safe_count <= 0:
         return 1.0
     return round(1.0 + 2.05 * (safe_count / (MINES_CELLS - MINES_COUNT)), 2)
@@ -7958,10 +8092,10 @@ _BLANK = "\u2800"  # متن نامرئی دکمه؛ فقط ایموجی پرمی
 
 def mines_keyboard(uid: int, game_id: str, opened: set[int], bombs: set[int], finished=False, can_cash=True):
     rows = []
-    for r in range(7):
+    for r in range(5):
         row = []
-        for c in range(3):
-            i = c * 7 + r
+        for c in range(5):
+            i = r * 5 + c
             if i in opened:
                 row.append(btn(_BLANK, "danger" if i in bombs else "success", icon=MINES_BOMB_EID if i in bombs else MINES_GEM_EID, callback_data=f"cz:mx:{uid}:{game_id}:{i}"))
             elif finished and i in bombs:
@@ -8005,7 +8139,7 @@ async def start_mines(bot, context, chat_id, user, bet, q=None, reply_to=None):
     state = {"uid": user.id, "bet": bet, "bombs": set(random.sample(range(MINES_CELLS), MINES_COUNT)), "opened": set(), "chat_id": chat_id, "message_id": q.message.message_id if q else None, "finished": False}
     context.application.bot_data.setdefault("mines_games", {})[game_id] = state
     busy.add(user.id)
-    text = f"{MINES_GEM_CE} بازی مین\nشرط: {bet:,} تومن\n۳ بمب بین ۲۱ خانه پنهانه. خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.\nضریب فعلی: ۱×"
+    text = f"{MINES_GEM_CE} بازی مین\nشرط: {bet:,} تومن\n۳ بمب بین ۲۵ خانه پنهانه. خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.\nضریب فعلی: ۱×"
     kb = mines_keyboard(user.id, game_id, state["opened"], state["bombs"])
     if q: await edit_html(q, B(text), kb)
     else: await send_html(bot, chat_id, B(text), reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None, reply_markup=kb)
@@ -8043,10 +8177,10 @@ async def mines_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts):
             row = await get_user(uid)
             rec = await update_group_record(st["chat_id"], "mines", q.from_user, payout)
             await q.answer("همه خانه‌های امن باز شد!")
-            await edit_html(q, B(f"🏆 همه ۱۸ خانه امن رو باز کردی!\nضریب نهایی: ۳٫۰۵×\nپرداخت: {payout:,} تومن{win_lines(payout - st['bet'], payout, row['balance'])}\n{rec}\nمحل بمب‌ها مشخص شد."), mines_keyboard(uid, game_id, st["opened"], st["bombs"], True, False))
+            await edit_html(q, B(f"🏆 همه ۲۲ خانه امن رو باز کردی!\nضریب نهایی: ۳٫۰۵×\nپرداخت: {payout:,} تومن{win_lines(payout - st['bet'], payout, row['balance'])}\n{rec}\nمحل بمب‌ها مشخص شد."), mines_keyboard(uid, game_id, st["opened"], st["bombs"], True, False))
             return
         await q.answer(f"خانه امن! ضریب {mult:g}×")
-        await edit_html(q, B(f"{MINES_GEM_CE} مین\nشرط: {st['bet']:,} تومن\nخانه امن: {count} از ۱۸\nضریب برداشت: {mult:g}×\nمبلغ دریافتی: {int(st['bet']*mult):,} تومن"), mines_keyboard(uid, game_id, st["opened"], st["bombs"]))
+        await edit_html(q, B(f"{MINES_GEM_CE} مین\nشرط: {st['bet']:,} تومن\nخانه امن: {count} از ۲۲\nضریب برداشت: {mult:g}×\nمبلغ دریافتی: {int(st['bet']*mult):,} تومن"), mines_keyboard(uid, game_id, st["opened"], st["bombs"]))
     elif action == "mc":
         st["finished"] = True; _busy(context).discard(uid); _cd_set(context, uid)
         mult = mines_multiplier(len(st["opened"]))
