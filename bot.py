@@ -541,6 +541,7 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS giveaway_entries (gid BIGINT NOT NULL, user_id BIGINT NOT NULL, inviter_id BIGINT, status TEXT NOT NULL DEFAULT 'active', joined_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_check DOUBLE PRECISION NOT NULL DEFAULT 0, PRIMARY KEY(gid, user_id))")
         await c.execute("CREATE INDEX IF NOT EXISTS giveaway_entries_inv_idx ON giveaway_entries (gid, inviter_id)")
         await c.execute("CREATE TABLE IF NOT EXISTS giveaway_posts (gid BIGINT NOT NULL, chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, PRIMARY KEY(gid, chat_id, message_id))")
+        await c.execute("CREATE TABLE IF NOT EXISTS giveaway_sent (gid BIGINT NOT NULL, chat_id BIGINT NOT NULL, PRIMARY KEY(gid, chat_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS purchases (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, amount BIGINT NOT NULL, price BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, file_id TEXT, reviewer BIGINT, reviewed_at DOUBLE PRECISION)")
         # جقستگرام: پروفایل، رسانه، پست، استوری، ری‌اکشن و چت‌روم عمومی
         await c.execute("CREATE TABLE IF NOT EXISTS social_profiles (user_id BIGINT PRIMARY KEY, username TEXT UNIQUE, display_name TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', avatar_media_id BIGINT, created_at DOUBLE PRECISION NOT NULL)")
@@ -7709,7 +7710,7 @@ async def gw_top_text(gid: int) -> str:
     return f"{GW_WIN_CE} <b>برترین‌های قرعه‌کشی</b>\n\n" + "\n".join(lines)
 
 
-def gw_post(g, bot_un: str, entries: int | None = None):
+def gw_post(g, bot_un: str, entries: int | None = None, plain: bool = False):
     """متن و دکمه‌ی پستی که تو گپ‌ها/کانال‌ها/پیوی‌ها فرستاده میشه."""
     chs = _gw_channels(g)
     cap = f"{entries:,}/{g['max_users']:,}" if (g["max_users"] and entries is not None) else (f"{g['max_users']:,} نفر" if g["max_users"] else "نامحدود")
@@ -7722,6 +7723,12 @@ def gw_post(g, bot_un: str, entries: int | None = None):
         text += "\n📢 شرط شرکت: عضویت در " + "، ".join(chs) + "\n"
     text += (f"\n{GW_TICKET_CE} با لینک اختصاصی‌ت دوستات رو دعوت کن؛ هر نفری که وارد شه یه تیکت بیشتر برات می‌شه (اگه از کانال‌ها لفت بده تیکتش حذف می‌شه)."
              f"\n{GW_WIN_CE} هر کس بیشترین تیکت رو جمع کنه برنده‌ست!")
+    if plain:   # کانال‌ها ایموجی پرمیوم/آیکن دکمه رو قبول نمی‌کنن؛ نسخه‌ی ساده
+        text = re.sub(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', r"\1", text)
+        rows = [[InlineKeyboardButton("🎁 شرکت در قرعه‌کشی", url=f"https://t.me/{bot_un}?start=gw_{g['id']}")]]
+        if g["top_public"]:
+            rows.append([InlineKeyboardButton("🏆 لیست برترین‌ها", url=f"https://t.me/{bot_un}?start=gwtop_{g['id']}")])
+        return text, InlineKeyboardMarkup(rows)
     rows = [[btn("🎁 شرکت در قرعه‌کشی", "success", url=f"https://t.me/{bot_un}?start=gw_{g['id']}")]]
     if g["top_public"]:
         rows.append([btn("لیست برترین‌ها", "primary", icon=GW_WIN_EID, url=f"https://t.me/{bot_un}?start=gwtop_{g['id']}")])
@@ -8093,45 +8100,107 @@ async def giveaway_loop(app):
 
 
 # ───── انتشار ─────
-async def gw_publish(bot, gid: int, admin_chat: int):
+async def gw_send_to(bot, gid: int, admin_chat: int, kinds: set, resend: bool = False):
+    """kinds ⊆ {"channels", "groups", "users"}. resend=True: فقط به مقصدهایی که هنوز پست بهشون نرفته."""
     g = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", gid)
+    if not g:
+        return
     un = await _gw_bot_username(bot)
-    text, kb = gw_post(g, un)
-    targets: list[tuple] = []   # (chat_id, ثبت‌شود برای پایان؟، گپ هست؟ → پین بشه)
-    if g["send_channels"]:
-        targets += [(c, True, False) for c in _gw_channels(g)]
-    if g["send_groups"]:
-        targets += [(r["chat_id"], True, True) for r in await pool.fetch("SELECT chat_id FROM chats")]
-    if g["send_users"]:
-        targets += [(r["user_id"], False, False) for r in await pool.fetch("SELECT user_id FROM users WHERE started")]
-    seen, ok, fail, pinned = set(), 0, 0, 0
-    for cid, keep, is_group in targets:
+    variants = [gw_post(g, un), gw_post(g, un, plain=True)]
+    done = {r["chat_id"] for r in await pool.fetch("SELECT chat_id FROM giveaway_sent WHERE gid=$1", gid)} if resend else set()
+    targets: list[tuple] = []   # (chat_id, ثبت‌شود برای پایان؟، گپ هست؟ → پین بشه، نوع)
+    if "channels" in kinds:
+        targets += [(c, True, False, "channels") for c in _gw_channels(g)]
+    if "groups" in kinds:
+        targets += [(r["chat_id"], True, True, "groups") for r in await pool.fetch("SELECT chat_id FROM chats")]
+    if "users" in kinds:
+        targets += [(r["user_id"], False, False, "users") for r in await pool.fetch("SELECT user_id FROM users WHERE started")]
+    stats = {k: {"ok": 0, "fail": 0, "skip": 0} for k in ("channels", "groups", "users")}
+    errors: list[str] = []
+    pinned = 0
+    seen = set()
+    hard = ("chat not found", "not enough rights", "need administrator", "have no rights", "not a member", "forbidden", "kicked")
+    for cid, keep, is_group, kind in targets:
         if cid in seen:
             continue
         seen.add(cid)
-        for _ in range(2):
+        st = stats[kind]
+        if resend:
+            real = cid
+            if isinstance(cid, str):   # @یوزرنیم کانال → آیدی عددی
+                try:
+                    real = (await bot.get_chat(cid)).id
+                except Exception:
+                    real = None
+            if real in done:
+                st["skip"] += 1
+                continue
+        sent, err, vi = None, None, 0
+        for _ in range(4):
+            text, kb = variants[vi]
             try:
-                m = await bot.send_message(cid, text, parse_mode="HTML", reply_markup=kb)
-                if keep:
-                    await pool.execute("INSERT INTO giveaway_posts (gid, chat_id, message_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", gid, m.chat_id, m.message_id)
-                ok += 1
-                if is_group:   # اگه ربات تو اون گپ ادمینه و دسترسی پین داره، همون لحظه پین میشه
-                    try:
-                        await bot.pin_chat_message(m.chat_id, m.message_id, disable_notification=False)
-                        pinned += 1
-                    except Exception:
-                        pass
+                sent = await bot.send_message(cid, text, parse_mode="HTML", reply_markup=kb)
                 break
             except RetryAfter as e:
                 await asyncio.sleep(e.retry_after + 1)
-            except Exception:
-                fail += 1
+            except BadRequest as e:
+                err = e
+                if vi == 0 and not any(h in str(e).lower() for h in hard):
+                    vi = 1   # احتمالاً ایموجی پرمیوم/آیکن دکمه؛ با نسخه‌ی ساده دوباره تلاش میشه
+                    continue
                 break
+            except Exception as e:
+                err = e
+                break
+        if sent is None:
+            st["fail"] += 1
+            if kind != "users" and len(errors) < 10:
+                errors.append(f"• {cid}: {err}")
+            await asyncio.sleep(0.06)
+            continue
+        st["ok"] += 1
+        try:
+            if keep:
+                await pool.execute("INSERT INTO giveaway_posts (gid, chat_id, message_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", gid, sent.chat_id, sent.message_id)
+            await pool.execute("INSERT INTO giveaway_sent (gid, chat_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", gid, sent.chat_id)
+        except Exception:
+            log.warning("giveaway post save failed", exc_info=True)
+        if is_group:   # اگه ربات تو اون گپ ادمینه و دسترسی پین داره، همون لحظه پین میشه
+            try:
+                await bot.pin_chat_message(sent.chat_id, sent.message_id, disable_notification=False)
+                pinned += 1
+            except Exception:
+                pass
         await asyncio.sleep(0.06)
+    names = {"channels": "کانال‌ها", "groups": "گپ‌ها", "users": "پیوی کاربرها"}
+    lines = [(f"✅ قرعه‌کشی «{g['name']}» منتشر شد." if not resend else f"📤 ارسال قرعه‌کشی «{g['name']}» تموم شد.")]
+    for k in ("channels", "groups", "users"):
+        if k in kinds:
+            x = stats[k]
+            lines.append(f"{names[k]}: ✅ {x['ok']:,} • ❌ {x['fail']:,}" + (f" • ⏭ {x['skip']:,} (قبلاً رفته بود)" if x["skip"] else ""))
+    if "groups" in kinds:
+        lines.append(f"پین‌شده تو گپ‌ها: {pinned:,}")
+    if errors:
+        lines.append("\nخطاها:\n" + "\n".join(errors))
+        if any(any(h in e.lower() for h in hard[:5]) for e in errors):
+            lines.append("\n⚠️ برای کانال‌ها: ربات باید تو کانال ادمین باشه و دسترسی «ارسال پیام» داشته باشه (یوزرنیم کانال هم باید درست باشه).")
+    lines.append(f"\nپایان: {_gw_fmt_time(g['ends_at'])} (تهران)\nمدیریتش: /admin ← 🎁 قرعه‌کشی")
     try:
-        await bot.send_message(admin_chat, f"✅ قرعه‌کشی «{g['name']}» منتشر شد.\nارسال موفق: {ok:,} • ناموفق: {fail:,} • پین‌شده تو گپ‌ها: {pinned:,}\nپایان: {_gw_fmt_time(g['ends_at'])} (تهران)\n\nمدیریتش: /admin ← 🎁 قرعه‌کشی")
+        await bot.send_message(admin_chat, "\n".join(lines))
     except Exception:
         pass
+
+
+async def gw_publish(bot, gid: int, admin_chat: int):
+    g = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", gid)
+    kinds = set()
+    if g["send_channels"]:
+        kinds.add("channels")
+    if g["send_groups"]:
+        kinds.add("groups")
+    if g["send_users"]:
+        kinds.add("users")
+    await gw_send_to(bot, gid, admin_chat, kinds)
 
 
 # ───── پنل پشتیبانی ─────
@@ -8162,16 +8231,32 @@ def gw_draft_kb(d: dict):
     ])
 
 
-async def gw_view(g):
+async def gw_view(g, bot=None):
     n = await pool.fetchval("SELECT count(*) FROM giveaway_entries WHERE gid=$1 AND status='active'", g["id"])
     left = await pool.fetchval("SELECT count(*) FROM giveaway_entries WHERE gid=$1 AND status='left'", g["id"])
     st = {"active": "🟢 فعال", "ended": "🏁 تموم‌شده", "cancelled": "⛔ لغوشده", "draft": "✏️ پیش‌نویس"}.get(g["status"], g["status"])
-    text = (f"🎁 {g['name']} (#{g['id']})\nوضعیت: {st}\nجایزه: {g['prize']}\nبرنده: {g['winners']} • ظرفیت: {g['max_users'] or 'نامحدود'}\n"
+    un = _GW_BOT_UN
+    if not un and bot is not None:
+        try:
+            un = await _gw_bot_username(bot)
+        except Exception:
+            un = ""
+    link = f"https://t.me/{un}?start=gw_{g['id']}" if un else ""
+    e = html.escape
+    text = (f"🎁 {e(g['name'])} (#{g['id']})\nوضعیت: {st}\nجایزه: {e(g['prize'])}\nبرنده: {g['winners']} • ظرفیت: {g['max_users'] or 'نامحدود'}\n"
             f"ثبت‌نامی فعال: {n:,} • لفت‌داده: {left:,}\nپایان: {_gw_fmt_time(g['ends_at'])} (تهران)\n"
-            f"کانال‌ها: {', '.join(_gw_channels(g)) or '—'}\nلیست برترین‌ها برای همه: {'✅' if g['top_public'] else '❌'}")
-    rows = [[btn("🏆 لیست برترین‌ها", "primary", callback_data=f"ad:gw:top:{g['id']}"),
-             btn(("🌐 برترین‌ها: همه ✅" if g["top_public"] else "🌐 برترین‌ها: فقط پشتیبان"), "primary", callback_data=f"ad:gw:pt:{g['id']}")]]
+            f"کانال‌ها: {e(', '.join(_gw_channels(g)) or '—')}\nلیست برترین‌ها برای همه: {'✅' if g['top_public'] else '❌'}")
+    if link:
+        text += f"\n\n🔗 لینک قرعه‌کشی:\n<code>{link}</code>"
+    rows = []
+    if link and g["status"] == "active":
+        rows.append([btn("🔗 باز کردن لینک قرعه‌کشی", "primary", url=link)])
+    rows.append([btn("🏆 لیست برترین‌ها", "primary", callback_data=f"ad:gw:top:{g['id']}"),
+                 btn(("🌐 برترین‌ها: همه ✅" if g["top_public"] else "🌐 برترین‌ها: فقط پشتیبان"), "primary", callback_data=f"ad:gw:pt:{g['id']}")])
     if g["status"] == "active":
+        rows.append([btn("📨 ارسال به پیوی کاربرها", "primary", callback_data=f"ad:gw:snd:{g['id']}:u"),
+                     btn("👥 ارسال به گپ‌ها", "primary", callback_data=f"ad:gw:snd:{g['id']}:g")])
+        rows.append([btn("📢 ارسال به کانال‌های اجباری", "primary", callback_data=f"ad:gw:snd:{g['id']}:c")])
         rows.append([btn("🎲 پایان و قرعه‌کشی همین الان", "success", callback_data=f"ad:gw:end:{g['id']}"),
                      btn("🗑 لغو قرعه‌کشی", "danger", callback_data=f"ad:gw:cx:{g['id']}")])
     rows.append([btn("🔙 قرعه‌کشی‌ها", callback_data="ad:gw:list")])
@@ -8214,8 +8299,36 @@ async def gw_admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
                 try: await context.bot.edit_message_reply_markup(p["chat_id"], p["message_id"], reply_markup=None)
                 except Exception: pass
         g = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", gid)
-        text, kb = await gw_view(g)
-        await q.edit_message_text(text, reply_markup=kb)
+        text, kb = await gw_view(g, context.bot)
+        try:
+            await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+        except BadRequest as e:
+            if "not modified" not in str(e).lower():
+                raise
+    elif sub == "snd":
+        gid = int(parts[3])
+        kind = {"u": "users", "g": "groups", "c": "channels"}.get(parts[4] if len(parts) > 4 else "")
+        g = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", gid)
+        if not g or g["status"] != "active" or not kind:
+            await context.bot.send_message(q.message.chat_id, "این قرعه‌کشی فعال نیست.")
+            return
+        running = context.application.bot_data.setdefault("gw_sending", set())
+        if (gid, kind) in running:
+            await context.bot.send_message(q.message.chat_id, "⏳ همین الان داره ارسال میشه؛ صبر کن تا گزارشش بیاد.")
+            return
+        running.add((gid, kind))
+        fa = {"users": "پیوی کاربرها", "groups": "گپ‌ها", "channels": "کانال‌های اجباری"}[kind]
+        await context.bot.send_message(q.message.chat_id, f"📤 ارسال قرعه‌کشی #{gid} به {fa} شروع شد (فقط به کسایی که قبلاً نرفته)؛ وقتی تموم شد گزارش می‌دم.")
+
+        async def _run():
+            try:
+                await gw_send_to(context.bot, gid, q.message.chat_id, {kind}, resend=True)
+            finally:
+                running.discard((gid, kind))
+
+        task = asyncio.create_task(_run())
+        context.application.bot_data.setdefault("tasks", set()).add(task)
+        task.add_done_callback(lambda t: context.application.bot_data["tasks"].discard(t))
     elif sub == "t":
         st = context.user_data.get("adm")
         if not st or st.get("act") != "gw" or st.get("step") != "confirm":
@@ -11921,7 +12034,7 @@ def main():
         .build()
     )
     app.add_handler(TypeHandler(Update, gate), group=-1)
-    app.add_handler(CallbackQueryHandler(self_panel_cb, pattern=r"^sp:(home|bank|robbery|cars|hand|casino|settings|gender|guide|transfer):\d+$"))
+    app.add_handler(CallbackQueryHandler(self_panel_cb, pattern=r"^sp:(home|bank|robbery|cars|powers|spy|theft|hand|casino|settings|gender|guide|guide2|transfer):\d+$"))
     app.add_handler(CallbackQueryHandler(hand_upgrade_cb, pattern=r"^sp:upgrade:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(account_transfer_cb, pattern=r"^at:(go|ok|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(guide_callback, pattern=r"^guide:(open|back|p1)$"))
