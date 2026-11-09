@@ -413,6 +413,7 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS rifts (user_lo BIGINT NOT NULL, user_hi BIGINT NOT NULL, ends_at DOUBLE PRECISION NOT NULL, PRIMARY KEY (user_lo, user_hi))")
         await c.execute("CREATE TABLE IF NOT EXISTS rift_log (initiator BIGINT NOT NULL, target BIGINT NOT NULL, day TEXT NOT NULL, cnt INT NOT NULL DEFAULT 0, PRIMARY KEY (initiator, target, day))")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_hug DOUBLE PRECISION NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS jagh_machine BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spouse_id BIGINT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_owned BOOLEAN NOT NULL DEFAULT FALSE")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_day TEXT NOT NULL DEFAULT ''")
@@ -3027,10 +3028,16 @@ BANK_INTEREST_EVERY = 12 * 3600     # هر چند ثانیه
 BANK_INTEREST_NEXT = 0.0            # زمان سود بعدی (توسط حلقه‌ی سود ست میشه)
 
 
-def bank_interest_note() -> str:
+def bank_interest_note(bank: int | None = None) -> str:
     left = BANK_INTEREST_NEXT - time.time()
     tail = f" • سود بعدی: {_duration_fa(int(left) + 1)} دیگه" if BANK_INTEREST_NEXT and left > 0 else ""
-    return f"سود بانک: <b>{BANK_INTEREST_RATE_PCT}٪ هر ۱۲ ساعت</b> روی موجودی بانک{tail}"
+    note = f"سود بانک: <b>{BANK_INTEREST_RATE_PCT}٪ هر ۱۲ ساعت</b> روی موجودی بانک{tail}"
+    if bank is not None:
+        bank = int(bank)
+        profit = (bank * BANK_INTEREST_RATE_PCT) // 100   # دقیقاً مثل فرمول حلقه‌ی سود
+        note += (f"\n{MONEY_CE} سود بعدی تو: <b>+{profit:,} تومان</b>"
+                 f"\n{BANK_CE} موجودی بانک بعد از سود: <b>{bank + profit:,} تومان</b>")
+    return note
 
 
 async def bank_interest_loop():
@@ -3092,7 +3099,7 @@ async def show_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{BANK_CE} موجودی حساب بانکی: <b>{bank:,} تومان</b>\n"
             f"{MONEY_CE} مجموع دارایی: <b>{pocket+bank:,} تومان</b>\n\n"
             f"کارمزد واریز: <b>{BANK_FEE:,} تومان</b> | برداشت بدون کارمزد\n"
-            f"{bank_interest_note()}")
+            f"{bank_interest_note(bank)}")
     kb=InlineKeyboardMarkup([[btn("واریز", "success", callback_data=f"bk:dep:{user.id}"), btn("برداشت", "primary", callback_data=f"bk:wd:{user.id}")]])
     await update.effective_message.reply_text(B(text), parse_mode="HTML", reply_markup=kb)
 
@@ -3567,7 +3574,8 @@ async def self_panel_text(uid: int, name: str = "") -> str:
         f"کاراکتر: {html.escape(char_name)}\n"
         f"💼 شغل: {html.escape(job_name)}\n"
         f"{MONEY_CE} دارایی کل: {total:,} تومان\n"
-        f"{HG_CE} زمان جق: {jagh_t} (هر {_duration_fa(cooldown)})\n\n"
+        f"{HG_CE} زمان جق: {jagh_t} (هر {_duration_fa(cooldown)})\n"
+        f"{jm_status_line(row.get('jagh_machine', 0))}\n\n"
         f"{energy_line(row.get('energy', 0))}\n\n"
         "یکی از بخش‌ها رو انتخاب کن:"
     )
@@ -3645,7 +3653,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "bank":
         row = await get_user(uid); pocket=int(row['balance'] or 0); bank=int(row['bank_balance'] or 0)
         text=(f"{BANK_CE} <b>بانک مرکزی</b>\n\nموجودی بانک: <b>{bank:,} تومان</b>\nپول جیب: <b>{pocket:,} تومان</b>\nمجموع دارایی: <b>{bank+pocket:,} تومان</b>\n\n"
-              f"واریز: <code>واریز 100m</code>\nبرداشت: <code>برداشت 100m</code>\nکارمزد هر واریز: <b>۵٬۰۰۰ تومان</b>؛ برداشت بدون کارمزد.\n{bank_interest_note()}")
+              f"واریز: <code>واریز 100m</code>\nبرداشت: <code>برداشت 100m</code>\nکارمزد هر واریز: <b>۵٬۰۰۰ تومان</b>؛ برداشت بدون کارمزد.\n{bank_interest_note(bank)}")
         await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back)); return
     if action == "robbery":
         text, kb = rob_view(uid, await _rob_profile(uid), time.time())
@@ -4444,6 +4452,9 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if norm_word(text).replace(" ", "").lower() in SHIFT_WORDS:
         await show_shift(update, context)
         return
+    if _word_key(text) in JM_WORDS:
+        await jagh_machine_collect(update, context)
+        return
     if _word_key(text) in TOP_WORDS:
         await top(update, context)
         return
@@ -4519,13 +4530,15 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # آپدیت اتمیک: فقط اگه ۵ دقیقه گذشته باشه پول اضافه میشه
     updated = await pool.fetchrow(
-        "UPDATE users SET balance = balance + $1::bigint, jaghs = jaghs + 1, last_ts = $2::double precision "
-        "WHERE user_id = $3::bigint AND last_ts <= $2::double precision - $4::double precision "
-        "RETURNING balance, jaghs",
+        "WITH o AS (SELECT jagh_machine AS old_m FROM users WHERE user_id = $3::bigint FOR UPDATE) "
+        "UPDATE users SET jagh_machine = LEAST(o.old_m + $1::bigint, $5::bigint), jaghs = jaghs + 1, last_ts = $2::double precision "
+        "FROM o WHERE user_id = $3::bigint AND last_ts <= $2::double precision - $4::double precision "
+        "RETURNING balance, jaghs, jagh_machine, o.old_m",
         amount,
         now,
         user.id,
         float(user_cooldown),
+        JM_CAP,
     )
     if updated is None:
         row = await get_user(user.id)
@@ -4537,6 +4550,13 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = pick_reply(amount, base_amount) + "\n\n" + energy_line(row.get("energy", 0))
     if low_en:
         text += "\n⚠️ انرژیت کمه؛ پول جق کمتر شد! با بغل، بوس یا هدیه انرژی بگیر."
+    _jm_new = int(updated["jagh_machine"]); _jm_added = _jm_new - int(updated["old_m"])
+    if _jm_added <= 0:
+        text += f"\n\n{JM_CE} دستگاه جق پره و پولی بهش اضافه نشد! بنویس «دستگاه جق» تا برداشت کنی."
+    else:
+        text += f"\n\n{JM_CE} +{_jm_added:,} رفت تو دستگاه جق ({_jm_new:,} / {JM_CAP:,})"
+        if _jm_new >= JM_MIN:
+            text += " — آماده‌ی برداشته ✅"
     text += event_banner()
     new_bal = updated["balance"]
     gender = row["gender"]
@@ -8455,9 +8475,10 @@ CAR_MAX_LEVEL = 5
 MAX_LEVEL_EID = "5458653586378469798"   # ایموجی «لول آخر» (فقط ماشین)
 MAX_LEVEL_CE = f'<tg-emoji emoji-id="{MAX_LEVEL_EID}">🏆</tg-emoji>'
 CAR_PAY_EVERY = 3600
+CAR_VAULT_CAP = 100_000_000   # سقف صندوق هر ماشین؛ پر که شد درآمد جمع نمیشه تا برداشت کنی
 CAR_COLOR_PRICE = 20_000_000
 CARS = [
-    ("پراید ۱۳۱", "Pride 131", "🚗", 800_000_000, 500_000),
+    ("پراید ۱۳۱", "Pride 131", "🚗", 100_000_000, 500_000),
     ("Toyota Supra MK5", "Toyota Supra MK5", "🏎️", 1_400_000_000, 1_000_000),
     ("BMW M4 Competition", "BMW M4 Competition", "🚘", 2_000_000_000, 1_200_000),
     ("Lamborghini Huracán", "Lamborghini Huracán", "🏎️", 3_500_000_000, 1_500_000),
@@ -8777,6 +8798,8 @@ async def send_garage_list(bot, chat_id: int, uid: int, reply_to: int | None = N
     row = await get_user(uid)
     bal = row["balance"] if row else 0
     _t, kb = garage_main(uid, bal, owned)
+    if owned:   # فقط جدول؛ بدون دکمه‌ی «ماشین من» و بقیه (خرید ماشین بعدی از پنل ماشین)
+        kb = None
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
     rich_ok = False
     try:
@@ -8788,7 +8811,8 @@ async def send_garage_list(bot, chat_id: int, uid: int, reply_to: int | None = N
     except Exception:
         log.warning("garage sendRichMessage failed, using <pre> table", exc_info=True)
     if rich_ok:
-        await send_html(bot, chat_id, B("🚗 برای دیدن یا خرید، یکی از ماشین‌ها رو انتخاب کن 👇"), reply_markup=kb)
+        if kb is not None:   # هنوز ماشینی نداره: دکمه‌ی خرید اولین ماشین لازمه
+            await send_html(bot, chat_id, B("🚗 برای خرید، اولین ماشین رو انتخاب کن 👇"), reply_markup=kb)
         return
     await send_html(bot, chat_id, garage_pre_text(bal, owned), reply_markup=kb, reply_parameters=rp)
 
@@ -9252,7 +9276,7 @@ async def car_profit_loop():
                     profit = int(profit * CAR_LOW_MULT)
                 async with pool.acquire() as c:
                     async with c.transaction():
-                        moved = await c.fetchval("UPDATE cars SET last_pay=last_pay+$1,pending_profit=pending_profit+$2 WHERE user_id=$3 AND car_idx=$4 AND last_pay=$5 RETURNING 1", hours*CAR_PAY_EVERY, profit, r["user_id"], r["car_idx"], r["last_pay"])
+                        moved = await c.fetchval("UPDATE cars SET last_pay=last_pay+$1,pending_profit=LEAST(pending_profit+$2, $6::bigint) WHERE user_id=$3 AND car_idx=$4 AND last_pay=$5 RETURNING 1", hours*CAR_PAY_EVERY, profit, r["user_id"], r["car_idx"], r["last_pay"], CAR_VAULT_CAP)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -10509,6 +10533,61 @@ def energy_line(energy) -> str:
     return f"{ce('energy', 1, '⚡')} انرژی\n{energy_bar(e)} {_fmt_en(e / ENERGY_MAX * 100)}٪"
 
 
+# ───────── دستگاه جق: پول جق، بوس و بغل میره تو دستگاه؛ با نوشتن «دستگاه جق» برداشت میشه ─────────
+JM_EID = "5190526908462292507"
+JM_CE = f'<tg-emoji emoji-id="{JM_EID}">🎰</tg-emoji>'
+JM_CAP = 1_200_000      # ظرفیت دستگاه (تومن)
+JM_MIN = 50_000         # حداقل موجودی برای برداشت
+JM_WORDS = {"دستگاهجق", "دستگاهجقی"}
+
+
+def jm_status_line(amount: int) -> str:
+    """وضعیت دستگاه برای پنل «خودم»."""
+    amount = int(amount or 0)
+    if amount >= JM_CAP:
+        st = "پره! بنویس «دستگاه جق» ✅"
+    elif amount >= JM_MIN:
+        st = "آماده‌ی برداشته ✅"
+    else:
+        st = f"هنوز آماده نیست ❌ (حداقل {JM_MIN:,} تومن)"
+    return f"{JM_CE} دستگاه جق: {amount:,} / {JM_CAP:,} تومن — {st}"
+
+
+async def jm_add(c, uid: int, amount: int):
+    """پول رو به دستگاه کاربر اضافه می‌کنه (سقف JM_CAP). برمی‌گردونه: (موجودی جدید، مقدار واقعاً اضافه‌شده)."""
+    r = await c.fetchrow(
+        "WITH o AS (SELECT jagh_machine AS old_m FROM users WHERE user_id=$2::bigint FOR UPDATE) "
+        "UPDATE users SET jagh_machine = LEAST(o.old_m + $1::bigint, $3::bigint) FROM o "
+        "WHERE user_id=$2::bigint RETURNING jagh_machine, o.old_m",
+        int(amount), uid, JM_CAP)
+    if not r:
+        return 0, 0
+    return int(r["jagh_machine"]), int(r["jagh_machine"]) - int(r["old_m"])
+
+
+async def jagh_machine_collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """«دستگاه جق»: اگه حداقل ۵۰ هزار توش باشه، همه‌ش میره تو کیف پول."""
+    msg, user = update.effective_message, update.effective_user
+    await upsert_user(user.id, user.full_name)
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    async with pool.acquire() as c:
+        async with c.transaction():
+            cur = int(await c.fetchval("SELECT jagh_machine FROM users WHERE user_id=$1 FOR UPDATE", user.id) or 0)
+            if cur >= JM_MIN:
+                new_bal = await c.fetchval(
+                    "UPDATE users SET balance=balance+$1, jagh_machine=0 WHERE user_id=$2 RETURNING balance", cur, user.id)
+    if cur < JM_MIN:
+        await msg.reply_text(B(f"{JM_CE} دستگاه جق هنوز آماده نیست!\n"
+                               f"موجودی: {cur:,} / {JM_CAP:,} تومن\n"
+                               f"حداقل {JM_MIN:,} تومن باید توش جمع بشه تا بتونی برداشت کنی."),
+                             parse_mode="HTML", reply_parameters=rp)
+        return
+    await msg.reply_text(B(f"{JM_CE} برداشت از دستگاه جق انجام شد!\n"
+                           f"{MONEY_CE} {cur:,} تومن به کیف پولت اضافه شد.\n"
+                           f"👛 موجودی کیف پول: {int(new_bal):,} تومن"),
+                         parse_mode="HTML", reply_parameters=rp)
+
+
 GIFT_MONEY_CE = '<tg-emoji emoji-id="5289850733011693663">💰</tg-emoji>'
 AFFAIR_ENERGY_PENALTY = 3.0      # انرژی منفی برای کسی که رو زوجین بوس/بغل میده
 HUG_COOLDOWN = 5 * 60            # هر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد
@@ -10570,9 +10649,9 @@ HUG_ENERGY_LINES = [
     "⚡ انرژیش {eb}، انرژی خودت {ea}",
 ]
 HUG_MONEY_LINES = [
-    "{m} {n} تومن پول، هر دوتون گرفتید!",
-    "{m} هر کدومتون {n} تومن جایزه گرفتید!",
-    "{m} {n} تومن به جیب هر دو نفرتون رفت!",
+    "{m} {n} تومن پول، هر دوتون گرفتید! (رفت تو دستگاه جق)",
+    "{m} هر کدومتون {n} تومن جایزه گرفتید! (رفت تو دستگاه جق)",
+    "{m} {n} تومن به دستگاه جق هر دو نفرتون رفت!",
 ]
 
 
@@ -10849,8 +10928,10 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     async with pool.acquire() as c:
         async with c.transaction():
             await c.execute("INSERT INTO affection_cooldowns(actor_id,target_id,last_ts) VALUES($1,$2,$3) ON CONFLICT(actor_id,target_id) DO UPDATE SET last_ts=EXCLUDED.last_ts",user.id,target.id,now)
-            s_en=await c.fetchval("UPDATE users SET balance=balance+$1,energy=LEAST(energy+$2,$3) WHERE user_id=$4 RETURNING energy",money,energy_gain,ENERGY_MAX,user.id)
-            t_en=await c.fetchval("UPDATE users SET balance=balance+$1,energy=LEAST(energy+$2,$3) WHERE user_id=$4 RETURNING energy",money,energy_gain,ENERGY_MAX,target.id)
+            s_en=await c.fetchval("UPDATE users SET energy=LEAST(energy+$1,$2) WHERE user_id=$3 RETURNING energy",energy_gain,ENERGY_MAX,user.id)
+            t_en=await c.fetchval("UPDATE users SET energy=LEAST(energy+$1,$2) WHERE user_id=$3 RETURNING energy",energy_gain,ENERGY_MAX,target.id)
+            s_jm,_s_add=await jm_add(c,user.id,money)   # پول بوس/بغل میره تو دستگاه جق
+            t_jm,_t_add=await jm_add(c,target.id,money)
     rel_note=""
     if kind=="kiss" and me['spouse_id'] and int(me['spouse_id'])==target.id:
         _rel=await add_relation(pool,user.id,target.id,KISS_RELATION)
