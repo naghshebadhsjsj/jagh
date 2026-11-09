@@ -1201,8 +1201,8 @@ function giveawayReferralSheet(){
   (async()=>{try{const rows=await api('/api/giveaway/referrals');
    list.replaceChildren(...(rows.length?rows.map(r=>h('div',{class:'urow'},
     h('div',{class:'grow'},h('b',{},r.giveaway),h('div',{class:'sub'},(r.prize||'بدون جایزه')+' • دعوت‌شده: '+r.user_name+' • وضعیت: '+r.status),
-      h('a',{href:r.user_link,style:'color:var(--link);display:block'},'مشاهده کاربر دعوت‌شده'),
-      h('a',{href:r.inviter_link,style:'color:var(--link);display:block'},'مشاهده دعوت‌کننده')
+      h('a',{href:'#',style:'color:var(--link);display:block;text-decoration:underline;cursor:pointer',onclick:e=>{e.preventDefault();close();openProfile(Number(r.user_id))}},'مشاهده حساب کاربر دعوت‌شده'),
+      h('a',{href:'#',style:'color:var(--link);display:block;text-decoration:underline;cursor:pointer',onclick:e=>{e.preventDefault();close();openProfile(Number(r.inviter_id))}},'مشاهده حساب دعوت‌کننده')
     ))):[h('div',{class:'empty'},'برای قرعه‌کشی‌های فعال زیرمجموعه‌ای ثبت نشده.')]))}
    catch(e){list.replaceChildren(h('div',{class:'empty err'},e.message))}})();
   return list;
@@ -1622,12 +1622,13 @@ function SocialScreen(){
     return el;
   }
   function openUser(uid){if(uid===me.id&&profile){section='profile';drawNav();renderSection();return}push(UserScreen(uid))}
-  async function renderRoom(){clearInterval(roomTimer);roomTimer=null;roomAfter=0;body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری چت‌روم…'));const msgs=h('div',{class:'sroom'}),composer=h('div',{class:'scomposer'}),inp=h('input',{class:'inp',placeholder:'پیامت رو بنویس…'}),send=h('button',{class:'btn s',style:'background:#b12bd5',onclick:sendMsg},'ارسال');let replyBar=h('div',{class:'snotice hid'});const premium=h('button',{class:'ib',title:'ایموجی پرمیوم',onclick:()=>{const id=prompt('شناسه عددی ایموجی پرمیوم را وارد کن');if(id&&/^\d+$/.test(id)){premium.dataset.id=id;toast('ایموجی برای پیام بعدی انتخاب شد')}}},'💎');if(!me.premium_emoji)premium.classList.add('hid');composer.append(premium,inp,send);
-    function renderMessage(m){const name=m.display_name||m.username||String(m.user_id);const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});node.append(h('div',{class:'sub'},name+' • '+whenShort(m.created_at)));if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text||'پاسخ به پیام')));if(m.text)node.append(h('div',{class:'tx',dir:'auto'},m.text));if(m.premium_emoji_id){const tag=h('tg-emoji',{'emoji-id':m.premium_emoji_id},'⭐');tag.className='prem';node.append(tag)}const rs=h('div',{class:'sreacts'},...(m.reactions||[]).map(r=>h('button',{onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));rs.append(h('button',{onclick:()=>reactSheet(m)},'＋'));node.append(rs);let x=null;node.ontouchstart=e=>{x=e.touches[0].clientX};node.ontouchend=e=>{if(x!==null&&x-e.changedTouches[0].clientX>55){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(m.text,60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}x=null};return node}
-    async function loadRoom(){if(roomBusy)return;roomBusy=true;try{const arr=await api('/api/social/room?after='+roomAfter);if(arr.length){arr.forEach(m=>{msgs.append(renderMessage(m));roomAfter=Math.max(roomAfter,m.message_id)});msgs.scrollTop=msgs.scrollHeight}}catch(e){}roomBusy=false}
+  async function renderRoom(){clearInterval(roomTimer);roomTimer=null;roomAfter=0;body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری چت‌روم…'));const msgs=h('div',{class:'sroom'}),composer=h('div',{class:'scomposer'}),inp=h('input',{class:'inp',placeholder:'پیامت رو بنویس…'}),send=h('button',{class:'btn s',style:'background:#b12bd5',onclick:sendMsg},'ارسال');let replyBar=h('div',{class:'snotice hid'});const premium=h('button',{class:'ib',title:'ایموجی پرمیوم',onclick:()=>{const id=prompt('شناسه عددی ایموجی پرمیوم تلگرام را وارد کن');if(id&&/^\d+$/.test(id.trim())){premium.dataset.id=id.trim();premium.textContent='💎 ✓';toast('ایموجی پرمیوم برای پیام بعدی انتخاب شد')}else if(id)toast('شناسه باید فقط عدد باشد',1)}},'💎');premium.classList.remove('hid');composer.append(premium,inp,send);
+    function renderMessage(m){const name=m.display_name||m.username||String(m.user_id);const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});node.append(h('div',{class:'sub'},name+' • '+whenShort(m.created_at)));if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text||'پاسخ به پیام')));if(m.text)node.append(h('div',{class:'tx',dir:'auto'},m.text));if(m.premium_emoji_id){const tag=h('span',{class:'prem',title:'ایموجی پرمیوم'},'⭐');node.append(tag);blob('ce'+m.premium_emoji_id,'/api/social/emoji?id='+encodeURIComponent(m.premium_emoji_id)).then(u=>{if(u){const im=h('img',{src:u,alt:'ایموجی پرمیوم',style:'width:26px;height:26px;object-fit:contain;vertical-align:middle'});tag.replaceChildren(im)}})}const rs=h('div',{class:'sreacts'},...(m.reactions||[]).map(r=>h('button',{onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));rs.append(h('button',{onclick:()=>reactSheet(m)},'＋'));node.append(rs);let x=null;node.ontouchstart=e=>{x=e.touches[0].clientX};node.ontouchend=e=>{if(x!==null&&x-e.changedTouches[0].clientX>55){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(m.text,60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}x=null};return node}
+    async function loadRoom(){if(roomBusy)return;roomBusy=true;try{const arr=await api('/api/social/room?after='+roomAfter);if(arr.length){arr.forEach(m=>{msgs.append(renderMessage(m));roomAfter=Math.max(roomAfter,m.message_id)});msgs.scrollTop=msgs.scrollHeight}}catch(e){toast(e.message||'دریافت پیام‌ها ناموفق بود',1)}finally{roomBusy=false}}
     async function react(mid,em){try{await api('/api/social/room/react',{message_id:mid,emoji:em});loadRoom()}catch(e){toast(e.message,1)}}
     function reactSheet(m){sheet('ری‌اکشن پیام',close=>h('div',{class:'chips'},['❤️','😂','😍','🔥','👏','👍','👎','😮'].map(em=>h('button',{class:'chip',onclick:()=>{close();react(m.message_id,em)}},em))))}
-    async function sendMsg(){const text=inp.value.trim(),pe=premium.dataset.id||null;if(!text&&!pe)return;send.disabled=true;try{await api('/api/social/room/send',{text,reply_to:reply?.message_id||null,premium_emoji_id:pe});inp.value='';premium.dataset.id='';reply=null;replyBar.classList.add('hid');await loadRoom()}catch(e){toast(e.message,1)}send.disabled=false}
+    async function sendMsg(){const text=inp.value.trim(),pe=premium.dataset.id||null;if(!text&&!pe)return;send.disabled=true;try{await api('/api/social/room/send',{text,reply_to:reply?.message_id||null,premium_emoji_id:pe});inp.value='';premium.dataset.id='';premium.textContent='💎';reply=null;replyBar.classList.add('hid');await loadRoom()}catch(e){toast(e.message,1)}send.disabled=false}
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
     body.replaceChildren(msgs,replyBar,composer);await loadRoom();roomTimer=setInterval(loadRoom,3500);root._destroy=()=>{clearInterval(roomTimer);roomTimer=null};
   }
   async function renderSection(){
@@ -1689,7 +1690,7 @@ function GamesScreen(){
   const area=h('div',{class:'roach-area'}),bug=h('button',{class:'roach',onclick:()=>{score++;sc.textContent='امتیاز: '+score;move()}},'🪳');
   function move(){bug.style.left=Math.floor(Math.random()*78)+'%';bug.style.top=Math.floor(Math.random()*72)+'%'}
   move();area.append(bug);
-  const start=h('button',{onclick:()=>{score=0;left=25;sc.textContent='امتیاز: ۰';clearInterval(timer);timer=setInterval(()=>{left--;tm.textContent='زمان: '+left;if(left<=0){clearInterval(timer);bug.remove();toast('پایان بازی؛ امتیاز '+score)}},1000);move()}},'شروع مجدد');
+  const start=h('button',{onclick:()=>{score=0;left=25;sc.textContent='امتیاز: ۰';clearInterval(timer);if(!bug.isConnected)area.append(bug);score=0;left=25;sc.textContent='امتیاز: ۰';tm.textContent='زمان: ۲۵';timer=setInterval(()=>{left--;tm.textContent='زمان: '+left;if(left<=0){clearInterval(timer);toast('پایان بازی؛ امتیاز '+score)}},1000);move()}},'شروع مجدد');
   frame('🔨 سوسک‌کش',h('div',{class:'gcard'},h('div',{class:'gbtnrow'},sc,tm),area,start));
  }
  function mines(){
@@ -1699,14 +1700,16 @@ function GamesScreen(){
   const reset=h('button',{onclick:()=>{bombs=new Set();while(bombs.size<5)bombs.add(Math.floor(Math.random()*25));ended=false;opened=0;draw()}},'چیدمان جدید');
   frame('💣 مین',h('div',{class:'gcard'},h('div',{class:'gdesc'},'۵ مین بین ۲۵ خانه پنهان شده؛ خانه‌های امن را پیدا کن.'),grid,reset));draw();
  }
- home();return root;
+ home();root.append(box);return root;
 }
 function MyselfScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
- (async()=>{try{const d=await api('/api/myself');const avatar=d.photo?h('img',{src:d.photo}):h('div',{class:'gvisual',style:'width:94px;height:94px;font-size:40px'},'♟');
+ (async()=>{try{const d=await api('/api/myself');const avatar=d.photo?h('img',{alt:'کاراکتر من'}):h('div',{class:'gvisual',style:'width:94px;height:94px;font-size:40px'},'♟');
  box.replaceChildren(h('div',{class:'ghead'},'خودم'),h('div',{class:'gcard'},h('div',{class:'selfhero'},avatar,h('div',{},h('div',{class:'gtitle'},d.character),h('div',{class:'gdesc'},d.name+' • سطح '+d.level))),h('div',{class:'gstats',style:'margin-top:18px'},
- ...[['انرژی',d.energy],['بانک',num(d.bank)+' تومان'],['دارایی کل',num(d.total_assets)+' تومان'],['دارایی تو جیب',num(d.pocket)+' تومان'],['تعداد جق',num(d.jaghs)],['آیدی عددی',d.id]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v),h('span',{class:'gdesc'},k))))))}catch(e){box.replaceChildren(h('div',{class:'empty err'},e.message))}})();
- return root;
+ ...[['انرژی',d.energy],['بانک',num(d.bank)+' تومان'],['دارایی کل',num(d.total_assets)+' تومان'],['دارایی تو جیب',num(d.pocket)+' تومان'],['تعداد جق',num(d.jaghs)],['آیدی عددی',d.id]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v),h('span',{class:'gdesc'},k))))));
+ if(d.photo)blob('my-character-photo',d.photo).then(u=>{if(u)avatar.src=u});
+ }catch(e){box.replaceChildren(h('div',{class:'empty err'},e.message))}})();
+ root.append(box);return root;
 }
 
 /* ───── شروع ───── */
@@ -2671,10 +2674,32 @@ async def _social_room(qs, user):
 async def _social_room_send(b,user):
     uid=int(user["id"]); txt=(b.get("text") or "").strip()[:1200]; reply=_int(b.get("reply_to")); pe=(str(b.get("premium_emoji_id") or "").strip() or None)
     if not txt and not pe: raise _ApiError("پیام خالیه")
-    if pe and (not _social_emoji_staff(user) or not pe.isdigit()): raise _ApiError("ایموجی پرمیوم فقط برای پشتیبانی فعاله")
+    if pe and not pe.isdigit(): raise _ApiError("شناسه ایموجی پرمیوم معتبر نیست")
     if reply and not await pool.fetchval("SELECT 1 FROM social_room_messages WHERE message_id=$1",reply): reply=None
     mid=await pool.fetchval("INSERT INTO social_room_messages(user_id,text,reply_to,premium_emoji_id,created_at) VALUES($1,$2,$3,$4,$5) RETURNING message_id",uid,txt,reply,pe,time.time())
     return _j({"ok":True,"message_id":mid})
+
+
+async def _social_emoji_image(qs, user):
+    """تصویر بندانگشتی ایموجی سفارشی تلگرام برای نمایش داخل WebView."""
+    eid = str(qs.get("id") or "").strip()
+    if not eid.isdigit() or BOT_REF is None:
+        return 404, "text/plain", b"not found", {}
+    try:
+        stickers = await _tg_call(BOT_REF.get_custom_emoji_stickers, [eid])
+        if not stickers:
+            return 404, "text/plain", b"not found", {}
+        sticker = stickers[0]
+        thumb = getattr(sticker, "thumbnail", None)
+        fid = getattr(thumb, "file_id", None) or getattr(sticker, "file_id", None)
+        data = await _ttl(f"custom-emoji:{eid}", 3600, lambda: _download(fid, 2 * 1024 * 1024)) if fid else b""
+        ctype = _sniff_image(data) if data else None
+        if not ctype:
+            return 404, "text/plain", b"not found", {}
+        return 200, ctype, data, {"Cache-Control": "private, max-age=3600"}
+    except Exception:
+        log.debug("custom emoji preview unavailable: %s", eid, exc_info=True)
+        return 404, "text/plain", b"not found", {}
 
 
 async def _social_room_react(b,user):
@@ -2740,7 +2765,7 @@ async def _g_giveaway_referrals(qs, user):
                     "user_link":f"tg://user?id={r['user_id']}","inviter_link":f"tg://user?id={r['inviter_id']}"})
     return _j(out)
 
-_SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get,"/api/social/comments":_social_comments}
+_SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/comments":_social_comments}
 _SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
