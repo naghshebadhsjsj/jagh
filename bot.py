@@ -555,6 +555,11 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS social_reactions (post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, emoji TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(post_id,user_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS social_room_messages (message_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, text TEXT NOT NULL, reply_to BIGINT, premium_emoji_id TEXT, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE INDEX IF NOT EXISTS social_room_created_idx ON social_room_messages(created_at DESC)")
+        await c.execute("""CREATE TABLE IF NOT EXISTS social_room_reads (
+            user_id BIGINT PRIMARY KEY,
+            last_read_message_id BIGINT NOT NULL DEFAULT 0,
+            updated_at DOUBLE PRECISION NOT NULL DEFAULT 0
+        )""")
         await c.execute("CREATE TABLE IF NOT EXISTS social_room_reactions (message_id BIGINT NOT NULL REFERENCES social_room_messages(message_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, emoji TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(message_id,user_id,emoji))")
         await c.execute("CREATE TABLE IF NOT EXISTS social_comments (comment_id BIGSERIAL PRIMARY KEY, post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, text TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE INDEX IF NOT EXISTS social_comments_post_idx ON social_comments(post_id, comment_id)")
@@ -730,7 +735,7 @@ textarea.inp{min-height:130px;resize:vertical}
 .sg-sk{margin:12px;border-radius:22px;background:var(--sec);overflow:hidden;height:300px;position:relative}
 .sg-gate{text-align:center;padding:44px 22px}.sg-gi{font-size:56px}.sg-gate h3{margin:8px 0 4px}.sg-gate p{color:var(--hint);font-size:13.5px;margin:0 0 6px}
 .sg-flex{display:flex;flex-direction:column;overflow:hidden}
-.sroom{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--sec)}.smsg{max-width:85%;margin:7px 0;padding:9px 11px;border-radius:14px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13)}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
+.sroom{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--sec)}.smsg{position:relative;max-width:85%;margin:8px 0;padding:10px 13px 7px;border-radius:21px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y;overflow-wrap:anywhere}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13);border-end-end-radius:8px}.smsg:not(.mine){border-end-start-radius:8px}.smsg .sub{font-size:12px;margin-bottom:4px}.smeta{display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:5px;min-height:16px;color:var(--hint);font-size:10.5px;line-height:1}.smeta .ticks{font-size:14px;letter-spacing:-4px;padding-inline-end:3px;color:var(--hint)}.smeta .ticks.seen{color:#28a9e0}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0;border-radius:24px;min-height:42px}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
 .av{border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;overflow:hidden;user-select:none}
 .av img{width:100%;height:100%;object-fit:cover;display:block}
 /* گپ‌ها / کاربران */
@@ -815,8 +820,8 @@ textarea.inp{min-height:130px;resize:vertical}
 <div id="app">
   <div id="views"></div>
   <nav id="tabs">
-    <button data-k="games" class="on"><i data-ce="5123323069850452850"></i><span>بازی‌ها</span></button>
-    <button data-k="room"><i data-ce="5769289093221454192"></i><span>چت‌روم</span></button>
+    <button data-k="games" class="on"><i data-ce="5807468311646048491"></i><span>بازی‌ها</span></button>
+    <button data-k="room"><i data-ce="5805493678956875998"></i><span>چت‌روم</span></button>
     <button data-k="myself"><i data-ce="6233367447789899509"></i><span>خودم</span></button>
     <button data-k="chats"><i data-ce="5805161437466726782"></i><span>گپ‌ها</span></button>
     <button data-k="users"><i data-ce="6213060666320754449"></i><span>کاربران</span></button>
@@ -1370,7 +1375,7 @@ function sgAvatar(p,size){
 }
 const sgSkel=()=>h('div',{class:'sg-sk'},h('div',{class:'sg-shim'}));
 function SocialScreen(){
-  let me=null,section='room',profile=null,roomTimer=null,roomAfter=0,reply=null,roomBusy=false,stripBox=null;
+  let me=null,section='room',profile=null,roomTimer=null,roomAfter=0,reply=null,roomBusy=false,roomReadAck=0,stripBox=null;
   const root=h('div',{class:'scr sg'}),body=h('div',{class:'scroll'});
   const head=h('div',{class:'sg-top'},
     h('div',{class:'sg-logo'},h('div',{class:'sg-cam'},'📸'),h('div',{},h('div',{class:'sg-brand'},'جقستگرام'),h('div',{class:'sg-tag'},'بساز، ببین، لایک کن و کامنت بذار'))),
@@ -1728,7 +1733,7 @@ function SocialScreen(){
     function renderMessage(m){
       const name=m.display_name||m.username||m.uname||String(m.user_id);
       const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});
-      node.append(h('div',{class:'sub'},name+' • '+whenShort(m.created_at)));
+      node.append(h('div',{class:'sub'},name));
       if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text?plain(m.reply_text):'پاسخ به پیام')));
       if(m.text)node.append(h('div',{class:'tx',dir:'auto'},...richText(m.text)));
       if(m.premium_emoji_id){const tag=h('span',{class:'prem',title:'ایموجی پرمیوم'},'⭐');node.append(tag);blob('ce'+m.premium_emoji_id,'/api/social/emoji?id='+encodeURIComponent(m.premium_emoji_id)).then(u=>{if(u){tag.replaceChildren(h('img',{src:u,alt:'ایموجی پرمیوم',style:'width:26px;height:26px;object-fit:contain;vertical-align:middle'}))}})}
@@ -1736,6 +1741,12 @@ function SocialScreen(){
       const rs=h('div',{class:'sreacts'},...rx.map(r=>h('button',{style:r.mine?'border-color:#b12bd5':'',onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));
       rs.append(h('button',{onclick:()=>reactSheet(m)},'＋'),h('button',{onclick:()=>{setReply(m,name);inp.focus()}},'↩'));
       node.append(rs);
+      const meta=h('div',{class:'smeta'},h('span',{},fTime.format(Number(m.created_at)*1000)));
+      if(m.user_id===me.id){
+        const seen=Number(m.read_count||0)>0;
+        meta.append(h('span',{class:'ticks'+(seen?' seen':''),title:seen?'سین شده':'ارسال شده'},seen?'✓✓':'✓'));
+      }
+      node.append(meta);
       let x=null;node.ontouchstart=e=>{x=e.touches[0].clientX};node.ontouchend=e=>{if(x!==null&&x-e.changedTouches[0].clientX>55)setReply(m,name);x=null};
       return node;
     }
@@ -1743,7 +1754,9 @@ function SocialScreen(){
       if(roomBusy)return;roomBusy=true;
       try{
         const arr=await api('/api/social/room?after=0');
-        const sig=JSON.stringify(arr.map(m=>[m.message_id,m.reactions]));
+        const sig=JSON.stringify(arr.map(m=>[m.message_id,m.reactions,m.read_count]));
+        const latest=arr.length?Math.max(...arr.map(m=>Number(m.message_id)||0)):0;
+        if(latest>roomReadAck){roomReadAck=latest;api('/api/social/room/read',{last_read_message_id:latest}).catch(()=>{roomReadAck=0})}
         if(force||sig!==lastSig){
           const first=!lastSig,near=first||msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<140;
           lastSig=sig;
@@ -2243,7 +2256,7 @@ function GamesScreen(){
 }
 function MyselfScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});let data=null;
- const E={money:'6233367447789899509',bank:'5445355530111437729',cars:'5323272789824654613',powers:'5204118276635892650',spy:'5805161437466726782',theft:'5316700038162817675',hand:'5388881284309195257',back:'5816895683256390576',trophy:'5413566144986503832',jm:'5190526908462292507',vs:'6213060666320754449',wallet:'5334806881548379091',engine:'5775888804392996347',body:'5037414171923186776',tires:'5377521684221815300',glass:'5037614751190879049',energy:'5400280896311944960',hg:'5787432469598835099'};
+ const E={money:'6233367447789899509',bank:'5805331874653932911',cars:'5323272789824654613',powers:'5204118276635892650',spy:'5805161437466726782',theft:'5316700038162817675',hand:'5388881284309195257',back:'5816895683256390576',trophy:'5413566144986503832',jm:'5190526908462292507',vs:'6213060666320754449',wallet:'5334806881548379091',engine:'5775888804392996347',body:'5037414171923186776',tires:'5377521684221815300',glass:'5037614751190879049',energy:'5400280896311944960',hg:'5787432469598835099'};
  const pb=(label,fn,cls,icon)=>h('button',{class:'pb '+(cls||''),onclick:fn},icon?(icon.nodeType?icon:ceI(icon,24)):null,h('span',{},label));
  const title=t=>h('div',{class:'ghead'},t);
  const moneyInput=ph=>h('input',{class:'inp',type:'number',inputmode:'numeric',min:'1',placeholder:ph});
@@ -3261,7 +3274,8 @@ async def _social_room(qs, user):
         "SELECT m.message_id,m.user_id,m.text,m.reply_to,m.premium_emoji_id,m.created_at,sp.username,sp.display_name,u.name AS uname, "
         "(SELECT json_agg(json_build_object('emoji',r.emoji,'n',r.n,'mine',r.mine)) FROM (SELECT emoji,count(*)::int n,bool_or(user_id=$2) mine FROM social_room_reactions WHERE message_id=m.message_id GROUP BY emoji) r) reactions, "
         "(SELECT text FROM social_room_messages x WHERE x.message_id=m.reply_to) reply_text, "
-        "(SELECT COALESCE(sp2.display_name,sp2.username,u2.name,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id LEFT JOIN users u2 ON u2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name "
+        "(SELECT COALESCE(sp2.display_name,sp2.username,u2.name,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id LEFT JOIN users u2 ON u2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name, "
+        "(SELECT count(*)::int FROM social_room_reads rr WHERE rr.user_id<>m.user_id AND rr.last_read_message_id>=m.message_id) read_count "
         "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id LEFT JOIN users u ON u.user_id=m.user_id "
         "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]))
     out = []
@@ -3274,6 +3288,23 @@ async def _social_room(qs, user):
         d["reactions"] = rx or []
         out.append(d)
     return _j(out)
+
+
+async def _social_room_read(b,user):
+    uid = int(user["id"])
+    last_id = _int(b.get("last_read_message_id"), 0, 0)
+    if last_id:
+        # Only acknowledge messages that actually exist; never move a receipt backwards.
+        last_id = int(await pool.fetchval(
+            "SELECT COALESCE(max(message_id),0) FROM social_room_messages WHERE message_id<=$1",
+            last_id) or 0)
+        await pool.execute(
+            "INSERT INTO social_room_reads(user_id,last_read_message_id,updated_at) VALUES($1,$2,$3) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "last_read_message_id=GREATEST(social_room_reads.last_read_message_id,EXCLUDED.last_read_message_id), "
+            "updated_at=EXCLUDED.updated_at",
+            uid, last_id, time.time())
+    return _j({"ok": True, "last_read_message_id": last_id})
 
 
 async def _social_room_send(b,user):
@@ -3819,7 +3850,7 @@ _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cas
 
 
 _SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
-_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
+_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
@@ -4168,8 +4199,8 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ───────────────────────── بانک و املاک ─────────────────────────
-BANK_EMOJIS = ("5445355530111437729", "5445353829304387411", "5443127283898405358")
-BANK_ICON_ID = "5332455502917949981"
+BANK_EMOJIS = ("5805331874653932911",)
+BANK_ICON_ID = "5805331874653932911"
 BANK_CE = "".join(f'<tg-emoji emoji-id="{eid}">🏦</tg-emoji>' for eid in BANK_EMOJIS)
 BANK_FEE = 5_000
 # ───── ایونت درآمد: پشتیبان می‌نویسه «ایونت درآمد 5 5دقیقه» ← تو اون مدت حقوق شیفت (کار) و پول جق ×۵ میشه ─────
