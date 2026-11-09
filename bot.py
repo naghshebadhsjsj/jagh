@@ -562,6 +562,21 @@ async def init_db(app: Application):
             updated_at DOUBLE PRECISION NOT NULL DEFAULT 0
         )""")
         await c.execute("CREATE TABLE IF NOT EXISTS social_room_reactions (message_id BIGINT NOT NULL REFERENCES social_room_messages(message_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, emoji TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(message_id,user_id,emoji))")
+        await c.execute("""CREATE TABLE IF NOT EXISTS room_poison_games (
+            game_id BIGSERIAL PRIMARY KEY,
+            creator BIGINT NOT NULL,
+            opponent BIGINT,
+            bet BIGINT NOT NULL,
+            phase TEXT NOT NULL,
+            turn BIGINT,
+            deadline DOUBLE PRECISION,
+            winner BIGINT,
+            reason TEXT,
+            state TEXT NOT NULL DEFAULT '{}',
+            created_at DOUBLE PRECISION NOT NULL,
+            finished_at DOUBLE PRECISION
+        )""")
+        await c.execute("CREATE INDEX IF NOT EXISTS room_poison_phase_idx ON room_poison_games(phase, game_id DESC)")
         await c.execute("CREATE TABLE IF NOT EXISTS social_comments (comment_id BIGSERIAL PRIMARY KEY, post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, text TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE INDEX IF NOT EXISTS social_comments_post_idx ON social_comments(post_id, comment_id)")
         await c.execute("CREATE TABLE IF NOT EXISTS social_quota (user_id BIGINT NOT NULL, day TEXT NOT NULL, posts INT NOT NULL DEFAULT 0, stories INT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day))")
@@ -821,7 +836,7 @@ textarea.inp{min-height:130px;resize:vertical}
 <div id="app">
   <div id="views"></div>
   <nav id="tabs">
-    <button data-k="games" class="on"><i data-ce="5807468311646048491"></i><span>بازی‌ها</span></button>
+    <button data-k="myself"><i data-ce="6233367447789899509"></i><span>خودم</span></button>
     <button data-k="room"><i data-ce="5805493678956875998"></i><span>چت‌روم</span></button>
     <button data-k="leaderboard"><i data-ce="5307866815148335163"></i><span>لیدربرد</span></button>
     <button data-k="myself"><i data-ce="6233367447789899509"></i><span>خودم</span></button>
@@ -1731,7 +1746,89 @@ function SocialScreen(){
       }
     }
     function drawPanel(){drawTabs();drawEGrid()}
-    const premium=h('button',{class:'ib',title:'ایموجی پرمیوم',onmousedown:e=>e.preventDefault(),onclick:()=>{epanel.classList.toggle('hid');if(!epanel.classList.contains('hid'))drawPanel()}},'💎');
+    const togglePanel=()=>{epanel.classList.toggle('hid');if(!epanel.classList.contains('hid'))drawPanel()};
+    /* ───── بازی سم یا خوراکی (دکمه الماس) ───── */
+    const gamebox=h('div',{class:'rpg hid'});let pg=null,pgSig='',pgBusy=false;
+    async function loadPoison(){
+      if(pgBusy)return;pgBusy=true;
+      try{pg=await api('/api/social/room/poison');drawPoison()}catch(e){}
+      finally{pgBusy=false}
+    }
+    async function poisonCall(path,body,okMsg){
+      try{const r=await api(path,body);if(okMsg||r.msg)toast(okMsg||r.msg);pgBusy=false;await loadPoison();if(r.done){roomBusy=false;loadRoom(true)}return r}
+      catch(e){toast(e.message,1);return null}
+    }
+    function poisonCreateSheet(){
+      sheet('☠️ بازی سم یا خوراکی',close=>{
+        const amt=h('input',{class:'inp',type:'number',inputmode:'numeric',min:'1',placeholder:'مبلغ شرط (تومن)'});
+        const go=h('button',{class:'btn',style:'width:100%;margin-top:10px;background:#b12bd5',onclick:async()=>{
+          const bet=Math.floor(Number(amt.value));if(!(bet>0)){toast('مبلغ شرط رو وارد کن',1);return}
+          go.disabled=true;
+          const r=await poisonCall('/api/social/room/poison/create',{bet},'بازی ساخته شد؛ منتظر حریف…');
+          go.disabled=false;if(r)close();
+        }},'ساخت بازی و انتظار برای حریف');
+        const chips=h('div',{class:'chips'},[10000,50000,100000,500000,1000000].map(v=>h('button',{class:'chip',onclick:()=>{amt.value=v}},num(v))));
+        return h('div',{},
+          h('div',{class:'sub',style:'line-height:1.9;margin-bottom:8px'},'مبلغ شرط رو تو تعیین می‌کنی و همون لحظه از حسابت کم میشه. نفر دوم باید همون مبلغ رو بده تا بازی همین‌جا تو چت‌روم شروع بشه. هر کی سم حریف رو پیدا کنه می‌بازه و برنده ۲ برابر شرط می‌گیره.'),
+          amt,chips,go);
+      });
+    }
+    function poisonCard(g){
+      const mine=g.me,iAmCreator=g.creator===me.id;
+      const card=h('div',{class:'rpc'},h('div',{class:'rp-h'},h('b',{},'☠️ سم یا خوراکی'),h('span',{class:'rp-bet'},'شرط: '+num(g.bet)+' • جایزه: '+num(g.pot))));
+      const nm=id=>id===g.creator?g.creator_name:g.opponent_name;
+      const timer=()=>h('span',{class:'rp-t','data-dl':String(Date.now()+(g.left||0)*1000)},'⏱ '+num(g.left||0)+'″');
+      if(g.phase==='lobby'){
+        if(iAmCreator){
+          card.append(h('div',{class:'rp-s'},'منتظر بازیکن دوم هستی…  ',timer()),
+            h('button',{class:'btn s gh',onclick:async()=>{if(await ask('بازی لغو بشه و شرطت برگرده؟'))poisonCall('/api/social/room/poison/cancel',{game_id:g.id},'بازی لغو شد و شرط برگشت')}},'لغو بازی'));
+        }else{
+          card.append(h('div',{class:'rp-s'},g.creator_name+' منتظر حریفه…'),
+            h('button',{class:'btn s',style:'background:#b12bd5',onclick:async()=>{if(await ask('مبلغ '+num(g.bet)+' تومن پرداخت بشه و وارد بازی بشی؟'))poisonCall('/api/social/room/poison/join',{game_id:g.id},'وارد بازی شدی! سمت رو مخفی کن')}},'پرداخت '+num(g.bet)+' و ورود'));
+        }
+        return card;
+      }
+      const done=g.phase==='done';
+      let status;
+      if(done){
+        const w=g.winner;
+        status=w?h('div',{class:'rp-s win'},'🏆 برنده: '+nm(w)+' — '+num(g.pot)+' تومن',h('div',{class:'sub'},g.reason||'')):h('div',{class:'rp-s'},'🤝 '+(g.reason||'بازی بدون برنده تموم شد'));
+      }else if(g.phase==='hide'){
+        const iHid=g.my_cell!=null;
+        status=h('div',{class:'rp-s'},mine?(iHid?'سمت مخفی شد؛ منتظر حریف…':'سم خودت رو پشت یکی از ۲۴ خانه مخفی کن (فقط خودت می‌بینی)'):'بازیکن‌ها دارن سم‌هاشون رو مخفی می‌کنن…','  ',timer());
+      }else{
+        status=h('div',{class:'rp-s'},g.turn===me.id?'نوبت توئه! یه خانه انتخاب کن؛ سم حریف رو پیدا کنی می‌بازی 😬':'نوبت '+nm(g.turn)+' است…','  ',timer());
+      }
+      card.append(h('div',{class:'rp-p'},nm(g.creator)||'',' ⚔️ ',nm(g.opponent)||''),status);
+      const canHide=!done&&mine&&g.phase==='hide'&&g.my_cell==null;
+      const canGuess=!done&&mine&&g.phase==='guess'&&g.turn===me.id;
+      const grid=h('div',{class:'rp-g'});
+      for(let i=0;i<24;i++){
+        const opened=g.opened.includes(i),poison=done&&(g.poisons||[]).includes(i),own=g.my_cell===i;
+        const can=(canHide&&true)||(canGuess&&!opened&&!own);
+        const b=h('button',{class:'rp-c'+(opened?' ok':'')+(poison?' bad':'')+(own&&!done?' own':''),disabled:!can},poison?'☠️':opened?'🍬':own?'☠️':'▫️');
+        if(can)b.onclick=async()=>{
+          if(canHide&&!await ask('سمت پشت خانه‌ی '+num(i+1)+' مخفی بشه؟'))return;
+          grid.querySelectorAll('button').forEach(x=>x.disabled=true);
+          const r=await poisonCall('/api/social/room/poison/move',{game_id:g.id,cell:i});
+          if(!r)pgSig='',drawPoison();
+        };
+        grid.append(b);
+      }
+      card.append(grid);return card;
+    }
+    function drawPoison(){
+      const gs=(pg&&pg.games)||[];
+      const sig=JSON.stringify(gs.map(g=>[g.id,g.phase,g.turn,g.opened,g.my_cell,g.hid,g.winner,g.opponent,g.poisons]));
+      if(sig===pgSig)return;pgSig=sig;
+      gamebox.replaceChildren(...gs.map(poisonCard));
+      gamebox.classList.toggle('hid',!gs.length);
+    }
+    const premium=h('button',{class:'ib',title:'ایموجی پرمیوم و بازی',onmousedown:e=>e.preventDefault(),onclick:()=>{
+      sheet('💎 منو',close=>h('div',{},
+        sact('⭐ ایموجی پرمیوم',()=>{close();togglePanel()}),
+        sact('☠️ بازی سم یا خوراکی',()=>{close();poisonCreateSheet()})));
+    }},'💎');
     composer.append(premium,inp,send);
     function setReply(m,name){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(plain(m.text),60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}
     function renderMessage(m){
@@ -1781,9 +1878,14 @@ function SocialScreen(){
       send.disabled=false;
     }
     inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
-    body.replaceChildren(msgs,replyBar,composer,epanel);
-    await loadRoom(true);roomTimer=setInterval(()=>loadRoom(false),3500);
-    root._destroy=()=>{clearInterval(roomTimer);roomTimer=null};
+    body.replaceChildren(gamebox,msgs,replyBar,composer,epanel);
+    await loadRoom(true);loadPoison();let tick=0;
+    roomTimer=setInterval(()=>{tick++;loadPoison();if(tick%2===0)loadRoom(false)},1800);
+    const rpClock=setInterval(()=>{
+      if(!gamebox.isConnected){clearInterval(rpClock);return}
+      gamebox.querySelectorAll('[data-dl]').forEach(e=>{const sec=Math.max(0,Math.ceil((Number(e.dataset.dl)-Date.now())/1000));e.textContent='⏱ '+num(sec)+'″'});
+    },1000);
+    root._destroy=()=>{clearInterval(roomTimer);roomTimer=null;clearInterval(rpClock)};
   }
   async function renderSection(){
     clearInterval(roomTimer);roomTimer=null;body.classList.remove('sg-flex');
@@ -1867,6 +1969,16 @@ const chatCss=document.createElement('style');chatCss.textContent=`
 .ecell{border:0;background:transparent;border-radius:10px;aspect-ratio:1;padding:3px;font-size:22px;display:flex;align-items:center;justify-content:center;color:var(--fg)}
 .ecell:active{background:#b12bd522}.ecell img{width:100%;height:100%;object-fit:contain;pointer-events:none}
 .enote{font-size:12.5px;color:var(--hint);padding:6px 4px;line-height:1.7}
+.rpg{flex:none;max-height:52vh;overflow-y:auto;padding:8px;background:var(--sec);border-bottom:1px solid var(--line)}
+.rpc{background:var(--bg);border:1px solid #b12bd566;border-radius:16px;padding:10px;margin-bottom:8px}
+.rp-h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px}.rp-bet{font-size:12px;color:var(--hint)}
+.rp-p{text-align:center;font-size:13px;margin:6px 0 2px}
+.rp-s{font-size:13px;line-height:1.8;margin:6px 0;text-align:center}.rp-s.win{color:#16a34a;font-weight:700}
+.rp-t{display:inline-block;min-width:44px;font-variant-numeric:tabular-nums;color:#b12bd5;font-weight:700}
+.rp-g{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:6px}
+.rp-c{aspect-ratio:1;border:1px solid var(--line);background:var(--sec);border-radius:12px;font-size:20px;color:var(--fg);padding:0}
+.rp-c:not(:disabled):active{transform:scale(.92)}.rp-c:disabled{opacity:.85}
+.rp-c.ok{background:#14532d33}.rp-c.bad{background:#b9162633;border-color:#b91626}.rp-c.own{border-color:#b12bd5;background:#b12bd522}
 `;document.head.append(chatCss);
 const coolCss=document.createElement('style');coolCss.textContent=`
 .cei{object-fit:contain;vertical-align:middle;flex:none;display:inline-block}
@@ -2263,20 +2375,24 @@ function LeaderboardScreen(){
  root.append(h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},ceI('5307866815148335163',24),' لیدربرد')),body);
  const medals=['5832692422647226240','5834620746999012948','5832346686369832003'];
  function section(titleText,icon,rows,unit){
-  const card=h('div',{class:'card'},h('h3',{},ceI(icon,25),' ',titleText));
-  rows.forEach((u,i)=>{
-   const av=avatar('user',u.user_id,u.name, i<3?66:44);
-   if(i<3){av.style.borderRadius='50%';av.style.border='3px solid '+(i===0?'#f5c542':i===1?'#b9c4d0':'#bd8754');av.style.overflow='hidden'}
-   const rank=i<3?ceI(medals[i],25):h('b',{class:'lb-rank'},String(i+1));
-   card.append(h('div',{class:'lb-row '+(i<3?'lb-podium':'')},rank,av,h('div',{class:'grow'},h('b',{},u.name||'کاربر'),h('div',{class:'sub'},u.username?'@'+u.username:'پروفایل تلگرام')),h('b',{class:'lb-value'},num(u.value)+' '+unit)));
-  });
+  const card=h('div',{class:'lb-page'},h('h3',{},ceI(icon,25),' ',titleText));
+  const podium=h('div',{class:'lb-podium-grid'});
+  const order=[1,0,2].filter(i=>rows[i]);
+  order.forEach(i=>{const u=rows[i];const item=h('div',{class:'lb-winner rank'+(i+1),onclick:()=>openUserProfile?.(u.user_id)});
+   item.append(avatar('user',u.user_id,u.name,70),h('b',{},ceI(medals[i],23)+' '+(u.name||'کاربر')),h('small',{},num(u.value)+' '+unit));podium.append(item)});
+  card.append(podium);
+  rows.slice(3).forEach((u,j)=>card.append(h('div',{class:'lb-row'},h('b',{class:'lb-rank'},String(j+4)),avatar('user',u.user_id,u.name,42),h('div',{class:'grow'},h('b',{},u.name||'کاربر'),h('div',{class:'sub'},u.username?'@'+u.username:'کاربر تلگرام')),h('b',{class:'lb-value'},num(u.value)+' '+unit))));
   if(!rows.length)card.append(h('div',{class:'empty'},'هنوز داده‌ای ثبت نشده'));
   return card;
  }
- async function load(){body.replaceChildren(h('div',{class:'empty'},'در حال دریافت رتبه‌بندی…'));try{const d=await api('/api/social/leaderboard');body.replaceChildren(section('بیشترین جق','5834455158829879029',d.jaghs||[],'جق'),section('بیشترین دارایی','5413715090157359985',d.assets||[],'تومان'))}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
+ async function load(){body.replaceChildren(h('div',{class:'empty'},'در حال دریافت رتبه‌بندی…'));try{
+  const d=await api('/api/social/leaderboard'),track=h('div',{class:'lb-track'});
+  track.append(section('بیشترین جق','5834455158829879029',d.jaghs||[],'جق'),section('بیشترین دارایی','5413715090157359985',d.assets||[],'تومان'));
+  body.replaceChildren(h('div',{class:'lb-hint'},'برای دیدن بیشترین دارایی به چپ بکشید ←'),track);
+ }catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
  load();return root;
 }
-const lbCss=document.createElement('style');lbCss.textContent='.lb-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.lb-row:last-child{border:0}.lb-podium{min-height:82px}.lb-podium .av{width:66px!important;height:66px!important}.lb-rank{width:26px;text-align:center}.lb-value{font-size:12px;white-space:nowrap}.lb-podium .lb-value{font-size:13px}';document.head.append(lbCss);
+const lbCss=document.createElement('style');lbCss.textContent='.lb-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;direction:rtl;overscroll-behavior-x:contain;scrollbar-width:none;height:100%}.lb-track::-webkit-scrollbar{display:none}.lb-page{flex:0 0 100%;width:100%;padding:12px;overflow-y:auto;scroll-snap-align:start}.lb-hint{text-align:center;color:var(--hint);font-size:12px;padding:8px}.lb-podium-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:6px;padding:18px 0}.lb-winner{display:flex;flex-direction:column;align-items:center;justify-content:end;text-align:center;gap:6px;padding:9px 2px;border-radius:16px;background:var(--sec);min-width:0}.lb-winner.rank1{transform:translateY(-13px);min-height:150px;border:2px solid #e5b93f}.lb-winner.rank2,.lb-winner.rank3{min-height:124px}.lb-winner .av{border-radius:50%!important;border:3px solid #d6b34a}.lb-winner b{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lb-winner small{font-size:11px;color:var(--hint)}.lb-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.lb-value{font-size:12px;white-space:nowrap}.lb-rank{width:24px;text-align:center}';document.head.append(lbCss);
 
 /* ───── شروع ───── */
 const TABS={games:GamesScreen,room:SocialScreen,leaderboard:LeaderboardScreen,myself:MyselfScreen,chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
@@ -2289,16 +2405,16 @@ async function bootTabs(){
   const m=await api('/api/social/me'),isSupport=m.is_support;
   if(!isSupport){
    ['chats','users','panel'].forEach(k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove());
-   openTab('games');
+   openTab('myself');
   }else{
    if(!(m.perms||[]).includes('group_msgs'))document.querySelector('#tabs button[data-k="chats"]')?.remove();
    if(!(m.perms||[]).includes('panel'))document.querySelector('#tabs button[data-k="panel"]')?.remove();
    if(!(m.perms||[]).includes('staff_list')&&!m.perms?.length)document.querySelector('#tabs button[data-k="users"]')?.remove();
-   openTab('games');
+   openTab('myself');
   }
  }catch(e){
   ['chats','users','panel'].forEach(k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove());
-  openTab('games');
+  openTab('myself');
  }
 }
 document.querySelectorAll('#tabs i[data-ce]').forEach(i=>i.append(ceI(i.dataset.ce,26)));
@@ -3044,8 +3160,10 @@ async def _social_take_quota(c, uid, user, col, maxn, label):
 
 async def _g_leaderboard(qs, user):
     # ده نفر برتر در هر دسته؛ دارایی = پول جیب + موجودی بانک
-    by_j = await pool.fetch("SELECT user_id,name,username,jaghs,(COALESCE(balance,0)+COALESCE(bank_balance,0)) AS assets FROM users WHERE jaghs>0 ORDER BY jaghs DESC LIMIT 10")
-    by_a = await pool.fetch("SELECT user_id,name,username,jaghs,(COALESCE(balance,0)+COALESCE(bank_balance,0)) AS assets FROM users WHERE (COALESCE(balance,0)+COALESCE(bank_balance,0))>0 ORDER BY assets DESC LIMIT 10")
+    # مالک‌ها و پشتیبان‌ها هرگز وارد لیدربرد عمومی نمی‌شوند.
+    excluded = sorted(set(ADMIN_IDS) | set(STAFF))
+    by_j = await pool.fetch("SELECT user_id,name,username,jaghs,(COALESCE(balance,0)+COALESCE(bank_balance,0)) AS assets FROM users WHERE started=TRUE AND jaghs>0 AND NOT (user_id=ANY($1::bigint[])) ORDER BY jaghs DESC LIMIT 10", excluded)
+    by_a = await pool.fetch("SELECT user_id,name,username,jaghs,(COALESCE(balance,0)+COALESCE(bank_balance,0)) AS assets FROM users WHERE started=TRUE AND (COALESCE(balance,0)+COALESCE(bank_balance,0))>0 AND NOT (user_id=ANY($1::bigint[])) ORDER BY assets DESC LIMIT 10", excluded)
     def pack(rows, field):
         return [{"user_id":int(r["user_id"]),"name":r["name"] or "کاربر", "username":r["username"], "value":int(r[field] or 0)} for r in rows]
     return _j({"jaghs":pack(by_j,"jaghs"),"assets":pack(by_a,"assets")})
@@ -3365,6 +3483,270 @@ async def _social_room_react(b,user):
     await pool.execute("INSERT INTO social_room_reactions(message_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,user_id,emoji) DO NOTHING",mid,uid,emoji,time.time())
     return _j({"ok":True})
 
+
+
+# ───── بازی دونفره «سم یا خوراکی» داخل چت‌روم مینی‌اپ ─────
+# سازنده شرط رو تعیین می‌کنه (پولش همون لحظه کم میشه) و منتظر می‌مونه؛ نفر دوم باید همون مبلغ رو بده.
+# هر دو سم خودشون رو پشت یکی از ۲۴ خانه مخفی می‌کنن، بعد نوبتی خانه باز می‌کنن؛ هر کی سم حریف رو پیدا کنه می‌بازه.
+# برنده ۲ برابر شرط می‌گیره. مهلت‌ها به‌صورت lazy (موقع هر درخواست) بررسی میشن و تو دیتابیس می‌مونن، پس با ری‌استارت هم پول گم نمیشه.
+RP_CELLS = 24
+RP_TURN_SECS = 60
+RP_LOBBY_SECS = 600
+RP_DONE_SHOW = 45
+RP_MAX_LOBBIES = 8
+_RP_LOCK = asyncio.Lock()
+
+
+def _rp_load(r) -> dict:
+    g = dict(r)
+    st = {}
+    try:
+        st = json.loads(g.get("state") or "{}")
+    except Exception:
+        st = {}
+    g["hidden"] = {int(k): int(v) for k, v in (st.get("hidden") or {}).items()}
+    g["opened"] = [int(x) for x in (st.get("opened") or [])]
+    return g
+
+
+async def _rp_fetch(gid):
+    if gid is None:
+        return None
+    r = await pool.fetchrow("SELECT * FROM room_poison_games WHERE game_id=$1", gid)
+    return _rp_load(r) if r else None
+
+
+async def _rp_store(g: dict):
+    await pool.execute(
+        "UPDATE room_poison_games SET opponent=$2, phase=$3, turn=$4, deadline=$5, winner=$6, reason=$7, state=$8, finished_at=$9 WHERE game_id=$1",
+        g["game_id"], g.get("opponent"), g["phase"], g.get("turn"), g.get("deadline"), g.get("winner"), g.get("reason"),
+        json.dumps({"hidden": {str(k): v for k, v in g["hidden"].items()}, "opened": g["opened"]}), g.get("finished_at"))
+
+
+async def _rp_say(uid: int, text: str):
+    """یه پیام تو چت‌روم می‌ذاره تا همه ببینن چی شد."""
+    try:
+        await pool.execute("INSERT INTO social_room_messages(user_id,text,created_at) VALUES($1,$2,$3)", int(uid), text, time.time())
+    except Exception:
+        log.debug("room poison say failed", exc_info=True)
+
+
+async def _rp_finish(g: dict, winner, reason: str, say: bool = True):
+    """پایان بازی. winner=None یعنی مساوی/لغو و شرط‌ها برمی‌گرده؛ وگرنه برنده کل جایزه رو می‌گیره."""
+    if g["phase"] == "done":
+        return
+    g.update(phase="done", winner=winner, reason=reason, turn=None, deadline=None, finished_at=time.time())
+    bet = int(g["bet"])
+    if winner is None:
+        await _give(g["creator"], bet)
+        if g.get("opponent"):
+            await _give(g["opponent"], bet)
+    else:
+        await _give(winner, bet * 2)
+    await _rp_store(g)
+    if say:
+        if winner is not None:
+            await _rp_say(winner, f"🏆 بازی سم یا خوراکی رو بردم! جایزه: {bet * 2:,} تومن")
+        elif g.get("opponent"):
+            await _rp_say(g["creator"], f"🤝 بازی سم یا خوراکی مساوی شد؛ شرط {bet:,} تومنی به هر دو برگشت.")
+
+
+async def _rp_tick(g: dict):
+    now = time.time()
+    if g["phase"] == "lobby":
+        if now - float(g["created_at"]) > RP_LOBBY_SECS:
+            await _rp_finish(g, None, "کسی وارد نشد؛ شرط به سازنده برگشت.", say=False)
+    elif g["phase"] == "hide":
+        if g.get("deadline") and now > g["deadline"]:
+            hid = list(g["hidden"].keys())
+            if len(hid) == 1:
+                await _rp_finish(g, hid[0], "حریف مهلتش برای مخفی کردن سم تموم شد.")
+            else:
+                await _rp_finish(g, None, "هیچ‌کدوم سم رو مخفی نکردن؛ شرط‌ها برگشت.")
+    elif g["phase"] == "guess":
+        if g.get("deadline") and now > g["deadline"]:
+            loser = g.get("turn")
+            winner = g["opponent"] if loser == g["creator"] else g["creator"]
+            await _rp_finish(g, winner, "مهلت انتخاب تموم شد؛ حریف برنده شد.")
+
+
+async def _rp_sweep() -> list:
+    """همه‌ی بازی‌های باز رو می‌گیره و مهلت‌های تموم‌شده رو تکلیف می‌کنه (باید زیر _RP_LOCK صدا زده بشه)."""
+    out = []
+    for r in await pool.fetch("SELECT * FROM room_poison_games WHERE phase<>'done' ORDER BY game_id"):
+        g = _rp_load(r)
+        await _rp_tick(g)
+        if g["phase"] != "done":
+            out.append(g)
+    return out
+
+
+async def _rp_names(uids) -> dict:
+    uids = [int(u) for u in set(uids) if u]
+    if not uids:
+        return {}
+    rows = await pool.fetch(
+        "SELECT u.user_id, COALESCE(NULLIF(sp.display_name,''), NULLIF(sp.username,''), NULLIF(u.name,'')) AS n "
+        "FROM users u LEFT JOIN social_profiles sp ON sp.user_id=u.user_id WHERE u.user_id = ANY($1::bigint[])", uids)
+    return {int(r["user_id"]): (r["n"] or str(r["user_id"])) for r in rows}
+
+
+def _rp_view(g: dict, uid: int, names: dict, now: float) -> dict:
+    mine = uid in (g["creator"], g.get("opponent"))
+    left = None
+    if g["phase"] == "lobby":
+        left = max(0, int(RP_LOBBY_SECS - (now - float(g["created_at"]))))
+    elif g.get("deadline"):
+        left = max(0, int(g["deadline"] - now))
+    d = {"id": g["game_id"], "creator": g["creator"], "creator_name": names.get(g["creator"], "بازیکن"),
+         "opponent": g.get("opponent"), "opponent_name": names.get(g.get("opponent"), "") if g.get("opponent") else "",
+         "bet": int(g["bet"]), "pot": int(g["bet"]) * 2, "phase": g["phase"], "turn": g.get("turn"), "left": left,
+         "opened": g["opened"], "me": mine, "my_cell": g["hidden"].get(uid) if mine else None,
+         "hid": sorted(g["hidden"].keys()), "winner": g.get("winner"), "reason": g.get("reason") or ""}
+    if g["phase"] == "done":
+        d["poisons"] = sorted(set(g["hidden"].values()))
+    return d
+
+
+async def _social_poison_state(qs, user):
+    uid = int(user["id"])
+    async with _RP_LOCK:
+        games = await _rp_sweep()
+        recent = await pool.fetch(
+            "SELECT * FROM room_poison_games WHERE phase='done' AND finished_at>$1 AND (creator=$2 OR opponent=$2) ORDER BY game_id DESC LIMIT 3",
+            time.time() - RP_DONE_SHOW, uid)
+        games += [_rp_load(r) for r in recent]
+    names = await _rp_names([x for g in games for x in (g["creator"], g.get("opponent"))])
+    now = time.time()
+    views = [_rp_view(g, uid, names, now) for g in games]
+    views.sort(key=lambda v: (not v["me"], -v["id"]))
+    return _j({"games": views, "balance": await _mini_balance(uid), "min_bet": CASINO_MIN_BET, "max_bet": CASINO_MAX_BET})
+
+
+def _rp_busy_sql() -> str:
+    return "SELECT 1 FROM room_poison_games WHERE phase<>'done' AND (creator=$1 OR opponent=$1)"
+
+
+async def _social_poison_create(b, user):
+    uid, _bal = await _mini_ctx(user)
+    try:
+        bet = int(float(str(b.get("bet")).replace(",", "").strip()))
+    except (TypeError, ValueError):
+        raise _ApiError("مبلغ شرط نامعتبره")
+    if bet < CASINO_MIN_BET:
+        raise _ApiError(f"حداقل شرط {CASINO_MIN_BET:,} تومنه.")
+    if bet > CASINO_MAX_BET:
+        raise _ApiError(f"حداکثر شرط {CASINO_MAX_BET:,} تومنه.")
+    async with _RP_LOCK:
+        await _rp_sweep()
+        if await pool.fetchval(_rp_busy_sql(), uid):
+            raise _ApiError("تو همین الان یه بازی سم یا خوراکی فعال داری.")
+        if int(await pool.fetchval("SELECT count(*) FROM room_poison_games WHERE phase='lobby'") or 0) >= RP_MAX_LOBBIES:
+            raise _ApiError("چند تا بازی منتظر حریفن؛ یکی‌شون رو وارد شو یا کمی صبر کن.")
+        if await _take(uid, bet) is None:
+            raise _ApiError("موجودی کافی نیست.")
+        try:
+            gid = await pool.fetchval(
+                "INSERT INTO room_poison_games(creator,bet,phase,state,created_at) VALUES($1,$2,'lobby','{}',$3) RETURNING game_id",
+                uid, bet, time.time())
+        except Exception:
+            await _give(uid, bet)
+            raise
+    await _rp_say(uid, f"☠️ یه بازی «سم یا خوراکی» ساختم!\nشرط هر نفر: {bet:,} تومن • جایزه: {bet * 2:,} تومن\nحریف می‌خواد؛ بیا تو بازی! 🎮")
+    return _j({"ok": True, "game_id": gid, "balance": await _mini_balance(uid)})
+
+
+async def _social_poison_join(b, user):
+    uid, _bal = await _mini_ctx(user)
+    gid = _int(b.get("game_id"))
+    async with _RP_LOCK:
+        await _rp_sweep()
+        g = await _rp_fetch(gid)
+        if not g or g["phase"] != "lobby":
+            raise _ApiError("این بازی دیگه فعال نیست.")
+        if g["creator"] == uid:
+            raise _ApiError("نمی‌تونی وارد بازی خودت بشی؛ منتظر حریف باش.")
+        if await pool.fetchval(_rp_busy_sql(), uid):
+            raise _ApiError("تو همین الان یه بازی سم یا خوراکی فعال داری.")
+        if await _take(uid, int(g["bet"])) is None:
+            raise _ApiError(f"برای ورود باید {int(g['bet']):,} تومن موجودی داشته باشی.")
+        g.update(opponent=uid, phase="hide", deadline=time.time() + RP_TURN_SECS)
+        try:
+            await _rp_store(g)
+        except Exception:
+            await _give(uid, int(g["bet"]))
+            raise
+    await _rp_say(uid, f"✅ وارد بازی سم یا خوراکی شدم! شرط: {int(g['bet']):,} تومن 😈")
+    return _j({"ok": True, "balance": await _mini_balance(uid)})
+
+
+async def _social_poison_cancel(b, user):
+    uid = int(user["id"])
+    gid = _int(b.get("game_id"))
+    async with _RP_LOCK:
+        await _rp_sweep()
+        g = await _rp_fetch(gid)
+        if not g or g["phase"] != "lobby":
+            raise _ApiError("این بازی دیگه تو مرحله‌ی انتظار نیست.")
+        if g["creator"] != uid:
+            raise _ApiError("فقط سازنده می‌تونه بازی رو لغو کنه.", 403)
+        await _rp_finish(g, None, "سازنده بازی رو لغو کرد؛ شرط برگشت.", say=False)
+    return _j({"ok": True, "balance": await _mini_balance(uid)})
+
+
+async def _social_poison_move(b, user):
+    uid, _bal = await _mini_ctx(user)
+    gid = _int(b.get("game_id"))
+    cell = _int(b.get("cell"))
+    if cell is None or not 0 <= cell < RP_CELLS:
+        raise _ApiError("خانه نامعتبره")
+    msg, done = "", False
+    async with _RP_LOCK:
+        await _rp_sweep()
+        g = await _rp_fetch(gid)
+        if not g:
+            raise _ApiError("بازی پیدا نشد.", 404)
+        if g["phase"] == "done":
+            raise _ApiError(g.get("reason") or "این بازی تموم شده.")
+        if g["phase"] == "lobby":
+            raise _ApiError("هنوز حریف وارد نشده.")
+        if uid not in (g["creator"], g["opponent"]):
+            raise _ApiError("این بازی برای دو بازیکنشه.", 403)
+        other = g["opponent"] if uid == g["creator"] else g["creator"]
+        if g["phase"] == "hide":
+            if uid in g["hidden"]:
+                raise _ApiError("سمت رو قبلاً مخفی کردی؛ منتظر حریف باش.")
+            g["hidden"][uid] = cell
+            if len(g["hidden"]) == 2:
+                g.update(phase="guess", turn=random.choice([g["creator"], g["opponent"]]), deadline=time.time() + RP_TURN_SECS)
+                g["opened"] = []
+                msg = "هر دو سم مخفی شد! بازی شروع شد."
+            else:
+                msg = "سمت مخفی شد! منتظر حریف…"
+            await _rp_store(g)
+        else:
+            if g.get("turn") != uid:
+                raise _ApiError("نوبت حریفه.")
+            if cell in g["opened"]:
+                raise _ApiError("این خانه قبلاً باز شده.")
+            if cell == g["hidden"].get(uid):
+                raise _ApiError("رو سم خودت نمی‌تونی بزنی!")
+            if cell == g["hidden"].get(other):
+                g["opened"].append(cell)
+                await _rp_finish(g, other, "سم حریف پیدا شد!")
+                done = True
+                msg = "سم حریف رو پیدا کردی؛ باختی! ☠️"
+            else:
+                g["opened"].append(cell)
+                g.update(turn=other, deadline=time.time() + RP_TURN_SECS)
+                if not [i for i in range(RP_CELLS) if i not in g["opened"] and i != g["hidden"].get(other)]:
+                    await _rp_finish(g, None, "خانه‌ی امنی نمونده؛ مساوی شد و شرط‌ها برگشت.")
+                    done = True
+                    msg = "مساوی شد."
+                else:
+                    await _rp_store(g)
+                    msg = "خوراکی بود! 🍬 نوبت حریف."
+    return _j({"ok": True, "msg": msg, "done": done, "balance": await _mini_balance(uid)})
 
 
 async def _myself_cars(uid):
@@ -3816,8 +4198,8 @@ _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cas
               "/api/game/mines/cashout": _p_game_mines_cashout}
 
 
-_SOCIAL_GET={"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
-_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read}
+_SOCIAL_GET={"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/room/poison":_social_poison_state,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
+_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
