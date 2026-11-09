@@ -813,10 +813,12 @@ textarea.inp{min-height:130px;resize:vertical}
 <div id="app">
   <div id="views"></div>
   <nav id="tabs">
-    <button data-k="chats" class="on"><i>💬</i><span>گپ‌ها</span></button>
-    <button data-k="users"><i>👥</i><span>کاربران</span></button>
-    <button data-k="panel"><i>🛠</i><span>پنل</span></button>
-    <button data-k="social"><i>📸</i><span>جقستگرام</span></button>
+    <button data-k="games" class="on"><i>✦</i><span>بازی‌ها</span></button>
+    <button data-k="room"><i>◉</i><span>چت‌روم</span></button>
+    <button data-k="myself"><i>♟</i><span>خودم</span></button>
+    <button data-k="chats"><i>▤</i><span>گپ‌ها</span></button>
+    <button data-k="users"><i>⌕</i><span>کاربران</span></button>
+    <button data-k="panel"><i>⚙</i><span>پشتیبانی</span></button>
   </nav>
 </div>
 <div id="toast"></div>
@@ -1192,6 +1194,20 @@ function ProfileScreen(uid){
 
 /* ───── تب پنل ───── */
 const ACT={money_add:'➕ پول',money_sub:'➖ پول',jagh_add:'➕ جق',jagh_sub:'➖ جق',ban:'🚫 محرومیت',unban:'✅ رفع محرومیت',task_add:'📋 تسک جدید',task_del:'🗑 حذف تسک',toggle:'🔌 روشن/خاموش ربات',broadcast:'📢 پیام همگانی'};
+
+function giveawayReferralSheet(){
+ sheet('زیرمجموعه‌های قرعه‌کشی فعال',close=>{
+  const list=h('div',{class:'plist'},h('div',{class:'empty'},'در حال دریافت…'));
+  (async()=>{try{const rows=await api('/api/giveaway/referrals');
+   list.replaceChildren(...(rows.length?rows.map(r=>h('div',{class:'urow'},
+    h('div',{class:'grow'},h('b',{},r.giveaway),h('div',{class:'sub'},(r.prize||'بدون جایزه')+' • دعوت‌شده: '+r.user_name+' • وضعیت: '+r.status),
+      h('a',{href:r.user_link,style:'color:var(--link);display:block'},'مشاهده کاربر دعوت‌شده'),
+      h('a',{href:r.inviter_link,style:'color:var(--link);display:block'},'مشاهده دعوت‌کننده')
+    ))):[h('div',{class:'empty'},'برای قرعه‌کشی‌های فعال زیرمجموعه‌ای ثبت نشده.')]))}
+   catch(e){list.replaceChildren(h('div',{class:'empty err'},e.message))}})();
+  return list;
+ });
+}
 function PanelScreen(){
   const body=h('div',{class:'scroll'});
   const el=h('div',{class:'scr'},h('div',{class:'top'},h('div',{class:'row2'},h('div',{class:'ttl'},'🛠 پنل پشتیبانی'),h('button',{class:'ib',onclick:()=>load()},'↻'))),body);
@@ -1206,7 +1222,7 @@ function PanelScreen(){
     const mk=(k,cls,label,fn)=>has(k)?h('button',{class:'act '+cls,onclick:fn},label):null;
     const grp1=[mk('money_sub','red','💸 کم کردن پول',()=>adjustSheet('balance','sub',null)),mk('money_add','ok','➕ افزودن پول',()=>adjustSheet('balance','add',null)),
       mk('jagh_sub','red','🤛 کم کردن جق',()=>adjustSheet('jaghs','sub',null)),mk('jagh_add','ok','➕ افزودن جق',()=>adjustSheet('jaghs','add',null))].filter(Boolean);
-    const grp2=[mk('ban','red','🚫 محروم کردن',()=>banSheet(null)),mk('unban','ok','✅ رفع محرومیت',()=>pickUser(u=>doUnban(u))),
+    const grp2=[has('giveaway')?h('button',{class:'act',onclick:()=>giveawayReferralSheet()},'زیرمجموعه‌های قرعه‌کشی'):null,mk('ban','red','🚫 محروم کردن',()=>banSheet(null)),mk('unban','ok','✅ رفع محرومیت',()=>pickUser(u=>doUnban(u))),
       (has('ban')||has('unban'))?h('button',{class:'act',onclick:()=>push(UsersScreen(true))},'📛 لیست محروم‌ها'):null,
       (has('task_daily')||has('task_weekly'))?h('button',{class:'act',onclick:()=>push(TasksScreen())},'📋 تسک‌ها'):null,
       mk('broadcast','','📢 پیام همگانی',()=>push(BroadcastScreen())),
@@ -1342,16 +1358,16 @@ function sgAvatar(p,size){
 }
 const sgSkel=()=>h('div',{class:'sg-sk'},h('div',{class:'sg-shim'}));
 function SocialScreen(){
-  let me=null,section='feed',profile=null,roomTimer=null,roomAfter=0,reply=null,roomBusy=false,stripBox=null;
+  let me=null,section='room',profile=null,roomTimer=null,roomAfter=0,reply=null,roomBusy=false,stripBox=null;
   const root=h('div',{class:'scr sg'}),body=h('div',{class:'scroll'});
   const head=h('div',{class:'sg-top'},
     h('div',{class:'sg-logo'},h('div',{class:'sg-cam'},'📸'),h('div',{},h('div',{class:'sg-brand'},'جقستگرام'),h('div',{class:'sg-tag'},'بساز، ببین، لایک کن و کامنت بذار'))),
     h('button',{class:'sg-ico',title:'بروزرسانی',onclick:()=>renderSection()},'↻'));
   const nav=h('div',{class:'sg-nav'});
-  const tabs=[['feed','🏠','خانه'],['explore','🔥','اکسپلور'],['room','💬','چت‌روم'],['profile','👤','پروفایل']];
+  const tabs=[['room','◉','چت‌روم']];
   function drawNav(){nav.replaceChildren(...tabs.map(([k,i,l])=>h('button',{class:section===k?'on':'',onclick:()=>{section=k;drawNav();renderSection()}},h('i',{},i),h('span',{},l))))}
   const fab=h('button',{class:'sg-fab hid',onclick:()=>createMenu()},'＋');
-  root.append(head,nav,body,fab);
+  root.append(body);
 
   /* ── پیج ── */
   function profileGate(){toast('برای انتشار محتوا اول پیج بساز',1);profileSheet()}
@@ -1617,7 +1633,7 @@ function SocialScreen(){
   async function renderSection(){
     clearInterval(roomTimer);roomTimer=null;
     body.classList.toggle('sg-flex',section==='room');
-    fab.classList.toggle('hid',!(profile&&section!=='room'));
+    fab.classList.add('hid');
     if(!me){body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری…'));return}
     try{
       if(section==='feed')await renderFeed();
@@ -1630,17 +1646,91 @@ function SocialScreen(){
   root._show=()=>{if(!me)init()};root._destroy=()=>{clearInterval(roomTimer)};init();return root;
 }
 
+
+/* ───── بازی‌ها و پروفایل شخصی ───── */
+const gameCss=document.createElement('style');gameCss.textContent=`
+.gscreen{padding:14px 14px 90px;background:radial-gradient(ellipse at 50% 0%,#172d53,#080f20 65%);color:#fff;min-height:100%}
+.ghead{font-size:25px;font-weight:900;margin:8px 4px 16px;letter-spacing:-.5px}
+.gcard{border:1px solid #ffffff20;border-radius:22px;padding:16px;margin:12px 0;background:linear-gradient(135deg,#1c3154,#111b31);box-shadow:0 10px 30px #0005}
+.gcard button{border:0;border-radius:14px;background:linear-gradient(110deg,#3678ff,#6544ef);color:#fff;font-weight:800;padding:13px;width:100%;margin-top:10px}
+.gvisual{height:145px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:76px;background:radial-gradient(circle,#244d77,#0c1426 70%);margin-bottom:12px}
+.gtitle{font-size:19px;font-weight:900}.gdesc{color:#aab9d0;font-size:13px;margin-top:3px}
+.gstats{display:grid;grid-template-columns:1fr 1fr;gap:9px}.gstat{background:#ffffff10;border-radius:14px;padding:12px}.gstat b{display:block;font-size:19px}
+.gbtnrow{display:flex;gap:8px}.gbtnrow button{flex:1}
+.game-board{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:12px 0}
+.minecell{aspect-ratio:1;border:1px solid #ffffff20;border-radius:12px;background:#263a59;color:white;font-size:22px}
+.minecell.open{background:#17263e}.roach-area{height:260px;position:relative;background:radial-gradient(#1d4b38,#09241d);border-radius:18px;overflow:hidden}
+.roach{position:absolute;border:0;background:transparent;font-size:38px;padding:8px}
+.selfhero{display:flex;align-items:center;gap:14px}.selfhero img{width:94px;height:94px;object-fit:cover;border-radius:22px;border:2px solid #5d8dff}
+`;document.head.append(gameCss);
+function GamesScreen(){
+ const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
+ function home(){box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),...[
+  ['🚀','موشک انفجار','ضریب رو تماشا کن؛ قبل از انفجار خارج شو.','crash'],
+  ['🔨','سوسک‌کش','سوسک‌ها رو قبل از فرار با چکش بزن!','roach'],
+  ['💣','مین','خانه‌های امن رو پیدا کن و از مین‌ها دوری کن.','mines']
+ ].map(([ico,title,desc,key])=>h('div',{class:'gcard'},h('div',{class:'gvisual'},ico),h('div',{class:'gtitle'},title),h('div',{class:'gdesc'},desc),h('button',{onclick:()=>play(key)},'شروع بازی'))))}
+ function play(k){
+  if(k==='crash')crash(); if(k==='roach')roach(); if(k==='mines')mines();
+ }
+ function frame(title,content){box.replaceChildren(h('div',{class:'ghead'},title),h('button',{class:'ib',style:'color:white',onclick:home},'← بازگشت'),content)}
+ function crash(){
+  let mult=1.00,ended=false,timer=null,started=false;
+  const val=h('div',{style:'font-size:54px;font-weight:900;text-align:center;padding:35px 0;color:#70e4ff'},'x1.00');
+  const msg=h('div',{class:'gdesc',style:'text-align:center'},'برای شروع پرواز آماده‌ای؟');
+  const go=h('button',{onclick:()=>{
+   if(!started){started=true;ended=false;mult=1;go.textContent='خروج از پرواز';msg.textContent='ضریب در حال افزایش است…';timer=setInterval(()=>{mult*=1+Math.random()*.035;val.textContent='x'+mult.toFixed(2);if(Math.random()<.018){clearInterval(timer);ended=true;started=false;msg.textContent='موشک منفجر شد! دوباره تلاش کن.';go.textContent='پرواز دوباره'}},180)}
+   else{clearInterval(timer);started=false;ended=true;msg.textContent='با ضریب x'+mult.toFixed(2)+' خارج شدی!';go.textContent='پرواز دوباره'}
+  }},'شروع پرواز');
+  frame('🚀 موشک انفجار',h('div',{class:'gcard'},h('div',{class:'gvisual'},'🛸'),val,msg,go));
+ }
+ function roach(){
+  let score=0,left=25,timer=null;const sc=h('b',{},'امتیاز: ۰'),tm=h('b',{},'زمان: ۲۵');
+  const area=h('div',{class:'roach-area'}),bug=h('button',{class:'roach',onclick:()=>{score++;sc.textContent='امتیاز: '+score;move()}},'🪳');
+  function move(){bug.style.left=Math.floor(Math.random()*78)+'%';bug.style.top=Math.floor(Math.random()*72)+'%'}
+  move();area.append(bug);
+  const start=h('button',{onclick:()=>{score=0;left=25;sc.textContent='امتیاز: ۰';clearInterval(timer);timer=setInterval(()=>{left--;tm.textContent='زمان: '+left;if(left<=0){clearInterval(timer);bug.remove();toast('پایان بازی؛ امتیاز '+score)}},1000);move()}},'شروع مجدد');
+  frame('🔨 سوسک‌کش',h('div',{class:'gcard'},h('div',{class:'gbtnrow'},sc,tm),area,start));
+ }
+ function mines(){
+  let bombs=new Set();while(bombs.size<5)bombs.add(Math.floor(Math.random()*25));
+  let ended=false,opened=0;const grid=h('div',{class:'game-board'});
+  function draw(){grid.replaceChildren(...Array.from({length:25},(_,i)=>{const b=h('button',{class:'minecell',onclick:()=>{if(ended||b.classList.contains('open'))return;b.classList.add('open');if(bombs.has(i)){b.textContent='💥';ended=true;toast('مین منفجر شد!');}else{b.textContent='💎';opened++;if(opened===20){ended=true;toast('برنده شدی!')}}}},'');return b}))}
+  const reset=h('button',{onclick:()=>{bombs=new Set();while(bombs.size<5)bombs.add(Math.floor(Math.random()*25));ended=false;opened=0;draw()}},'چیدمان جدید');
+  frame('💣 مین',h('div',{class:'gcard'},h('div',{class:'gdesc'},'۵ مین بین ۲۵ خانه پنهان شده؛ خانه‌های امن را پیدا کن.'),grid,reset));draw();
+ }
+ home();return root;
+}
+function MyselfScreen(){
+ const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
+ (async()=>{try{const d=await api('/api/myself');const avatar=d.photo?h('img',{src:d.photo}):h('div',{class:'gvisual',style:'width:94px;height:94px;font-size:40px'},'♟');
+ box.replaceChildren(h('div',{class:'ghead'},'خودم'),h('div',{class:'gcard'},h('div',{class:'selfhero'},avatar,h('div',{},h('div',{class:'gtitle'},d.character),h('div',{class:'gdesc'},d.name+' • سطح '+d.level))),h('div',{class:'gstats',style:'margin-top:18px'},
+ ...[['انرژی',d.energy],['بانک',num(d.bank)+' تومان'],['دارایی کل',num(d.total_assets)+' تومان'],['دارایی تو جیب',num(d.pocket)+' تومان'],['تعداد جق',num(d.jaghs)],['آیدی عددی',d.id]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v),h('span',{class:'gdesc'},k))))))}catch(e){box.replaceChildren(h('div',{class:'empty err'},e.message))}})();
+ return root;
+}
+
 /* ───── شروع ───── */
-const TABS={chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen,social:SocialScreen},tabEls={};
+const TABS={games:GamesScreen,room:SocialScreen,myself:MyselfScreen,chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
 function openTab(k){
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
-  if(!tabEls[k])tabEls[k]=TABS[k]();push(tabEls[k],true);
+ document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+ if(!tabEls[k])tabEls[k]=TABS[k]();push(tabEls[k],true);
 }
 async function bootTabs(){
-  try{const m=await api('/api/social/me');const isSupport=m.is_support;
-    if(!isSupport){document.querySelectorAll('#tabs button').forEach(b=>{if(b.dataset.k!=='social')b.remove()});openTab('social')}
-    else{if(!(m.perms||[]).includes('group_msgs')){const cb=document.querySelector('#tabs button[data-k="chats"]');if(cb)cb.remove()}openTab('social')}
-  }catch(e){document.querySelectorAll('#tabs button').forEach(b=>{if(b.dataset.k!=='social')b.remove()});openTab('social')}
+ try{
+  const m=await api('/api/social/me'),isSupport=m.is_support;
+  if(!isSupport){
+   ['chats','users','panel'].forEach(k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove());
+   openTab('games');
+  }else{
+   if(!(m.perms||[]).includes('group_msgs'))document.querySelector('#tabs button[data-k="chats"]')?.remove();
+   if(!(m.perms||[]).includes('panel'))document.querySelector('#tabs button[data-k="panel"]')?.remove();
+   if(!(m.perms||[]).includes('staff_list')&&!m.perms?.length)document.querySelector('#tabs button[data-k="users"]')?.remove();
+   openTab('games');
+  }
+ }catch(e){
+  ['chats','users','panel'].forEach(k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove());
+  openTab('games');
+ }
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>openTab(b.dataset.k));
 bootTabs();
@@ -1853,7 +1943,7 @@ async def _g_groups(qs, user):
     async def go():
         rows = await pool.fetch(
             "SELECT ids.chat_id, ch.title, COALESCE(cnt.n, 0) AS n, cnt.last_ts, l.name AS last_name, l.text AS last_text "
-            "FROM (SELECT chat_id FROM chats UNION SELECT DISTINCT chat_id FROM group_msgs) ids "
+            "FROM (SELECT chat_id FROM chats) ids "
             "LEFT JOIN chats ch ON ch.chat_id = ids.chat_id "
             "LEFT JOIN (SELECT chat_id, count(*) AS n, max(ts) AS last_ts FROM group_msgs GROUP BY chat_id) cnt ON cnt.chat_id = ids.chat_id "
             "LEFT JOIN (SELECT DISTINCT ON (chat_id) chat_id, name, text FROM group_msgs ORDER BY chat_id, ts DESC) l ON l.chat_id = ids.chat_id "
@@ -2594,12 +2684,69 @@ async def _social_room_react(b,user):
     await pool.execute("INSERT INTO social_room_reactions(message_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,user_id,emoji) DO NOTHING",mid,uid,emoji,time.time())
     return _j({"ok":True})
 
+
+
+async def _g_myself(qs, user):
+    uid = int(user["id"])
+    r = await pool.fetchrow(
+        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender "
+        "FROM users u WHERE u.user_id=$1", uid)
+    if not r:
+        raise _ApiError("اول ربات رو استارت کن تا پروفایلت ساخته بشه")
+    gender = r["gender"] or "m"
+    lvl = level_for(int(r["jaghs"] or 0))
+    photo = CHAR_PHOTOS.get((gender, lvl))
+    photo_url = None
+    if photo and BOT_REF is not None:
+        try:
+            photo_url = await _ttl(f"charphoto:{gender}:{lvl}", 300, lambda: _download(photo))
+            if photo_url:
+                # endpoint serves the downloaded bytes; keep only a stable URL in JSON
+                photo_url = f"/api/myself/photo?g={gender}&l={lvl}"
+        except Exception:
+            photo_url = None
+    pocket = int(r["balance"] or 0)
+    bank = int(r["bank_balance"] or 0)
+    return _j({"id":uid,"name":r["name"] or user.get("first_name") or "کاربر",
+               "gender":gender,"level":lvl,"character":CHARACTERS.get(gender,CHARACTERS["m"])[lvl-1][0],
+               "energy":round(float(r["energy"] or 0),1),"bank":bank,"pocket":pocket,
+               "total_assets":pocket+bank,"jaghs":int(r["jaghs"] or 0),"photo":photo_url})
+
+
+async def _g_myself_photo(qs, user):
+    uid=int(user["id"])
+    r=await pool.fetchrow("SELECT gender,jaghs FROM users WHERE user_id=$1",uid)
+    if not r: return 404,"text/plain",b"not found",{}
+    gender=r["gender"] or "m"; lvl=level_for(int(r["jaghs"] or 0)); fid=CHAR_PHOTOS.get((gender,lvl))
+    if not fid or BOT_REF is None: return 404,"text/plain",b"not found",{}
+    data=await _download(fid); typ=_sniff_image(data) if data else None
+    if not typ: return 404,"text/plain",b"not found",{}
+    return 200,typ,data,{"Cache-Control":"private, max-age=300"}
+
+
+async def _g_giveaway_referrals(qs, user):
+    uid=int(user["id"])
+    rows=await pool.fetch(
+        "SELECT g.id,g.name,g.prize,g.ends_at,e.user_id,e.inviter_id,e.status,e.joined_at,u.name AS user_name "
+        "FROM giveaways g JOIN giveaway_entries e ON e.gid=g.id "
+        "LEFT JOIN users u ON u.user_id=e.user_id "
+        "WHERE g.status='active' AND e.inviter_id IS NOT NULL "
+        "ORDER BY g.ends_at DESC,e.joined_at DESC LIMIT 1000")
+    out=[]
+    for r in rows:
+        out.append({"giveaway_id":r["id"],"giveaway":r["name"],"prize":r["prize"],
+                    "ends_at":r["ends_at"],"user_id":r["user_id"],"user_name":r["user_name"] or "کاربر",
+                    "inviter_id":r["inviter_id"],"status":r["status"],
+                    "user_link":f"tg://user?id={r['user_id']}","inviter_link":f"tg://user?id={r['inviter_id']}"})
+    return _j(out)
+
 _SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get,"/api/social/comments":_social_comments}
 _SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
 _API_PERM = {
+    "/api/giveaway/referrals": ("giveaway",),
     "/api/stats": ("stats",),
     "/api/groups": ("group_msgs",), "/api/group": ("group_msgs",),
     "/api/messages": ("group_msgs",), "/api/media": ("group_msgs",),
@@ -2612,7 +2759,7 @@ _API_PERM = {
 }
 
 _GET = {
-    "/api/me": _g_me, "/api/stats": _g_stats, "/api/groups": _g_groups, "/api/group": _g_group, "/api/messages": _g_messages,
+    "/api/me": _g_me, "/api/myself": _g_myself, "/api/myself/photo": _g_myself_photo, "/api/giveaway/referrals": _g_giveaway_referrals, "/api/stats": _g_stats, "/api/groups": _g_groups, "/api/group": _g_group, "/api/messages": _g_messages,
     "/api/users": _g_users, "/api/user": _g_user, "/api/avatar": _g_avatar, "/api/media": _g_media,
     "/api/tasks": _g_tasks, "/api/log": _g_log, "/api/bc/status": _g_bc_status,
 }
@@ -2637,7 +2784,7 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     social = path.startswith("/api/social/")
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
-    if not social:
+    if not social and path not in ("/api/myself", "/api/myself/photo"):
         _uid = int(user["id"])
         if not (has_perm(_uid, "panel") and has_perm(_uid, "miniapp")):
             return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
@@ -9910,7 +10057,22 @@ def _is_bot_text_command(text: str) -> bool:
 
 
 async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """قبل از همه‌ی هندلرها: ثبت گروه‌ها + اگه ربات خاموش باشه فقط پشتیبان‌ها کار می‌کنن."""
+    """ثبت گروه‌ها و کنترل دسترسی‌ها."""
+    cm = getattr(update, "my_chat_member", None)
+    if cm and cm.chat and cm.chat.type in ("group", "supergroup"):
+        new_status = str(getattr(cm.new_chat_member, "status", ""))
+        cid = cm.chat.id
+        try:
+            if new_status in ("left", "kicked"):
+                await pool.execute("DELETE FROM chats WHERE chat_id=$1", cid)
+                await pool.execute("DELETE FROM group_msgs WHERE chat_id=$1", cid)
+                KNOWN_CHATS.discard(cid)
+            elif new_status in ("member", "administrator"):
+                await pool.execute("INSERT INTO chats(chat_id,title) VALUES($1,$2) ON CONFLICT(chat_id) DO UPDATE SET title=EXCLUDED.title",cid,cm.chat.title or "")
+                KNOWN_CHATS.add(cid)
+        except Exception:
+            log.exception("group membership update failed")
+        return
     user, chat = update.effective_user, update.effective_chat
     if user and user.username and not user.is_bot:
         try:  # یوزرنیم ذخیره میشه تا پشتیبان بتونه با @یوزرنیم هم کاربر رو پیدا کنه
