@@ -1822,6 +1822,7 @@ const gameCss=document.createElement('style');gameCss.textContent=`
 @keyframes rkpop{0%{transform:scale(.55)}60%{transform:scale(1.14)}100%{transform:scale(1)}}@keyframes rkshk{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 .rk-cell.pop{animation:rkpop .28s}.rk-cell.boom{animation:rkshk .35s}
 .rk-cell.safe{background:#14532d}.rk-cell.bomb{background:#5b1626}.rk-cell.boom{background:#b91c1c}.rk-cell.off{opacity:.55}
+.self-card{overflow:hidden}.self-avatar{width:92px;height:92px;object-fit:cover;border-radius:24px;background:linear-gradient(135deg,#7445ff,#eb4da6);box-shadow:0 8px 24px #8b35d455}.self-fallback{display:grid;place-items:center;font-size:42px}.self-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:12px}.self-action{margin:0!important;min-height:48px;border-radius:15px;background:linear-gradient(135deg,#6848ed,#b23cc9);box-shadow:0 5px 16px #713bd333}.self-action.wide{grid-column:1/-1;background:linear-gradient(135deg,#d94b8a,#7b3ee8)}.self-back{background:var(--sec);color:var(--fg)}.gdivider{height:1px;background:var(--line);margin:14px 0}.car-photo{display:block;width:100%;height:165px;object-fit:contain;border-radius:16px;background:linear-gradient(135deg,#151b34,#293d64);margin-bottom:10px}.car-parts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.car-part{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:8px;background:var(--sec);border-radius:12px;font-size:12px}.btn.tiny{width:auto;margin:0!important;padding:5px 9px;font-size:11px}.gcard[data-game="crash"] .gvisual{animation:rocketLaunch7 7s ease-in-out infinite}@keyframes rocketLaunch7{0%,72%,100%{transform:translateY(0) rotate(0) scale(1);filter:drop-shadow(0 0 0 transparent)}78%{transform:translate(18px,-24px) rotate(-20deg) scale(1.1);filter:drop-shadow(0 0 15px #62d8ff)}88%{transform:translate(55px,-55px) rotate(-25deg) scale(.7);opacity:.25}90%{transform:translate(0,0) rotate(0) scale(1);opacity:1}}
 `;document.head.append(gameCss);
 const chatCss=document.createElement('style');chatCss.textContent=`
 .scomposer{align-items:flex-end}
@@ -1845,7 +1846,7 @@ function GamesScreen(){
   ['🚀','موشک','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن، ضریب خروج رو انتخاب کن یا خودت قبل از انفجار برداشت بزن.','crash'],
   ['🔨','سوسک‌کش','سوسک‌ها رو قبل از فرار با چکش بزن!','roach'],
   ['💣','مین','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن، خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.','mines']
- ].map(([ico,title,desc,key])=>h('div',{class:'gcard'},h('div',{class:'gvisual'},ico),h('div',{class:'gtitle'},title),h('div',{class:'gdesc'},desc),h('button',{onclick:()=>play(key)},'شروع بازی'))))}
+ ].map(([ico,title,desc,key])=>h('div',{class:'gcard', 'data-game':key},h('div',{class:'gvisual'},ico),h('div',{class:'gtitle'},title),h('div',{class:'gdesc'},desc),h('button',{onclick:()=>play(key)},'شروع بازی'))))}
  function play(k){
   if(k==='crash')crash(); if(k==='roach')roach(); if(k==='mines')mines();
  }
@@ -2172,12 +2173,41 @@ function GamesScreen(){
  home();root.append(box);return root;
 }
 function MyselfScreen(){
- const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
- (async()=>{try{const d=await api('/api/myself');const avatar=d.photo?h('img',{alt:'کاراکتر من'}):h('div',{class:'gvisual',style:'width:94px;height:94px;font-size:40px'},'♟');
- box.replaceChildren(h('div',{class:'ghead'},'خودم'),h('div',{class:'gcard'},h('div',{class:'selfhero'},avatar,h('div',{},h('div',{class:'gtitle'},d.character),h('div',{class:'gdesc'},d.name+' • سطح '+d.level))),h('div',{class:'gstats',style:'margin-top:18px'},
- ...[['انرژی',d.energy],['بانک',num(d.bank)+' تومان'],['دارایی کل',num(d.total_assets)+' تومان'],['دارایی تو جیب',num(d.pocket)+' تومان'],['تعداد جق',num(d.jaghs)],['آیدی عددی',d.id]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v),h('span',{class:'gdesc'},k))))));
- if(d.photo)blob('my-character-photo',d.photo).then(u=>{if(u)avatar.src=u});
- }catch(e){box.replaceChildren(h('div',{class:'empty err'},e.message))}})();
+ const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});let data=null;
+ const moneyInput=(ph)=>h('input',{class:'inp',type:'number',inputmode:'numeric',min:'1',placeholder:ph});
+ function btn(label,fn,cls=''){return h('button',{class:'btn '+cls,onclick:fn},label)}
+ async function load(){data=await api('/api/myself');home()}
+ function home(){
+  const av=data.photo?h('img',{class:'self-avatar',alt:'کاراکتر'}):h('div',{class:'self-avatar self-fallback'},'🎖');
+  if(data.photo)blob('my-character-photo',data.photo).then(u=>{if(u)av.src=u});
+  box.replaceChildren(h('div',{class:'ghead'},'♟ خودم'),h('div',{class:'gcard self-card'},h('div',{class:'selfhero'},av,h('div',{},h('div',{class:'gtitle'},data.character),h('div',{class:'gdesc'},data.name+' • سطح '+data.level))),
+   h('div',{class:'gstats'},...[[ '💵 جیب',num(data.pocket)+' تومان'],['🏦 بانک',num(data.bank)+' تومان'],['💎 دارایی کل',num(data.total_assets)+' تومان'],['⚡ انرژی',data.energy+'٪'],['🤛 تعداد',num(data.jaghs)],['🆔 شناسه',String(data.id)]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v),h('span',{class:'gdesc'},k))))),
+   h('div',{class:'self-grid'},
+    btn('🏦 بانک',bank,'self-action'),btn('🚗 ماشین من',cars,'self-action'),btn('💪 قدرت‌ها',powers,'self-action'),btn('⚙️ تنظیمات',settings,'self-action'),h('div',{class:'gdesc wide'},'🎰 موجودی دستگاه: '+num(data.jagh_machine)+' / 1,200,000 تومان'),btn('🎰 برداشت دستگاه جق · ۲ برابر',machine,'self-action wide')));
+ }
+ function bank(){
+  const amount=moneyInput('مبلغ به تومان');
+  box.replaceChildren(h('div',{class:'ghead'},'🏦 بانک مرکزی'),h('div',{class:'gcard'},h('div',{class:'gstats'},...[[ 'موجودی بانک',num(data.bank)],['موجودی جیب',num(data.pocket)]].map(([k,v])=>h('div',{class:'gstat'},h('b',{},v+' تومان'),h('span',{class:'gdesc'},k)))),amount,
+   btn('واریز به بانک (کارمزد ۵٬۰۰۰)',async()=>{await bankAction('deposit',amount)},'self-action'),btn('برداشت از بانک',async()=>{await bankAction('withdraw',amount)},'self-action'),
+   h('div',{class:'gdivider'}),h('div',{class:'gtitle'},'🔁 انتقال پول با شناسه کاربر'),h('input',{class:'inp',id:'truid',type:'number',placeholder:'شناسه عددی گیرنده'}),h('input',{class:'inp',id:'tramt',type:'number',placeholder:'مبلغ انتقال'}),
+   btn('ارسال انتقال',transfer,'self-action'),btn('← برگشت',home,'self-back')));
+ }
+ async function bankAction(action,input){const amount=Number(input.value);if(!amount||amount<=0)return toast('مبلغ معتبر وارد کن',1);try{const r=await api('/api/myself/bank',{action,amount});toast('عملیات بانکی انجام شد ✅');await load()}catch(e){toast(e.message,1)}}
+ async function transfer(){const user_id=Number(box.querySelector('#truid').value),amount=Number(box.querySelector('#tramt').value);if(!user_id||!amount||amount<=0)return toast('شناسه و مبلغ رو وارد کن',1);if(!await ask('انتقال '+num(amount)+' تومان به شناسه '+user_id+' انجام بشه؟'))return;try{await api('/api/myself/transfer',{user_id,amount});toast('انتقال با موفقیت انجام شد ✅');await load()}catch(e){toast(e.message,1)}}
+ async function machine(){if(Number(data.jagh_machine)<50000)return toast('موجودی دستگاه هنوز به ۵۰ هزار تومان نرسیده',1);if(!await ask('موجودی '+num(data.jagh_machine)+' تومانی دستگاه دو برابر و به کیف پول واریز شود؟'))return;try{const r=await api('/api/myself/machine',{});toast('برداشت دوبرابر شد: '+num(r.payout)+' تومان');await load()}catch(e){toast(e.message,1)}}
+ function cars(){
+  const items=data.cars||[];const cards=items.map(c=>{const img=h('img',{class:'car-photo',alt:c.name});blob('my-car-'+c.idx,'/api/myself/car-photo?idx='+c.idx).then(u=>{if(u)img.src=u});
+   const parts=Object.entries(c.parts||{}).map(([k,v])=>h('div',{class:'car-part'},h('span',{},({engine:'⚙️ موتور',body:'🛡️ بدنه',tires:'🛞 لاستیک',glass_rims:'🪟 شیشه و رینگ'})[k]||k),h('b',{},v+'/5'),btn('ارتقا',()=>upgrade(c.idx,k),'tiny')));
+   return h('div',{class:'gcard car-card'},img,h('div',{class:'gtitle'},c.emoji+' '+c.name),h('div',{class:'gdesc'},'سطح '+c.level+' • صندوق درآمد: '+num(c.pending)+' تومان'),h('div',{class:'car-parts'},...parts),btn('💰 جمع‌آوری درآمد',()=>collectCar(c.idx),'self-action'));
+  });
+  box.replaceChildren(h('div',{class:'ghead'},'🚗 ماشین‌های من'),...(cards.length?cards:[h('div',{class:'gcard'},'هنوز ماشینی نخریدی. برای خرید ماشین از بخش گاراژ ربات استفاده کن.')]),btn('← برگشت',home,'self-back'));
+ }
+ async function collectCar(idx){try{const r=await api('/api/myself/car/collect',{idx});toast('درآمد '+num(r.amount)+' تومان جمع شد');await load();cars()}catch(e){toast(e.message,1)}}
+ async function upgrade(idx,part){if(!await ask('این قطعه ارتقا داده شود؟ هزینه از کیف پول کم می‌شود.'))return;try{await api('/api/myself/car/upgrade',{idx,part});toast('ارتقا انجام شد');await load();cars()}catch(e){toast(e.message,1)}}
+ function powers(){box.replaceChildren(h('div',{class:'ghead'},'💪 قدرت‌ها'),h('div',{class:'gcard'},h('div',{class:'gtitle'},'🕵️ جاسوسی'),h('div',{class:'gdesc'},'با خرید قابلیت جاسوسی، اطلاعات و فعالیت کاربر را در گروه بررسی کن.'),h('div',{class:'gtitle'},'🤛 قدرت دست'),h('div',{class:'gdesc'},'دستت را تا ۵ سطح ارتقا بده تا زمان انتظار جق کمتر شود.'),h('div',{class:'gtitle'},'🥷 دزدی'),h('div',{class:'gdesc'},'در گروه روی پیام کاربر ریپلای کن و «دزدی» را بفرست.'),btn('📋 کپی دستور خرید جاسوسی',()=>copy('خرید جاسوسی'),'self-action'),btn('📋 کپی دستور دست',()=>copy('دست'),'self-action'),btn('📋 کپی دستور دزدی',()=>copy('دزدی'),'self-action'),btn('← برگشت',home,'self-back')))}
+ function settings(){box.replaceChildren(h('div',{class:'ghead'},'⚙️ تنظیمات'),h('div',{class:'gcard'},h('div',{class:'gtitle'},'انتخاب جنسیت کاراکتر'),btn('🧔 مرد',()=>gender('m'),'self-action'),btn('👩 زن',()=>gender('f'),'self-action'),h('div',{class:'gdivider'}),btn('📖 راهنما',()=>toast('راهنمای کامل در بخش راهنمای ربات موجود است'),'self-action'),btn('← برگشت',home,'self-back')))}
+ async function gender(g){try{await api('/api/myself/gender',{gender:g});toast('تنظیمات ذخیره شد');await load()}catch(e){toast(e.message,1)}}
+ load().catch(e=>box.replaceChildren(h('div',{class:'empty err'},e.message)));
  root.append(box);return root;
 }
 
@@ -3266,7 +3296,108 @@ async def _g_myself(qs, user):
     return _j({"id":uid,"name":r["name"] or user.get("first_name") or "کاربر",
                "gender":gender,"level":lvl,"character":CHARACTERS.get(gender,CHARACTERS["m"])[lvl-1][0],
                "energy":round(float(r["energy"] or 0),1),"bank":bank,"pocket":pocket,
-               "total_assets":pocket+bank,"jaghs":int(r["jaghs"] or 0),"photo":photo_url})
+               "total_assets":pocket+bank,"jaghs":int(r["jaghs"] or 0),"jagh_machine":int(await pool.fetchval("SELECT jagh_machine FROM users WHERE user_id=$1",uid) or 0),"photo":photo_url,
+               "cars":[{"idx":int(i),"name":CARS[int(i)][0],"emoji":CARS[int(i)][2],"color":int(car["color"] or 0),"level":int(car["level"] or 1),"pending":int(car["pending_profit"] or 0),"parts":{k:int(car[col] or 0) for k,(_label,_ico,col) in CAR_PARTS.items()}} for i,car in (await _owned_cars(uid)).items()]})
+
+
+async def _p_myself_bank(b, user):
+    uid=int(user["id"]); action=str(b.get("action") or ""); amount=_int(b.get("amount"),None,1,10**12)
+    if action not in ("deposit","withdraw") or amount is None:
+        raise _ApiError("عملیات یا مبلغ نامعتبره")
+    async with pool.acquire() as c:
+        async with c.transaction():
+            r=await c.fetchrow("SELECT balance,bank_balance FROM users WHERE user_id=$1 FOR UPDATE",uid)
+            if not r: raise _ApiError("حساب پیدا نشد")
+            pocket,bank=int(r["balance"] or 0),int(r["bank_balance"] or 0)
+            if action=="deposit":
+                fee=5_000
+                if pocket < amount+fee: raise _ApiError(f"موجودی جیب با کارمزد {fee:,} تومان کافی نیست")
+                await c.execute("UPDATE users SET balance=balance-$1,bank_balance=bank_balance+$2 WHERE user_id=$3",amount+fee,amount,uid)
+                pocket-=amount+fee; bank+=amount
+            else:
+                if bank < amount: raise _ApiError("موجودی بانک کافی نیست")
+                await c.execute("UPDATE users SET bank_balance=bank_balance-$1,balance=balance+$1 WHERE user_id=$2",amount,uid)
+                pocket+=amount; bank-=amount
+    return _j({"ok":True,"balance":pocket,"bank":bank,"total":pocket+bank})
+
+
+async def _p_myself_transfer(b, user):
+    uid=int(user["id"]); target=_int(b.get("user_id"),None,1,9_223_372_036_854_775_807); amount=_int(b.get("amount"),None,1,10**12)
+    if target is None or amount is None or target==uid: raise _ApiError("آیدی یا مبلغ انتقال معتبر نیست")
+    async with pool.acquire() as c:
+        async with c.transaction():
+            rows=await c.fetch("SELECT user_id,balance FROM users WHERE user_id=ANY($1::bigint[]) ORDER BY user_id FOR UPDATE",[uid,target])
+            by={int(x["user_id"]):x for x in rows}
+            if uid not in by: raise _ApiError("حساب شما پیدا نشد")
+            if target not in by: raise _ApiError("کاربر مقصد هنوز ربات رو استارت نکرده")
+            if int(by[uid]["balance"] or 0)<amount: raise _ApiError("موجودی جیب برای انتقال کافی نیست")
+            await c.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2",amount,uid)
+            await c.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2",amount,target)
+            remain=int(by[uid]["balance"] or 0)-amount
+    return _j({"ok":True,"balance":remain,"amount":amount,"user_id":target})
+
+
+async def _p_myself_machine(b, user):
+    uid=int(user["id"])
+    async with pool.acquire() as c:
+        async with c.transaction():
+            row=await c.fetchrow("SELECT jagh_machine,balance FROM users WHERE user_id=$1 FOR UPDATE",uid)
+            if not row: raise _ApiError("حساب پیدا نشد")
+            stored=int(row["jagh_machine"] or 0)
+            if stored<JM_MIN: raise _ApiError(f"حداقل {JM_MIN:,} تومان برای برداشت لازمه")
+            payout=stored*2
+            await c.execute("UPDATE users SET balance=balance+$1,jagh_machine=0 WHERE user_id=$2",payout,uid)
+            balance=int(row["balance"] or 0)+payout
+    return _j({"ok":True,"stored":stored,"payout":payout,"balance":balance,"machine":0})
+
+
+async def _p_myself_car_collect(b, user):
+    uid=int(user["id"]); idx=_int(b.get("idx"),None,0,len(CARS)-1)
+    if idx is None: raise _ApiError("ماشین نامعتبره")
+    async with pool.acquire() as c:
+        async with c.transaction():
+            row=await c.fetchrow("SELECT pending_profit FROM cars WHERE user_id=$1 AND car_idx=$2 FOR UPDATE",uid,idx)
+            if not row: raise _ApiError("این ماشین رو نداری")
+            amount=int(row["pending_profit"] or 0)
+            if amount<=0: raise _ApiError("هنوز درآمدی برای جمع‌آوری نداری")
+            await c.execute("UPDATE cars SET pending_profit=0 WHERE user_id=$1 AND car_idx=$2",uid,idx)
+            await c.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2",amount,uid)
+            bal=int(await c.fetchval("SELECT balance FROM users WHERE user_id=$1",uid) or 0)
+    return _j({"ok":True,"amount":amount,"balance":bal})
+
+
+async def _p_myself_car_upgrade(b, user):
+    uid=int(user["id"]); idx=_int(b.get("idx"),None,0,len(CARS)-1); part=str(b.get("part") or "")
+    if idx is None or part not in CAR_PARTS: raise _ApiError("قطعه یا ماشین نامعتبره")
+    _label,_ico,col=CAR_PARTS[part]
+    async with pool.acquire() as c:
+        async with c.transaction():
+            car=await c.fetchrow(f"SELECT {col} FROM cars WHERE user_id=$1 AND car_idx=$2 FOR UPDATE",uid,idx)
+            if not car: raise _ApiError("این ماشین رو نداری")
+            level=int(car[col] or 0)
+            if level>=CAR_MAX_LEVEL: raise _ApiError("این قطعه به آخرین سطح رسیده")
+            cost=car_upgrade_cost(idx,level)
+            paid=await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance >= $1 RETURNING balance",cost,uid)
+            if paid is None: raise _ApiError(f"پول کافی نیست؛ هزینه {cost:,} تومان")
+            await c.execute(f"UPDATE cars SET {col}={col}+1,level=GREATEST(level,1) WHERE user_id=$1 AND car_idx=$2",uid,idx)
+    return _j({"ok":True,"balance":int(paid),"level":level+1,"cost":cost,"part":part})
+
+
+async def _p_myself_gender(b, user):
+    uid=int(user["id"]); gender=str(b.get("gender") or "")
+    if gender not in ("m","f"): raise _ApiError("جنسیت نامعتبره")
+    await pool.execute("UPDATE users SET gender=$1 WHERE user_id=$2",gender,uid)
+    return _j({"ok":True,"gender":gender})
+
+
+async def _g_myself_car_photo(qs, user):
+    uid=int(user["id"]); idx=_int(qs.get("idx"),None,0,len(CARS)-1)
+    if idx is None: return 404,"text/plain",b"not found",{}
+    row=await pool.fetchrow("SELECT color FROM cars WHERE user_id=$1 AND car_idx=$2",uid,idx)
+    if not row: return 404,"text/plain",b"not found",{}
+    photo=await _car_photo(idx,int(row["color"] or 0))
+    if not photo: return 404,"text/plain",b"not found",{}
+    data=photo.getvalue(); return 200,"image/jpeg",data,{"Cache-Control":"private, max-age=300"}
 
 
 async def _g_myself_photo(qs, user):
@@ -3572,7 +3703,7 @@ _API_PERM = {
 }
 
 _GET = {
-    "/api/me": _g_me, "/api/myself": _g_myself, "/api/myself/photo": _g_myself_photo, "/api/giveaway/referrals": _g_giveaway_referrals, "/api/stats": _g_stats, "/api/groups": _g_groups, "/api/group": _g_group, "/api/messages": _g_messages,
+    "/api/me": _g_me, "/api/myself": _g_myself, "/api/myself/photo": _g_myself_photo, "/api/myself/car-photo": _g_myself_car_photo, "/api/giveaway/referrals": _g_giveaway_referrals, "/api/stats": _g_stats, "/api/groups": _g_groups, "/api/group": _g_group, "/api/messages": _g_messages,
     "/api/users": _g_users, "/api/user": _g_user, "/api/avatar": _g_avatar, "/api/media": _g_media,
     "/api/tasks": _g_tasks, "/api/log": _g_log, "/api/bc/status": _g_bc_status,
 }
@@ -3580,6 +3711,9 @@ _POST = {
     "/api/user/adjust": _p_adjust, "/api/user/ban": _p_ban, "/api/user/unban": _p_unban,
     "/api/task/add": _p_task_add, "/api/task/delete": _p_task_del, "/api/toggle": _p_toggle,
     "/api/bc/start": _p_bc_start,
+    "/api/myself/bank": _p_myself_bank, "/api/myself/transfer": _p_myself_transfer,
+    "/api/myself/machine": _p_myself_machine, "/api/myself/car/collect": _p_myself_car_collect,
+    "/api/myself/car/upgrade": _p_myself_car_upgrade, "/api/myself/gender": _p_myself_gender,
 }
 
 
@@ -3598,7 +3732,7 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     game = path.startswith("/api/game/")   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
-    if not social and not game and path not in ("/api/myself", "/api/myself/photo"):
+    if not social and not game and not path.startswith("/api/myself") :
         _uid = int(user["id"])
         if not (has_perm(_uid, "panel") and has_perm(_uid, "miniapp")):
             return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
