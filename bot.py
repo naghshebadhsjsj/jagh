@@ -7602,7 +7602,7 @@ async def _duel_run(update, context, q, frm, to, act, key, done):
 # ───────────────────────── قرعه‌کشی (ساخت از پنل پشتیبانی) ─────────────────────────
 # پشتیبان از /admin ← «🎁 قرعه‌کشی» یه قرعه‌کشی می‌سازه: نام، مدت، کانال‌ها، جایزه، ظرفیت، تعداد برنده، تعداد دایره‌های کپچا.
 # کاربر با دکمه‌ی پست وارد ربات میشه ← عضویت تو کانال‌ها ← کپچای دایره‌ای ← ثبت‌نام. هر نفری که با لینک اختصاصی یکی وارد بشه
-# برای دعوت‌کننده ۱ تیکت اضافه می‌شه؛ اگه اون نفر از کانال‌ها لفت بده تیکت حذف میشه. برنده‌ها با وزنِ تیکت قرعه‌کشی میشن.
+# برای دعوت‌کننده ۱ تیکت اضافه می‌شه؛ اگه اون نفر از کانال‌ها لفت بده تیکت حذف میشه. برنده‌ها کسایی‌ان که بیشترین تیکت رو دارن (تساوی: زودتر ثبت‌نام‌کرده).
 GW_CHECK_BATCH = 120          # هر دور چند نفر از ثبت‌نامی‌ها برای لفت‌دادن چک بشن
 GW_LOOP_SECS = 30
 GW_CAPTCHA_TTL = 180
@@ -7612,6 +7612,17 @@ GW_COLORS = [
     ("بنفش", (155, 89, 182)), ("نارنجی", (255, 140, 0)), ("صورتی", (255, 105, 180)), ("فیروزه‌ای", (20, 190, 200)),
 ]
 _GW_BOT_UN: str | None = None
+GW_TICKET_EID = "5438521232121149744"   # تیکت
+GW_WIN_EID = "5832692422647226240"      # برنده
+GW_TEDDY_EID = "5206502842478638898"    # جایزه‌ی تدی
+GW_TICKET_CE = f'<tg-emoji emoji-id="{GW_TICKET_EID}">🎟</tg-emoji>'
+GW_WIN_CE = f'<tg-emoji emoji-id="{GW_WIN_EID}">🏆</tg-emoji>'
+GW_TEDDY_CE = f'<tg-emoji emoji-id="{GW_TEDDY_EID}">🧸</tg-emoji>'
+
+
+def gw_prize_ce(prize: str) -> str:
+    p = (prize or "").lower()
+    return GW_TEDDY_CE if ("تدی" in p or "teddy" in p) else TROPHY_CE
 
 
 async def _gw_bot_username(bot) -> str:
@@ -7694,8 +7705,8 @@ async def gw_top_text(gid: int) -> str:
     if not rows:
         return "🏆 هنوز کسی ثبت‌نام نکرده."
     medals = ["🥇", "🥈", "🥉"]
-    lines = [f"{medals[i] if i < 3 else str(i + 1) + '.'} {_ulink(r['user_id'], r['name'] or 'کاربر')} — {r['tickets']} تیکت ({r['invited']} دعوت)" for i, r in enumerate(rows)]
-    return "🏆 <b>برترین‌های قرعه‌کشی</b>\n\n" + "\n".join(lines)
+    lines = [f"{medals[i] if i < 3 else str(i + 1) + '.'} {_ulink(r['user_id'], r['name'] or 'کاربر')} — {r['tickets']} {GW_TICKET_CE} ({r['invited']} دعوت)" for i, r in enumerate(rows)]
+    return f"{GW_WIN_CE} <b>برترین‌های قرعه‌کشی</b>\n\n" + "\n".join(lines)
 
 
 def gw_post(g, bot_un: str, entries: int | None = None):
@@ -7703,16 +7714,17 @@ def gw_post(g, bot_un: str, entries: int | None = None):
     chs = _gw_channels(g)
     cap = f"{entries:,}/{g['max_users']:,}" if (g["max_users"] and entries is not None) else (f"{g['max_users']:,} نفر" if g["max_users"] else "نامحدود")
     text = (f"🎁 <b>قرعه‌کشی: {html.escape(g['name'])}</b>\n\n"
-            f"🏆 جایزه: <b>{html.escape(g['prize'])}</b>\n"
-            f"👥 تعداد برنده: <b>{g['winners']}</b>\n"
-            f"👤 ظرفیت: <b>{cap}</b>\n"
-            f"⏰ پایان: <b>{_gw_fmt_time(g['ends_at'])}</b> (ساعت تهران)\n")
+            f"{gw_prize_ce(g['prize'])} جایزه: <b>{html.escape(g['prize'])}</b>\n"
+            f"{GW_WIN_CE} تعداد برنده: <b>{g['winners']}</b>\n"
+            f"{REF_CE} ظرفیت: <b>{cap}</b>\n"
+            f"{HG_CE} پایان: <b>{_gw_fmt_time(g['ends_at'])}</b> (ساعت تهران)\n")
     if chs:
         text += "\n📢 شرط شرکت: عضویت در " + "، ".join(chs) + "\n"
-    text += "\n🎟 با لینک اختصاصی‌ت دوستات رو دعوت کن؛ هر نفری که وارد شه یه تیکت بیشتر برات می‌شه (اگه از کانال‌ها لفت بده تیکتش حذف می‌شه)."
+    text += (f"\n{GW_TICKET_CE} با لینک اختصاصی‌ت دوستات رو دعوت کن؛ هر نفری که وارد شه یه تیکت بیشتر برات می‌شه (اگه از کانال‌ها لفت بده تیکتش حذف می‌شه)."
+             f"\n{GW_WIN_CE} هر کس بیشترین تیکت رو جمع کنه برنده‌ست!")
     rows = [[btn("🎁 شرکت در قرعه‌کشی", "success", url=f"https://t.me/{bot_un}?start=gw_{g['id']}")]]
     if g["top_public"]:
-        rows.append([btn("🏆 لیست برترین‌ها", "primary", url=f"https://t.me/{bot_un}?start=gwtop_{g['id']}")])
+        rows.append([btn("لیست برترین‌ها", "primary", icon=GW_WIN_EID, url=f"https://t.me/{bot_un}?start=gwtop_{g['id']}")])
     return text, InlineKeyboardMarkup(rows)
 
 
@@ -7793,13 +7805,14 @@ async def gw_status_view(bot, g, uid: int):
     from urllib.parse import quote
     share = f"https://t.me/share/url?url={quote(link)}&text={quote('🎁 تو قرعه‌کشی «' + g['name'] + '» شرکت کن!')}"
     text = (f"✅ <b>تو تو قرعه‌کشی «{html.escape(g['name'])}» ثبت‌نام شدی!</b>\n\n"
-            f"🎟 تیکت‌های تو: <b>{tickets}</b> (دعوت‌های فعال: {invited})\n"
-            f"⏰ پایان: {_gw_fmt_time(g['ends_at'])} (ساعت تهران)\n\n"
+            f"{GW_TICKET_CE} تیکت‌های تو: <b>{tickets}</b> (دعوت‌های فعال: {invited})\n"
+            f"{HG_CE} پایان: {_gw_fmt_time(g['ends_at'])} (ساعت تهران)\n"
+            f"{GW_WIN_CE} هر کس بیشترین تیکت رو داشته باشه برنده‌ست.\n\n"
             f"🔗 لینک اختصاصی تو:\n<code>{link}</code>\n\n"
             "هر نفری که با این لینک وارد بشه، کپچا رو رد کنه و تو کانال‌ها عضو بمونه، یه تیکت برات اضافه می‌کنه. اگه لفت بده تیکتش حذف می‌شه.")
     rows = [[btn("📤 اشتراک‌گذاری لینک", "success", url=share)]]
     if g["top_public"]:
-        rows.append([btn("🏆 لیست برترین‌ها", "primary", callback_data=f"gw:top:{g['id']}")])
+        rows.append([btn("لیست برترین‌ها", "primary", icon=GW_WIN_EID, callback_data=f"gw:top:{g['id']}")])
     rows.append([btn("🔄 تازه‌سازی", None, callback_data=f"gw:me:{g['id']}")])
     return text, InlineKeyboardMarkup(rows)
 
@@ -7825,7 +7838,7 @@ async def gw_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if g["status"] != "active":
         winners = (g["winner_ids"] or "").split(",") if g["winner_ids"] else []
-        await msg.reply_text("🏁 این قرعه‌کشی تموم شده." + (f"\nبرنده‌ها: {len(winners)} نفر 🎉" if winners else ""))
+        await msg.reply_text("🏁 این قرعه‌کشی تموم شده." + (f"\nبرنده‌ها: {len(winners)} نفر {GW_WIN_CE}" if winners else ""))
         return
     if time.time() >= g["ends_at"]:
         await msg.reply_text("⌛ زمان این قرعه‌کشی تموم شده؛ نتیجه به‌زودی اعلام می‌شه.")
@@ -7946,7 +7959,7 @@ async def gw_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if res[0] == "ok" and res[1]:
             t, _ = await gw_tickets(gid, res[1])
             try:
-                await bot.send_message(res[1], f"🎟 {_ulink(user.id, user.full_name)} با لینک تو وارد قرعه‌کشی «{html.escape(g['name'])}» شد!\nتیکت‌های تو: <b>{t}</b>", parse_mode="HTML")
+                await bot.send_message(res[1], f"{GW_TICKET_CE} {_ulink(user.id, user.full_name)} با لینک تو وارد قرعه‌کشی «{html.escape(g['name'])}» شد!\nتیکت‌های تو: <b>{t}</b>", parse_mode="HTML")
             except Exception:
                 pass
 
@@ -7990,24 +8003,17 @@ async def gw_sweep_left(bot, g, only_old: float | None = None, limit: int | None
 
 
 async def gw_draw(bot, g) -> list[int]:
+    """برنده‌ها = بیشترین تیکت‌ها (تساوی: هر کی زودتر ثبت‌نام کرده)."""
     rows = await pool.fetch(
         "SELECT e.user_id, 1 + coalesce(c.n, 0) AS t FROM giveaway_entries e "
         "LEFT JOIN (SELECT inviter_id, count(*) AS n FROM giveaway_entries WHERE gid=$1 AND status='active' AND inviter_id IS NOT NULL GROUP BY inviter_id) c "
-        "ON c.inviter_id = e.user_id WHERE e.gid=$1 AND e.status='active'", g["id"])
-    pool_ = [(r["user_id"], int(r["t"])) for r in rows]
-    rng = random.SystemRandom()
+        "ON c.inviter_id = e.user_id WHERE e.gid=$1 AND e.status='active' ORDER BY t DESC, e.joined_at, e.user_id", g["id"])
     winners: list[int] = []
     chs = _gw_channels(g)
-    while pool_ and len(winners) < g["winners"]:
-        total = sum(t for _, t in pool_)
-        x = rng.uniform(0, total)
-        acc = 0
-        idx = len(pool_) - 1
-        for i, (_, t) in enumerate(pool_):
-            acc += t
-            if x <= acc:
-                idx = i; break
-        uid, _t = pool_.pop(idx)
+    for r in rows:
+        if len(winners) >= g["winners"]:
+            break
+        uid = r["user_id"]
         if chs and await gw_has_left(bot, chs, uid):   # برنده باید هنوز تو کانال‌ها باشه
             await pool.execute("UPDATE giveaway_entries SET status='left' WHERE gid=$1 AND user_id=$2", g["id"], uid)
             continue
@@ -8029,8 +8035,10 @@ async def gw_finish(bot, gid: int, by_staff: int | None = None):
     await pool.execute("UPDATE giveaways SET winner_ids=$2 WHERE id=$1", gid, ",".join(str(w) for w in winners))
     names = {r["user_id"]: r["name"] for r in await pool.fetch("SELECT user_id, name FROM users WHERE user_id = ANY($1::bigint[])", winners)} if winners else {}
     if winners:
-        lines = "\n".join(f"{i + 1}. {_ulink(w, names.get(w) or 'کاربر')}" for i, w in enumerate(winners))
-        result = f"🏁 <b>قرعه‌کشی «{html.escape(g['name'])}» تموم شد!</b>\n\n🏆 جایزه: <b>{html.escape(g['prize'])}</b>\n\n🎉 برنده‌ها:\n{lines}\n\nمبارک باشه! برای دریافت جایزه با پشتیبانی هماهنگ کنید."
+        tk = {w: (await gw_tickets(gid, w))[0] for w in winners}
+        lines = "\n".join(f"{GW_WIN_CE} {i + 1}. {_ulink(w, names.get(w) or 'کاربر')} — {tk[w]} {GW_TICKET_CE}" for i, w in enumerate(winners))
+        result = (f"🏁 <b>قرعه‌کشی «{html.escape(g['name'])}» تموم شد!</b>\n\n{gw_prize_ce(g['prize'])} جایزه: <b>{html.escape(g['prize'])}</b>\n\n"
+                  f"{GW_WIN_CE} برنده‌ها (بیشترین تیکت):\n{lines}\n\nمبارک باشه! برای دریافت جایزه با پشتیبانی هماهنگ کنید.")
     else:
         result = f"🏁 <b>قرعه‌کشی «{html.escape(g['name'])}» تموم شد!</b>\n\nمتأسفانه شرکت‌کننده‌ی معتبری نبود و برنده‌ای انتخاب نشد."
     # پست‌های قبلی: دکمه‌ها برداشته میشه و نتیجه پایینشون میاد
@@ -8038,6 +8046,10 @@ async def gw_finish(bot, gid: int, by_staff: int | None = None):
     for p in posts:
         try:
             await bot.edit_message_reply_markup(p["chat_id"], p["message_id"], reply_markup=None)
+        except Exception:
+            pass
+        try:   # پست پین‌شده‌ی قرعه‌کشی (اگه پین شده باشه) برداشته میشه
+            await bot.unpin_chat_message(p["chat_id"], message_id=p["message_id"])
         except Exception:
             pass
         try:
@@ -8048,7 +8060,7 @@ async def gw_finish(bot, gid: int, by_staff: int | None = None):
         await asyncio.sleep(0.06)
     for w in winners:
         try:
-            await bot.send_message(w, f"🎉 تبریک! تو برنده‌ی قرعه‌کشی «{html.escape(g['name'])}» شدی!\n🏆 جایزه: <b>{html.escape(g['prize'])}</b>\nبرای دریافت جایزه به پشتیبانی پیام بده.", parse_mode="HTML")
+            await bot.send_message(w, f"{GW_WIN_CE} تبریک! تو برنده‌ی قرعه‌کشی «{html.escape(g['name'])}» شدی!\n{gw_prize_ce(g['prize'])} جایزه: <b>{html.escape(g['prize'])}</b>\nبرای دریافت جایزه به پشتیبانی پیام بده.", parse_mode="HTML")
         except Exception:
             pass
     others = [r["user_id"] for r in await pool.fetch("SELECT user_id FROM giveaway_entries WHERE gid=$1 AND status='active'", gid) if r["user_id"] not in winners]
@@ -8085,15 +8097,15 @@ async def gw_publish(bot, gid: int, admin_chat: int):
     g = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", gid)
     un = await _gw_bot_username(bot)
     text, kb = gw_post(g, un)
-    targets: list[tuple[int, bool]] = []   # (chat_id, ثبت‌شود برای پایان؟)
+    targets: list[tuple] = []   # (chat_id, ثبت‌شود برای پایان؟، گپ هست؟ → پین بشه)
     if g["send_channels"]:
-        targets += [(c, True) for c in _gw_channels(g)]
+        targets += [(c, True, False) for c in _gw_channels(g)]
     if g["send_groups"]:
-        targets += [(r["chat_id"], True) for r in await pool.fetch("SELECT chat_id FROM chats")]
+        targets += [(r["chat_id"], True, True) for r in await pool.fetch("SELECT chat_id FROM chats")]
     if g["send_users"]:
-        targets += [(r["user_id"], False) for r in await pool.fetch("SELECT user_id FROM users WHERE started")]
-    seen, ok, fail = set(), 0, 0
-    for cid, keep in targets:
+        targets += [(r["user_id"], False, False) for r in await pool.fetch("SELECT user_id FROM users WHERE started")]
+    seen, ok, fail, pinned = set(), 0, 0, 0
+    for cid, keep, is_group in targets:
         if cid in seen:
             continue
         seen.add(cid)
@@ -8103,6 +8115,12 @@ async def gw_publish(bot, gid: int, admin_chat: int):
                 if keep:
                     await pool.execute("INSERT INTO giveaway_posts (gid, chat_id, message_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", gid, m.chat_id, m.message_id)
                 ok += 1
+                if is_group:   # اگه ربات تو اون گپ ادمینه و دسترسی پین داره، همون لحظه پین میشه
+                    try:
+                        await bot.pin_chat_message(m.chat_id, m.message_id, disable_notification=False)
+                        pinned += 1
+                    except Exception:
+                        pass
                 break
             except RetryAfter as e:
                 await asyncio.sleep(e.retry_after + 1)
@@ -8111,7 +8129,7 @@ async def gw_publish(bot, gid: int, admin_chat: int):
                 break
         await asyncio.sleep(0.06)
     try:
-        await bot.send_message(admin_chat, f"✅ قرعه‌کشی «{g['name']}» منتشر شد.\nارسال موفق: {ok:,} • ناموفق: {fail:,}\nپایان: {_gw_fmt_time(g['ends_at'])} (تهران)\n\nمدیریتش: /admin ← 🎁 قرعه‌کشی")
+        await bot.send_message(admin_chat, f"✅ قرعه‌کشی «{g['name']}» منتشر شد.\nارسال موفق: {ok:,} • ناموفق: {fail:,} • پین‌شده تو گپ‌ها: {pinned:,}\nپایان: {_gw_fmt_time(g['ends_at'])} (تهران)\n\nمدیریتش: /admin ← 🎁 قرعه‌کشی")
     except Exception:
         pass
 
@@ -8130,7 +8148,7 @@ def gw_draft_text(d: dict) -> str:
             f"نام: {d['name']}\nمدت: {_gw_fmt_dur(d['duration'])}\nکانال‌ها: {', '.join(d['channels']) or '—'}\nجایزه: {d['prize']}\n"
             f"ظرفیت: {d['max_users'] or 'نامحدود'} • برنده: {d['winners']} • دایره‌های کپچا: {d['circles']}\n\n"
             f"ارسال به: گروه‌ها {yn(d['send_groups'])} • پیوی کاربرها {yn(d['send_users'])} • کانال‌ها {yn(d['send_channels'])}\n"
-            f"لیست برترین‌ها برای همه: {yn(d['top_public'])} (خاموش = فقط پشتیبان‌ها)\n\nتنظیمات رو عوض کن و «انتشار» رو بزن.")
+            f"لیست برترین‌ها برای همه: {yn(d['top_public'])} (خاموش = فقط پشتیبان‌ها)\nبرنده‌ها: کسایی که بیشترین تیکت رو دارن • تو گپ‌هایی که ربات ادمینه پین میشه\n\nتنظیمات رو عوض کن و «انتشار» رو بزن.")
 
 
 def gw_draft_kb(d: dict):
