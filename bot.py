@@ -533,6 +533,7 @@ async def init_db(app: Application):
             except Exception:
                 log.exception("bad %s in db", r["key"])
         await c.execute("CREATE TABLE IF NOT EXISTS support_staff (user_id BIGINT PRIMARY KEY, perms TEXT NOT NULL DEFAULT '')")
+        await c.execute("CREATE TABLE IF NOT EXISTS mini_games (uid BIGINT PRIMARY KEY, kind TEXT NOT NULL, bet BIGINT NOT NULL, state TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE TABLE IF NOT EXISTS transfer_daily (user_id BIGINT NOT NULL, day TEXT NOT NULL, total BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day))")
         await c.execute("CREATE TABLE IF NOT EXISTS support_manage (manager_id BIGINT NOT NULL, target_id BIGINT NOT NULL, PRIMARY KEY(manager_id, target_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS referrals (referred_id BIGINT PRIMARY KEY, referrer_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, rewarded_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_check DOUBLE PRECISION NOT NULL DEFAULT 0)")
@@ -1622,17 +1623,62 @@ function SocialScreen(){
     return el;
   }
   function openUser(uid){if(uid===me.id&&profile){section='profile';drawNav();renderSection();return}push(UserScreen(uid))}
-  async function renderRoom(){clearInterval(roomTimer);roomTimer=null;roomAfter=0;body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری چت‌روم…'));const msgs=h('div',{class:'sroom'}),composer=h('div',{class:'scomposer'}),inp=h('input',{class:'inp',placeholder:'پیامت رو بنویس…'}),send=h('button',{class:'btn s',style:'background:#b12bd5',onclick:sendMsg},'ارسال');let replyBar=h('div',{class:'snotice hid'});const premium=h('button',{class:'ib',title:'ایموجی پرمیوم',onclick:()=>{const id=prompt('شناسه عددی ایموجی پرمیوم تلگرام را وارد کن');if(id&&/^\d+$/.test(id.trim())){premium.dataset.id=id.trim();premium.textContent='💎 ✓';toast('ایموجی پرمیوم برای پیام بعدی انتخاب شد')}else if(id)toast('شناسه باید فقط عدد باشد',1)}},'💎');premium.classList.remove('hid');composer.append(premium,inp,send);
-    function renderMessage(m){const name=m.display_name||m.username||String(m.user_id);const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});node.append(h('div',{class:'sub'},name+' • '+whenShort(m.created_at)));if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text||'پاسخ به پیام')));if(m.text)node.append(h('div',{class:'tx',dir:'auto'},m.text));if(m.premium_emoji_id){const tag=h('span',{class:'prem',title:'ایموجی پرمیوم'},'⭐');node.append(tag);blob('ce'+m.premium_emoji_id,'/api/social/emoji?id='+encodeURIComponent(m.premium_emoji_id)).then(u=>{if(u){const im=h('img',{src:u,alt:'ایموجی پرمیوم',style:'width:26px;height:26px;object-fit:contain;vertical-align:middle'});tag.replaceChildren(im)}})}const rs=h('div',{class:'sreacts'},...(m.reactions||[]).map(r=>h('button',{onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));rs.append(h('button',{onclick:()=>reactSheet(m)},'＋'));node.append(rs);let x=null;node.ontouchstart=e=>{x=e.touches[0].clientX};node.ontouchend=e=>{if(x!==null&&x-e.changedTouches[0].clientX>55){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(m.text,60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}x=null};return node}
-    async function loadRoom(){if(roomBusy)return;roomBusy=true;try{const arr=await api('/api/social/room?after='+roomAfter);if(arr.length){arr.forEach(m=>{msgs.append(renderMessage(m));roomAfter=Math.max(roomAfter,m.message_id)});msgs.scrollTop=msgs.scrollHeight}}catch(e){toast(e.message||'دریافت پیام‌ها ناموفق بود',1)}finally{roomBusy=false}}
-    async function react(mid,em){try{await api('/api/social/room/react',{message_id:mid,emoji:em});loadRoom()}catch(e){toast(e.message,1)}}
+  async function renderRoom(){
+    clearInterval(roomTimer);roomTimer=null;roomAfter=0;body.classList.add('sg-flex');
+    body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری چت‌روم…'));
+    const msgs=h('div',{class:'sroom'}),composer=h('div',{class:'scomposer'}),inp=h('input',{class:'inp',placeholder:'پیامت رو بنویس…'}),send=h('button',{class:'btn s',style:'background:#b12bd5',onclick:()=>sendMsg()},'ارسال');
+    const replyBar=h('div',{class:'snotice hid'});let lastSig='';
+    const premium=h('button',{class:'ib',title:'ایموجی پرمیوم',onclick:()=>{
+      sheet('ایموجی پرمیوم',close=>{
+        const i=h('input',{class:'inp',placeholder:'شناسه عددی ایموجی پرمیوم تلگرام',dir:'ltr',inputmode:'numeric'});
+        return h('div',{},i,h('button',{class:'btn',onclick:()=>{const v=i.value.trim();if(!/^\d+$/.test(v)){toast('شناسه باید فقط عدد باشد',1);return}premium.dataset.id=v;premium.textContent='💎 ✓';close();toast('ایموجی پرمیوم برای پیام بعدی انتخاب شد')}},'تأیید'),
+          h('button',{class:'btn',style:'background:var(--sec);color:var(--fg)',onclick:()=>{premium.dataset.id='';premium.textContent='💎';close()}},'حذف انتخاب'))})}},'💎');
+    composer.append(premium,inp,send);
+    function setReply(m,name){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(m.text,60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}
+    function renderMessage(m){
+      const name=m.display_name||m.username||m.uname||String(m.user_id);
+      const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});
+      node.append(h('div',{class:'sub'},name+' • '+whenShort(m.created_at)));
+      if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text||'پاسخ به پیام')));
+      if(m.text)node.append(h('div',{class:'tx',dir:'auto'},m.text));
+      if(m.premium_emoji_id){const tag=h('span',{class:'prem',title:'ایموجی پرمیوم'},'⭐');node.append(tag);blob('ce'+m.premium_emoji_id,'/api/social/emoji?id='+encodeURIComponent(m.premium_emoji_id)).then(u=>{if(u){tag.replaceChildren(h('img',{src:u,alt:'ایموجی پرمیوم',style:'width:26px;height:26px;object-fit:contain;vertical-align:middle'}))}})}
+      const rx=Array.isArray(m.reactions)?m.reactions:[];
+      const rs=h('div',{class:'sreacts'},...rx.map(r=>h('button',{style:r.mine?'border-color:#b12bd5':'',onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));
+      rs.append(h('button',{onclick:()=>reactSheet(m)},'＋'),h('button',{onclick:()=>{setReply(m,name);inp.focus()}},'↩'));
+      node.append(rs);
+      let x=null;node.ontouchstart=e=>{x=e.touches[0].clientX};node.ontouchend=e=>{if(x!==null&&x-e.changedTouches[0].clientX>55)setReply(m,name);x=null};
+      return node;
+    }
+    async function loadRoom(force){
+      if(roomBusy)return;roomBusy=true;
+      try{
+        const arr=await api('/api/social/room?after=0');
+        const sig=JSON.stringify(arr.map(m=>[m.message_id,m.reactions]));
+        if(force||sig!==lastSig){
+          const first=!lastSig,near=first||msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<140;
+          lastSig=sig;
+          msgs.replaceChildren(...(arr.length?arr.map(renderMessage):[h('div',{class:'empty'},'هنوز پیامی نیست؛ اولین نفر باش 👋')]));
+          if(near||force)msgs.scrollTop=msgs.scrollHeight;
+        }
+      }catch(e){if(!lastSig)toast(e.message||'دریافت پیام‌ها ناموفق بود',1)}
+      finally{roomBusy=false}
+    }
+    async function react(mid,em){try{await api('/api/social/room/react',{message_id:mid,emoji:em});loadRoom(true)}catch(e){toast(e.message,1)}}
     function reactSheet(m){sheet('ری‌اکشن پیام',close=>h('div',{class:'chips'},['❤️','😂','😍','🔥','👏','👍','👎','😮'].map(em=>h('button',{class:'chip',onclick:()=>{close();react(m.message_id,em)}},em))))}
-    async function sendMsg(){const text=inp.value.trim(),pe=premium.dataset.id||null;if(!text&&!pe)return;send.disabled=true;try{await api('/api/social/room/send',{text,reply_to:reply?.message_id||null,premium_emoji_id:pe});inp.value='';premium.dataset.id='';premium.textContent='💎';reply=null;replyBar.classList.add('hid');await loadRoom()}catch(e){toast(e.message,1)}send.disabled=false}
+    async function sendMsg(){
+      const text=inp.value.trim(),pe=premium.dataset.id||null;if(!text&&!pe)return;
+      send.disabled=true;
+      try{await api('/api/social/room/send',{text,reply_to:reply?reply.message_id:null,premium_emoji_id:pe});inp.value='';premium.dataset.id='';premium.textContent='💎';reply=null;replyBar.classList.add('hid');roomBusy=false;await loadRoom(true)}
+      catch(e){toast(e.message,1)}
+      send.disabled=false;
+    }
     inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
-    body.replaceChildren(msgs,replyBar,composer);await loadRoom();roomTimer=setInterval(loadRoom,3500);root._destroy=()=>{clearInterval(roomTimer);roomTimer=null};
+    body.replaceChildren(msgs,replyBar,composer);
+    await loadRoom(true);roomTimer=setInterval(()=>loadRoom(false),3500);
+    root._destroy=()=>{clearInterval(roomTimer);roomTimer=null};
   }
   async function renderSection(){
-    clearInterval(roomTimer);roomTimer=null;
+    clearInterval(roomTimer);roomTimer=null;body.classList.remove('sg-flex');
     body.classList.toggle('sg-flex',section==='room');
     fab.classList.add('hid');
     if(!me){body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری…'));return}
@@ -1663,28 +1709,52 @@ const gameCss=document.createElement('style');gameCss.textContent=`
 .minecell.open{background:#17263e}.roach-area{height:260px;position:relative;background:radial-gradient(#1d4b38,#09241d);border-radius:18px;overflow:hidden}
 .roach{position:absolute;border:0;background:transparent;font-size:38px;padding:8px}
 .selfhero{display:flex;align-items:center;gap:14px}.selfhero img{width:94px;height:94px;object-fit:cover;border-radius:22px;border:2px solid #5d8dff}
+.rk-wrap{max-width:520px;margin:0 auto}.rk-wrap button{font-family:inherit}
+.rk-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 12px}
+.rk-back{border:0;background:#ffffff14;color:#fff;border-radius:14px;padding:9px 13px;font-weight:800}
+.rk-title{font-weight:900;font-size:17px}.rk-bal{background:#ffffff14;border-radius:16px;padding:8px 12px;font-size:13px;white-space:nowrap}
+.rk-chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;min-height:46px}.rk-chips::-webkit-scrollbar{display:none}
+.rk-chip{flex:0 0 auto;border-radius:18px;padding:9px 16px;font-weight:900;font-size:15px;background:#232b40;color:#8b96b0;direction:ltr}
+.rk-chip.first{background:#fff;color:#0b1220}.rk-chip.mid{background:#1f4fd1;color:#fff}.rk-chip.hi{background:#6a35e0;color:#fff}
+.rk-stage{position:relative;height:290px;border-radius:24px;overflow:hidden;background:radial-gradient(ellipse at 50% 55%,#10244a,#050b1c 72%);margin-bottom:12px}
+.rk-stars{position:absolute;inset:0}.rk-star{position:absolute;width:4px;height:4px;background:#fff;opacity:.8;animation:rktw 3s infinite ease-in-out}
+@keyframes rktw{50%{opacity:.12}}
+.rk-plane{position:absolute;left:50%;top:50%;width:230px;margin:-70px 0 0 -115px;filter:drop-shadow(0 0 26px #1de9c455)}
+.rk-plane svg{display:block;width:100%;height:auto}
+.rk-plane.fly{animation:rkfl 2.2s ease-in-out infinite}@keyframes rkfl{50%{transform:translateY(-14px) rotate(-2deg)}}
+.rk-plane.boom{animation:rkb .7s forwards}@keyframes rkb{to{transform:scale(1.7) rotate(25deg);opacity:0}}
+.rk-mult{position:absolute;left:0;right:0;top:14px;text-align:center;font-size:46px;font-weight:900;direction:ltr;text-shadow:0 0 22px #3b82ff88;z-index:2}
+.rk-mult.run{color:#7ee8ff}.rk-mult.win{color:#4ade80}.rk-mult.lose{color:#ff5a6e}
+.rk-panel{background:linear-gradient(#17233f,#0f1830);border:1px solid #ffffff18;border-radius:26px;padding:16px}
+.rk-lbl{font-weight:900;margin-bottom:10px}.rk-row{display:flex;gap:8px;align-items:center}
+.rk-inp{flex:1;min-width:0;width:100%;box-sizing:border-box;background:#0a1124;border:1px solid #ffffff25;border-radius:14px;color:#fff;font-size:20px;font-weight:900;padding:12px;text-align:center}
+.rk-inp.sm{font-size:15px;margin-top:8px}
+.rk-step{flex:0 0 46px;height:46px;border:0;border-radius:14px;background:#ffffff18;color:#fff;font-size:24px;font-weight:900}
+.rk-opts{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 2px}
+.rk-opt{border:1px solid #ffffff25;background:#ffffff0d;color:#fff;border-radius:14px;padding:9px 13px;font-weight:800;font-size:13px}.rk-opt.on{background:#2f6bff;border-color:#2f6bff}
+.rk-hint{font-size:12.5px;color:#aab9d0;margin-top:10px;line-height:1.7}.rk-hint.bad{color:#ff8a98}
+.rk-main{width:100%;border:0;border-radius:18px;background:#2f6bff;color:#fff;font-weight:900;font-size:17px;padding:15px;margin-top:12px}
+.rk-main.green{background:#16a34a}.rk-main:disabled{opacity:.45}
+.rk-link{border:0;background:transparent;color:#8fb2ff;font-size:13px;margin-top:10px;width:100%;padding:6px}
+.rk-res{border-radius:18px;padding:14px;text-align:center}.rk-res.win{background:#14532d66}.rk-res.lose{background:#7f1d1d66}
+.rk-res-t{font-weight:900;font-size:18px}.rk-res-d{font-size:13px;margin-top:6px;color:#dbe6f7;line-height:1.7}
+.rk-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.rk-st{background:#ffffff10;border-radius:14px;padding:10px;text-align:center}.rk-st b{display:block;font-size:15px;direction:ltr}.rk-st span{font-size:11px;color:#9fb0cc}
+.rk-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:12px 0}
+.rk-cell{aspect-ratio:1;border:0;border-radius:14px;background:#22314f;font-size:26px;color:#fff;padding:0}
+.rk-cell.safe{background:#14532d}.rk-cell.bomb{background:#5b1626}.rk-cell.boom{background:#b91c1c}.rk-cell.off{opacity:.55}
 `;document.head.append(gameCss);
 function GamesScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
  function home(){box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),...[
-  ['🚀','موشک انفجار','ضریب رو تماشا کن؛ قبل از انفجار خارج شو.','crash'],
+  ['🚀','موشک','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن، ضریب خروج رو انتخاب کن یا خودت قبل از انفجار برداشت بزن.','crash'],
   ['🔨','سوسک‌کش','سوسک‌ها رو قبل از فرار با چکش بزن!','roach'],
-  ['💣','مین','خانه‌های امن رو پیدا کن و از مین‌ها دوری کن.','mines']
+  ['💣','مین','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن، خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.','mines']
  ].map(([ico,title,desc,key])=>h('div',{class:'gcard'},h('div',{class:'gvisual'},ico),h('div',{class:'gtitle'},title),h('div',{class:'gdesc'},desc),h('button',{onclick:()=>play(key)},'شروع بازی'))))}
  function play(k){
   if(k==='crash')crash(); if(k==='roach')roach(); if(k==='mines')mines();
  }
  function frame(title,content){box.replaceChildren(h('div',{class:'ghead'},title),h('button',{class:'ib',style:'color:white',onclick:home},'← بازگشت'),content)}
- function crash(){
-  let mult=1.00,ended=false,timer=null,started=false;
-  const val=h('div',{style:'font-size:54px;font-weight:900;text-align:center;padding:35px 0;color:#70e4ff'},'x1.00');
-  const msg=h('div',{class:'gdesc',style:'text-align:center'},'برای شروع پرواز آماده‌ای؟');
-  const go=h('button',{onclick:()=>{
-   if(!started){started=true;ended=false;mult=1;go.textContent='خروج از پرواز';msg.textContent='ضریب در حال افزایش است…';timer=setInterval(()=>{mult*=1+Math.random()*.035;val.textContent='x'+mult.toFixed(2);if(Math.random()<.018){clearInterval(timer);ended=true;started=false;msg.textContent='موشک منفجر شد! دوباره تلاش کن.';go.textContent='پرواز دوباره'}},180)}
-   else{clearInterval(timer);started=false;ended=true;msg.textContent='با ضریب x'+mult.toFixed(2)+' خارج شدی!';go.textContent='پرواز دوباره'}
-  }},'شروع پرواز');
-  frame('🚀 موشک انفجار',h('div',{class:'gcard'},h('div',{class:'gvisual'},'🛸'),val,msg,go));
- }
  function roach(){
   let score=0,left=25,timer=null;const sc=h('b',{},'امتیاز: ۰'),tm=h('b',{},'زمان: ۲۵');
   const area=h('div',{class:'roach-area'}),bug=h('button',{class:'roach',onclick:()=>{score++;sc.textContent='امتیاز: '+score;move()}},'🪳');
@@ -1693,12 +1763,168 @@ function GamesScreen(){
   const start=h('button',{onclick:()=>{score=0;left=25;sc.textContent='امتیاز: ۰';clearInterval(timer);if(!bug.isConnected)area.append(bug);score=0;left=25;sc.textContent='امتیاز: ۰';tm.textContent='زمان: ۲۵';timer=setInterval(()=>{left--;tm.textContent='زمان: '+left;if(left<=0){clearInterval(timer);toast('پایان بازی؛ امتیاز '+score)}},1000);move()}},'شروع مجدد');
   frame('🔨 سوسک‌کش',h('div',{class:'gcard'},h('div',{class:'gbtnrow'},sc,tm),area,start));
  }
- function mines(){
-  let bombs=new Set();while(bombs.size<5)bombs.add(Math.floor(Math.random()*25));
-  let ended=false,opened=0;const grid=h('div',{class:'game-board'});
-  function draw(){grid.replaceChildren(...Array.from({length:25},(_,i)=>{const b=h('button',{class:'minecell',onclick:()=>{if(ended||b.classList.contains('open'))return;b.classList.add('open');if(bombs.has(i)){b.textContent='💥';ended=true;toast('مین منفجر شد!');}else{b.textContent='💎';opened++;if(opened===20){ended=true;toast('برنده شدی!')}}}},'');return b}))}
-  const reset=h('button',{onclick:()=>{bombs=new Set();while(bombs.size<5)bombs.add(Math.floor(Math.random()*25));ended=false;opened=0;draw()}},'چیدمان جدید');
-  frame('💣 مین',h('div',{class:'gcard'},h('div',{class:'gdesc'},'۵ مین بین ۲۵ خانه پنهان شده؛ خانه‌های امن را پیدا کن.'),grid,reset));draw();
+ let rkCleanup=null;
+ function leave(){if(rkCleanup){rkCleanup();rkCleanup=null}home()}
+ const PLANE_SVG='<svg viewBox="0 0 240 170" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="rkg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4fbff"/><stop offset="1" stop-color="#7f98ad"/></linearGradient><linearGradient id="rkg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cfe0ec"/><stop offset="1" stop-color="#4b6379"/></linearGradient><linearGradient id="rkf" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#5ff5d1"/><stop offset="1" stop-color="#0b6c6c" stop-opacity="0"/></linearGradient></defs><g class="rk-flame"><ellipse cx="66" cy="112" rx="38" ry="9" fill="url(#rkf)" transform="rotate(-18 66 112)"/><ellipse cx="104" cy="130" rx="40" ry="10" fill="url(#rkf)" transform="rotate(-18 104 130)"/></g><polygon points="40,98 200,22 150,118" fill="url(#rkg1)"/><polygon points="200,22 118,104 150,118" fill="url(#rkg2)"/><polygon points="40,98 118,104 150,118" fill="#9fb4c6"/><polygon points="200,22 128,78 118,104" fill="#e8f3fb" opacity=".8"/><rect x="104" y="110" width="42" height="12" rx="5" fill="#2b7bd8" transform="rotate(-18 125 116)"/></svg>';
+ const fx=m=>'x'+Number(m).toFixed(2);
+ const toEn=s=>String(s).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+ function starField(){const f=h('div',{class:'rk-stars'});for(let i=0;i<26;i++)f.append(h('i',{class:'rk-star',style:'left:'+Math.random()*100+'%;top:'+Math.random()*100+'%;animation-delay:'+(Math.random()*3).toFixed(2)+'s'}));return f}
+ function topBar(title,balEl){return h('div',{class:'rk-top'},h('button',{class:'rk-back',onclick:leave},'بازگشت ←'),h('div',{class:'rk-title'},title),h('div',{class:'rk-bal'},'💰 ',balEl))}
+ /* انتخاب مبلغ شرط (حداقل ۵۰٬۰۰۰ تومان) */
+ function betPicker(st,onNext,btnText){
+  const min=st.min_bet||50000,max=Math.min(st.max_bet||1e12,st.balance||0);
+  let bet=min;
+  const inp=h('input',{class:'rk-inp',type:'text',inputmode:'numeric',dir:'ltr',value:String(min)});
+  const hint=h('div',{class:'rk-hint'});
+  const go=h('button',{class:'rk-main'},btnText);
+  const parse=()=>parseInt(toEn(inp.value).replace(/\D/g,''),10)||0;
+  function refresh(){bet=parse();let msg='',bad=false;
+   if(bet<min){msg='حداقل شرط '+num(min)+' تومان است.';bad=true}
+   else if(bet>(st.balance||0)){msg='موجودی کافی نیست (موجودی: '+num(st.balance)+' تومان).';bad=true}
+   else if(bet>(st.max_bet||1e12)){msg='سقف شرط '+num(st.max_bet)+' تومان است.';bad=true}
+   else msg='مبلغ شرط: '+num(bet)+' تومان';
+   hint.textContent=msg;hint.className='rk-hint'+(bad?' bad':'');go.disabled=bad}
+  const set=v=>{inp.value=String(Math.max(0,Math.floor(v)));refresh()};
+  inp.oninput=refresh;
+  go.onclick=()=>{refresh();if(!go.disabled)onNext(bet)};
+  const quick=[[50000,'۵۰ هزار'],[100000,'۱۰۰ هزار'],[250000,'۲۵۰ هزار'],[500000,'۵۰۰ هزار'],[1000000,'۱ میلیون']];
+  const box=h('div',{},
+   h('div',{class:'rk-row'},h('button',{class:'rk-step',onclick:()=>set(Math.max(min,parse()-50000))},'−'),inp,h('button',{class:'rk-step',onclick:()=>set(parse()+50000)},'+')),
+   h('div',{class:'rk-opts'},...quick.map(([v,l])=>h('button',{class:'rk-opt',onclick:()=>set(v)},l)),h('button',{class:'rk-opt',onclick:()=>set(max)},'حداکثر')),
+   hint,go);
+  refresh();return box;
+ }
+ async function crash(){
+  box.replaceChildren(h('div',{class:'gdesc',style:'padding:40px;text-align:center'},'در حال بارگذاری…'));
+  let st;try{st=await api('/api/game/crash/state')}catch(e){toast(e.message,1);home();return}
+  if(st.other){toast('اول بازی '+(st.other==='mines'?'مین':'موشک')+'ِ نیمه‌کاره‌ات رو تموم کن.',1);if(st.other==='mines'){mines();return}}
+  let off=0,poll=null,raf=null,bet=0,target=null,over=false,stopped=false;
+  const stopLoops=()=>{clearInterval(poll);cancelAnimationFrame(raf);poll=raf=null};
+  rkCleanup=()=>{stopped=true;stopLoops()};
+  const balEl=h('b',{},num(st.balance));
+  const mult=h('div',{class:'rk-mult'},'x1.00');
+  const plane=h('div',{class:'rk-plane'});plane.innerHTML=PLANE_SVG;
+  const chips=h('div',{class:'rk-chips'});
+  const panel=h('div',{class:'rk-panel'});
+  const drawChips=l=>chips.replaceChildren(...(l||[]).map((m,i)=>h('div',{class:'rk-chip '+(i===0?'first':m>=3?'hi':m>=1.5?'mid':'lo')},fx(m))));
+  box.replaceChildren(h('div',{class:'rk-wrap'},topBar('🚀 موشک',balEl),chips,h('div',{class:'rk-stage'},starField(),plane,mult),panel));
+  drawChips(st.hist);
+  function phaseBet(){
+   over=false;mult.textContent='x1.00';mult.className='rk-mult';plane.className='rk-plane';
+   panel.replaceChildren(h('div',{class:'rk-lbl'},'۱. مبلغ شرط را انتخاب کن'),betPicker(st,v=>{bet=v;phaseTarget()},'ادامه'));
+  }
+  function phaseTarget(){
+   let tgt=null;
+   const info=h('div',{class:'rk-hint'}),row=h('div',{class:'rk-opts'});
+   const cust=h('input',{class:'rk-inp sm',type:'text',inputmode:'decimal',dir:'ltr',placeholder:'ضریب دلخواه، مثلاً 2.5'});
+   const opts=[[null,'برداشت دستی'],[1.5,'x1.5'],[2,'x2'],[3,'x3'],[5,'x5'],[10,'x10']];
+   function draw(){
+    row.replaceChildren(...opts.map(([v,l])=>h('button',{class:'rk-opt'+(tgt===v?' on':''),onclick:()=>{tgt=v;cust.value=v==null?'':String(v);draw()}},l)));
+    info.className='rk-hint';
+    info.textContent=tgt==null?'وسط پرواز خودت دکمه «برداشت» را می‌زنی.':'اگر موشک به x'+tgt.toFixed(2)+' برسد خودکار برداشت می‌شود و '+num(Math.floor(bet*tgt))+' تومان می‌گیری.';
+   }
+   cust.oninput=()=>{const v=parseFloat(toEn(cust.value).replace('٫','.').replace(',','.'));tgt=(isFinite(v)&&v>=1.1&&v<=100)?Math.round(v*100)/100:null;draw()};
+   const go=h('button',{class:'rk-main',onclick:async()=>{
+    go.disabled=true;
+    try{const r=await api('/api/game/crash/start',{bet,target:tgt});st.balance=r.balance;balEl.textContent=num(r.balance);fly(r)}
+    catch(e){toast(e.message,1);go.disabled=false}
+   }},'شرط بندی کنید');
+   panel.replaceChildren(h('div',{class:'rk-lbl'},'۲. ضریب خروج را انتخاب کن یا دستی برداشت بزن'),row,cust,info,go,
+    h('button',{class:'rk-link',onclick:phaseBet},'← تغییر مبلغ شرط ('+num(bet)+' تومان)'));
+   draw();
+  }
+  function finish(s){
+   if(over)return;over=true;stopLoops();
+   st.balance=s.balance;balEl.textContent=num(s.balance);drawChips(s.hist);
+   const win=s.result==='win';
+   if(win){mult.textContent=fx(s.mult);mult.className='rk-mult win';plane.className='rk-plane fly'}
+   else{mult.textContent=fx(s.crash);mult.className='rk-mult lose';plane.className='rk-plane boom'}
+   hap(win?'success':'error');
+   panel.replaceChildren(
+    h('div',{class:'rk-res '+(win?'win':'lose')},
+     h('div',{class:'rk-res-t'},win?'🎉 برداشت موفق!':'💥 موشک منفجر شد!'),
+     h('div',{class:'rk-res-d'},win?('ضریب '+fx(s.mult)+' • دریافتی '+num(s.payout)+' تومان • سود '+num(s.profit)+' تومان'):('موشک در '+fx(s.crash)+' منفجر شد و شرط '+num(s.bet)+' تومانی‌ات سوخت.'))),
+    h('button',{class:'rk-main',onclick:phaseBet},'بازی جدید'));
+  }
+  function fly(r){
+   over=false;bet=r.bet;target=r.target;off=r.now-Date.now()/1000;
+   const rate=r.rate,t0=r.t0;let busy=false,cur=1;
+   plane.className='rk-plane fly';mult.className='rk-mult run';
+   const cash=h('button',{class:'rk-main green',onclick:doCash},'برداشت');
+   panel.replaceChildren(h('div',{class:'rk-lbl'},'شرط: '+num(bet)+' تومان'),cash,
+    h('div',{class:'rk-hint'},target?('ضریب هدف: x'+target.toFixed(2)+' (خودکار برداشت می‌شود)'):'هر لحظه ممکن است منفجر شود؛ به‌موقع برداشت بزن!'));
+   async function check(){if(over)return;try{const s=await api('/api/game/crash/state');if(s.done)finish(s);else busy=false}catch(e){busy=false}}
+   async function doCash(){if(busy||over)return;busy=true;cash.disabled=true;try{finish(await api('/api/game/crash/cashout',{}))}catch(e){if(!over){toast(e.message,1);busy=false;cash.disabled=false}}}
+   function tick(){
+    if(stopped||over)return;
+    const el=Date.now()/1000+off-t0;cur=el<=0?1:Math.floor(Math.exp(rate*el)*100)/100;
+    mult.textContent=fx(cur);cash.textContent='برداشت  '+num(Math.floor(bet*cur))+' تومان';
+    if(target&&cur>=target&&!busy){busy=true;check()}
+    raf=requestAnimationFrame(tick);
+   }
+   poll=setInterval(()=>{if(!busy&&!over){busy=true;check()}},450);
+   tick();
+  }
+  if(st.active)fly(st);else if(st.done)finish(st);else phaseBet();
+ }
+ async function mines(){
+  box.replaceChildren(h('div',{class:'gdesc',style:'padding:40px;text-align:center'},'در حال بارگذاری…'));
+  let st;try{st=await api('/api/game/mines/state')}catch(e){toast(e.message,1);home();return}
+  if(st.other==='crash'){toast('اول بازی موشکِ نیمه‌کاره‌ات رو تموم کن.',1);crash();return}
+  rkCleanup=()=>{};
+  let playing=false,busy=false,g=null;
+  const balEl=h('b',{},num(st.balance));
+  const sMult=h('b',{},'x1.00'),sWin=h('b',{},'—'),sNext=h('b',{},'—');
+  const stats=h('div',{class:'rk-stats'},h('div',{class:'rk-st'},sMult,h('span',{},'ضریب فعلی')),h('div',{class:'rk-st'},sWin,h('span',{},'برد فعلی')),h('div',{class:'rk-st'},sNext,h('span',{},'ضریب بعدی')));
+  const grid=h('div',{class:'rk-grid'});
+  const panel=h('div',{class:'rk-panel'});
+  box.replaceChildren(h('div',{class:'rk-wrap'},topBar('💣 مین',balEl),stats,grid,panel));
+  function drawGrid(opened,bombs,boom){
+   grid.replaceChildren(...Array.from({length:25},(_,i)=>{
+    const o=opened.includes(i),b=!!bombs&&bombs.includes(i);
+    return h('button',{class:'rk-cell'+(o?' safe':'')+(b?' bomb':'')+(i===boom?' boom':'')+(playing?'':' off'),onclick:()=>openCell(i)},b?'💣':o?'💎':'')}));
+  }
+  function setStats(v){
+   sMult.textContent=v?fx(v.mult):'x1.00';sWin.textContent=v?num(v.payout):'—';sNext.textContent=v&&v.next?fx(v.next):'—';
+  }
+  function phaseBet(){
+   playing=false;g=null;setStats(null);drawGrid([],null,-1);
+   panel.replaceChildren(h('div',{class:'rk-lbl'},'مبلغ شرط را انتخاب کن'),
+    h('div',{class:'rk-hint'},'۵ مین بین ۲۵ خانه پنهان است. هر خانه امن ضریب را بالا می‌برد؛ هر وقت خواستی برداشت بزن.'),
+    betPicker(st,async v=>{try{const r=await api('/api/game/mines/start',{bet:v});st.balance=r.balance;balEl.textContent=num(r.balance);play(r)}catch(e){toast(e.message,1)}},'شروع بازی'));
+  }
+  function play(v){
+   playing=true;g=v;setStats(v);drawGrid(v.opened,null,-1);
+   const cash=h('button',{class:'rk-main green',onclick:doCash},'برداشت');
+   panel.replaceChildren(h('div',{class:'rk-lbl'},'شرط: '+num(v.bet)+' تومان'),cash,h('div',{class:'rk-hint'},'خانه‌ها را باز کن؛ اگر به مین بخوری شرطت می‌سوزد!'));
+   cash.disabled=!v.opened.length;cash.textContent=v.opened.length?('برداشت  '+num(v.payout)+' تومان'):'اول یک خانه باز کن';
+  }
+  function end(win,r){
+   playing=false;st.balance=r.balance;balEl.textContent=num(r.balance);
+   drawGrid(r.opened,r.bombs,r.lost?r.cell:-1);hap(win?'success':'error');
+   if(!win)setStats(null);
+   panel.replaceChildren(
+    h('div',{class:'rk-res '+(win?'win':'lose')},
+     h('div',{class:'rk-res-t'},win?(r.auto?'🏆 همه‌ی خانه‌های امن را باز کردی!':'🎉 برداشت موفق!'):'💥 مین خوردی!'),
+     h('div',{class:'rk-res-d'},win?('ضریب '+fx(r.mult)+' • دریافتی '+num(r.payout)+' تومان • سود '+num(r.profit)+' تومان'):('شرط '+num(r.bet)+' تومانی‌ات سوخت.'))),
+    h('button',{class:'rk-main',onclick:phaseBet},'بازی جدید'));
+  }
+  async function openCell(i){
+   if(!playing||busy||g.opened.includes(i))return;busy=true;
+   try{
+    const r=await api('/api/game/mines/open',{cell:i});
+    if(r.lost)end(false,r);
+    else if(r.won){g=r;setStats(r);end(true,r)}
+    else play(r);
+   }catch(e){toast(e.message,1)}
+   busy=false;
+  }
+  async function doCash(){
+   if(!playing||busy)return;busy=true;
+   try{end(true,await api('/api/game/mines/cashout',{}))}catch(e){toast(e.message,1)}
+   busy=false;
+  }
+  if(st.active)play(st);else phaseBet();
  }
  home();root.append(box);return root;
 }
@@ -2662,13 +2888,22 @@ async def _social_comment_del(b, user):
 async def _social_room(qs, user):
     after = _int(qs.get("after"), 0, 0)
     rows = await pool.fetch(
-        "SELECT m.message_id,m.user_id,m.text,m.reply_to,m.premium_emoji_id,m.created_at,sp.username,sp.display_name, "
+        "SELECT m.message_id,m.user_id,m.text,m.reply_to,m.premium_emoji_id,m.created_at,sp.username,sp.display_name,u.name AS uname, "
         "(SELECT json_agg(json_build_object('emoji',r.emoji,'n',r.n,'mine',r.mine)) FROM (SELECT emoji,count(*)::int n,bool_or(user_id=$2) mine FROM social_room_reactions WHERE message_id=m.message_id GROUP BY emoji) r) reactions, "
         "(SELECT text FROM social_room_messages x WHERE x.message_id=m.reply_to) reply_text, "
-        "(SELECT COALESCE(sp2.display_name,sp2.username,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name "
-        "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id "
+        "(SELECT COALESCE(sp2.display_name,sp2.username,u2.name,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id LEFT JOIN users u2 ON u2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name "
+        "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id LEFT JOIN users u ON u.user_id=m.user_id "
         "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]))
-    return _j([dict(r) for r in reversed(rows)])
+    out = []
+    for r in reversed(rows):
+        d = dict(r)
+        rx = d.get("reactions")
+        if isinstance(rx, str):   # json_agg بدون codec به‌صورت متن برمی‌گرده؛ باید به لیست تبدیل بشه
+            try: rx = json.loads(rx)
+            except Exception: rx = []
+        d["reactions"] = rx or []
+        out.append(d)
+    return _j(out)
 
 
 async def _social_room_send(b,user):
@@ -2765,6 +3000,242 @@ async def _g_giveaway_referrals(qs, user):
                     "user_link":f"tg://user?id={r['user_id']}","inviter_link":f"tg://user?id={r['inviter_id']}"})
     return _j(out)
 
+# ───────────── بازی‌های مینی‌اپ: موشک و مین با شرط واقعی (همه‌چیز سمت سرور حساب میشه) ─────────────
+MINI_MIN_BET = 50_000          # حداقل شرط موشک و مین مینی‌اپ (تومن)
+MINI_CRASH_RATE = 0.12         # ضریب = e^(RATE × ثانیه)؛ از x1.00 شروع میشه
+MINI_CRASH_EDGE = 0.95         # بخش اصلی توزیع انفجار؛ پایین‌تر = سخت‌تر
+MINI_CRASH_EARLY = 0.08        # احتمال انفجار زودهنگام (بین x1.00 تا x1.19)
+MINI_CRASH_MAX = 100.0
+MINI_CRASH_DELAY = 0.8         # ثانیه‌ی آماده‌باش قبل از پرواز
+MINI_MINES_CELLS = 25
+MINI_MINES_COUNT = 5
+MINI_MINES_EDGE = 0.92         # سود ربات تو مین (۸٪)
+MINI_MINES_MAXMULT = 50.0      # سقف ضریب؛ بهش برسه خودکار برداشت میشه
+_MINI_LOCKS: dict[int, asyncio.Lock] = {}
+_MINI_HIST: list[float] = []   # آخرین نقطه‌های انفجار موشک (کل بازیکنا)
+
+
+def _mini_lock(uid: int) -> asyncio.Lock:
+    return _MINI_LOCKS.setdefault(uid, asyncio.Lock())
+
+
+def _mini_crash_point() -> float:
+    if random.random() < MINI_CRASH_EARLY:
+        return round(random.uniform(1.0, 1.19), 2)
+    u = max(random.random(), 1e-9)
+    return max(1.0, min(MINI_CRASH_MAX, math.floor(100 * MINI_CRASH_EDGE / u) / 100))
+
+
+def _mini_mult_at(t: float) -> float:
+    return 1.0 if t <= 0 else max(1.0, math.floor(math.exp(MINI_CRASH_RATE * t) * 100) / 100)
+
+
+def _mini_time_for(m: float) -> float:
+    return math.log(max(m, 1.0)) / MINI_CRASH_RATE
+
+
+def _mini_mines_mult(k: int) -> float:
+    if k <= 0:
+        return 1.0
+    m = MINI_MINES_EDGE
+    for i in range(k):
+        m *= (MINI_MINES_CELLS - i) / (MINI_MINES_CELLS - MINI_MINES_COUNT - i)
+    return min(MINI_MINES_MAXMULT, math.floor(m * 100) / 100)
+
+
+async def _mini_ctx(user):
+    uid = int(user["id"])
+    if BANNED.get(uid, 0) > time.time():
+        raise _ApiError("حسابت محروم شده.", 403)
+    r = await pool.fetchrow("SELECT balance FROM users WHERE user_id=$1", uid)
+    if not r:
+        raise _ApiError("اول ربات رو استارت کن تا حسابت ساخته بشه")
+    return uid, int(r["balance"] or 0)
+
+
+async def _mini_balance(uid: int) -> int:
+    return int(await pool.fetchval("SELECT balance FROM users WHERE user_id=$1", uid) or 0)
+
+
+def _mini_bet(b) -> int:
+    try:
+        bet = int(float(str(b.get("bet")).replace(",", "").strip()))
+    except (TypeError, ValueError):
+        raise _ApiError("مبلغ شرط نامعتبره")
+    if bet < MINI_MIN_BET:
+        raise _ApiError(f"حداقل شرط {MINI_MIN_BET:,} تومنه.")
+    if bet > CASINO_MAX_BET:
+        raise _ApiError(f"حداکثر شرط {CASINO_MAX_BET:,} تومنه.")
+    return bet
+
+
+def _mini_base(bal: int) -> dict:
+    return {"balance": bal, "min_bet": MINI_MIN_BET, "max_bet": CASINO_MAX_BET, "hist": _MINI_HIST[:14]}
+
+
+# ───── موشک ─────
+def _mini_crash_eval(st: dict, manual: bool):
+    """('win'|'crash'|'run', ضریب). خروج خودکار روی ضریب هدف هم همین‌جا (به‌صورت lazy) حساب میشه."""
+    el = max(0.0, time.time() - st["t0"])
+    cp, tgt = st["crash"], st.get("target")
+    if tgt and tgt <= cp and el >= _mini_time_for(tgt):
+        return "win", float(tgt)
+    if el >= _mini_time_for(cp):
+        return "crash", cp
+    if manual:
+        return "win", min(_mini_mult_at(el), cp)
+    return "run", _mini_mult_at(el)
+
+
+async def _mini_crash_finish(uid: int, bet: int, st: dict, res: str, m: float) -> dict:
+    win = res == "win"
+    await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+    payout = int(bet * m + 1e-6) if win else 0
+    if payout > 0:
+        await _give(uid, payout)
+    _MINI_HIST.insert(0, st["crash"])
+    del _MINI_HIST[30:]
+    return {"done": True, "active": False, "result": "win" if win else "crash", "mult": m, "crash": st["crash"],
+            "bet": bet, "payout": payout, "profit": payout - bet, "balance": await _mini_balance(uid), "hist": _MINI_HIST[:14]}
+
+
+async def _p_game_crash_start(b, user):
+    uid, _bal = await _mini_ctx(user)
+    bet = _mini_bet(b)
+    tgt = None
+    if b.get("target") not in (None, "", 0):
+        try:
+            tgt = round(float(b.get("target")), 2)
+        except (TypeError, ValueError):
+            raise _ApiError("ضریب نامعتبره")
+        if tgt < 1.1 or tgt > MINI_CRASH_MAX:
+            raise _ApiError("ضریب باید بین ۱٫۱ و ۱۰۰ باشه.")
+    async with _mini_lock(uid):
+        if await pool.fetchval("SELECT 1 FROM mini_games WHERE uid=$1", uid):
+            raise _ApiError("اول بازی قبلیت رو تموم کن.")
+        if await _take(uid, bet) is None:
+            raise _ApiError("موجودی کافی نیست.")
+        st = {"crash": _mini_crash_point(), "t0": time.time() + MINI_CRASH_DELAY, "target": tgt}
+        try:
+            await pool.execute("INSERT INTO mini_games (uid, kind, bet, state, created_at) VALUES ($1,'crash',$2,$3,$4)",
+                               uid, bet, json.dumps(st), time.time())
+        except Exception:
+            await _give(uid, bet)
+            raise
+    return _j({"t0": st["t0"], "now": time.time(), "rate": MINI_CRASH_RATE, "bet": bet, "target": tgt,
+               "balance": await _mini_balance(uid)})
+
+
+async def _g_game_crash_state(qs, user):
+    uid, bal = await _mini_ctx(user)
+    async with _mini_lock(uid):
+        row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+        if not row or row["kind"] != "crash":
+            return _j({**_mini_base(bal), "active": False, "done": False, "other": row["kind"] if row else None})
+        st, bet = json.loads(row["state"]), int(row["bet"])
+        res, m = _mini_crash_eval(st, False)
+        if res == "run":
+            return _j({**_mini_base(bal), "active": True, "done": False, "t0": st["t0"], "now": time.time(),
+                       "rate": MINI_CRASH_RATE, "bet": bet, "target": st.get("target")})
+        return _j(await _mini_crash_finish(uid, bet, st, res, m))
+
+
+async def _p_game_crash_cashout(b, user):
+    uid, _bal = await _mini_ctx(user)
+    async with _mini_lock(uid):
+        row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+        if not row or row["kind"] != "crash":
+            raise _ApiError("بازی فعالی نداری.")
+        st, bet = json.loads(row["state"]), int(row["bet"])
+        res, m = _mini_crash_eval(st, True)
+        return _j(await _mini_crash_finish(uid, bet, st, res, m))
+
+
+# ───── مین ─────
+def _mini_mines_view(st: dict, bet: int) -> dict:
+    k = len(st["opened"])
+    m = _mini_mines_mult(k)
+    nxt = _mini_mines_mult(k + 1) if k < MINI_MINES_CELLS - MINI_MINES_COUNT else None
+    return {"opened": st["opened"], "mult": m, "next": nxt, "bet": bet, "payout": int(bet * m + 1e-6),
+            "cells": MINI_MINES_CELLS, "mines": MINI_MINES_COUNT}
+
+
+async def _p_game_mines_start(b, user):
+    uid, _bal = await _mini_ctx(user)
+    bet = _mini_bet(b)
+    async with _mini_lock(uid):
+        if await pool.fetchval("SELECT 1 FROM mini_games WHERE uid=$1", uid):
+            raise _ApiError("اول بازی قبلیت رو تموم کن.")
+        if await _take(uid, bet) is None:
+            raise _ApiError("موجودی کافی نیست.")
+        st = {"bombs": random.sample(range(MINI_MINES_CELLS), MINI_MINES_COUNT), "opened": []}
+        try:
+            await pool.execute("INSERT INTO mini_games (uid, kind, bet, state, created_at) VALUES ($1,'mines',$2,$3,$4)",
+                               uid, bet, json.dumps(st), time.time())
+        except Exception:
+            await _give(uid, bet)
+            raise
+    return _j({**_mini_mines_view(st, bet), "balance": await _mini_balance(uid)})
+
+
+async def _g_game_mines_state(qs, user):
+    uid, bal = await _mini_ctx(user)
+    row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+    if not row or row["kind"] != "mines":
+        return _j({**_mini_base(bal), "active": False, "other": row["kind"] if row else None,
+                   "cells": MINI_MINES_CELLS, "mines": MINI_MINES_COUNT})
+    return _j({**_mini_base(bal), "active": True, **_mini_mines_view(json.loads(row["state"]), int(row["bet"]))})
+
+
+async def _p_game_mines_open(b, user):
+    uid, _bal = await _mini_ctx(user)
+    cell = _int(b.get("cell"))
+    if cell is None or not 0 <= cell < MINI_MINES_CELLS:
+        raise _ApiError("خونه نامعتبره")
+    async with _mini_lock(uid):
+        row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+        if not row or row["kind"] != "mines":
+            raise _ApiError("بازی فعالی نداری.")
+        st, bet = json.loads(row["state"]), int(row["bet"])
+        if cell in st["opened"]:
+            raise _ApiError("این خونه قبلاً باز شده.")
+        if cell in st["bombs"]:
+            await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+            return _j({"lost": True, "cell": cell, "opened": st["opened"], "bombs": st["bombs"], "bet": bet,
+                       "balance": await _mini_balance(uid)})
+        st["opened"].append(cell)
+        v = _mini_mines_view(st, bet)
+        if len(st["opened"]) >= MINI_MINES_CELLS - MINI_MINES_COUNT or v["mult"] >= MINI_MINES_MAXMULT:
+            await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+            await _give(uid, v["payout"])
+            return _j({**v, "won": True, "auto": True, "bombs": st["bombs"], "profit": v["payout"] - bet,
+                       "balance": await _mini_balance(uid)})
+        await pool.execute("UPDATE mini_games SET state=$2 WHERE uid=$1", uid, json.dumps(st))
+        return _j(v)
+
+
+async def _p_game_mines_cashout(b, user):
+    uid, _bal = await _mini_ctx(user)
+    async with _mini_lock(uid):
+        row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+        if not row or row["kind"] != "mines":
+            raise _ApiError("بازی فعالی نداری.")
+        st, bet = json.loads(row["state"]), int(row["bet"])
+        if not st["opened"]:
+            raise _ApiError("اول حداقل یه خونه امن باز کن.")
+        v = _mini_mines_view(st, bet)
+        await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+        await _give(uid, v["payout"])
+        return _j({**v, "won": True, "auto": False, "bombs": st["bombs"], "profit": v["payout"] - bet,
+                   "balance": await _mini_balance(uid)})
+
+
+_GAME_GET = {"/api/game/crash/state": _g_game_crash_state, "/api/game/mines/state": _g_game_mines_state}
+_GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cashout": _p_game_crash_cashout,
+              "/api/game/mines/start": _p_game_mines_start, "/api/game/mines/open": _p_game_mines_open,
+              "/api/game/mines/cashout": _p_game_mines_cashout}
+
+
 _SOCIAL_GET={"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/comments":_social_comments}
 _SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/react":_social_room_react}
 
@@ -2807,9 +3278,10 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     if user is None:
         return _j({"error": "نشست تلگرام معتبر نیست؛ مینی‌اپ را از داخل تلگرام باز کن"}, 403)
     social = path.startswith("/api/social/")
+    game = path.startswith("/api/game/")   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
-    if not social and path not in ("/api/myself", "/api/myself/photo"):
+    if not social and not game and path not in ("/api/myself", "/api/myself/photo"):
         _uid = int(user["id"])
         if not (has_perm(_uid, "panel") and has_perm(_uid, "miniapp")):
             return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
@@ -2820,11 +3292,11 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
         return _j({"error": "دیتابیس هنوز آماده نیست"}, 503)
     try:
         if method in ("GET", "HEAD"):
-            fn = (_SOCIAL_GET if social else _GET).get(path)
+            fn = (_SOCIAL_GET if social else _GAME_GET if game else _GET).get(path)
             if fn:
                 return await fn(qs, user)
         elif method == "POST":
-            fn = (_SOCIAL_POST if social else _POST).get(path)
+            fn = (_SOCIAL_POST if social else _GAME_POST if game else _POST).get(path)
             if fn:
                 try:
                     data = json.loads(body.decode("utf-8") or "{}")
@@ -7867,19 +8339,31 @@ async def gw_tickets(gid: int, uid: int):
 
 async def gw_top(gid: int, limit: int = 10):
     return await pool.fetch(
-        "SELECT e.user_id, u.name, 1 + coalesce(c.n, 0) AS tickets, coalesce(c.n, 0) AS invited "
+        "SELECT e.user_id, u.name, 1 + coalesce(c.n, 0) AS tickets, coalesce(c.n, 0) AS invited, e.inviter_id, iu.name AS inviter_name "
         "FROM giveaway_entries e LEFT JOIN users u ON u.user_id = e.user_id "
+        "LEFT JOIN users iu ON iu.user_id = e.inviter_id "
         "LEFT JOIN (SELECT inviter_id, count(*) AS n FROM giveaway_entries WHERE gid=$1 AND status='active' AND inviter_id IS NOT NULL GROUP BY inviter_id) c "
         "ON c.inviter_id = e.user_id WHERE e.gid=$1 AND e.status='active' ORDER BY tickets DESC, e.joined_at LIMIT $2", gid, limit)
 
 
-async def gw_top_text(gid: int) -> str:
+async def gw_top_text(gid: int, staff: bool = False) -> str:
+    """staff=True (پشتیبان): اسم‌ها لینک آبیِ پروفایلن + آیدی عددی + کسی که هر نفر رو دعوت کرده."""
     rows = await gw_top(gid)
     if not rows:
         return "🏆 هنوز کسی ثبت‌نام نکرده."
     medals = ["🥇", "🥈", "🥉"]
-    lines = [f"{medals[i] if i < 3 else str(i + 1) + '.'} {_ulink(r['user_id'], r['name'] or 'کاربر')} — {r['tickets']} {GW_TICKET_CE} ({r['invited']} دعوت)" for i, r in enumerate(rows)]
-    return f"{GW_WIN_CE} <b>برترین‌های قرعه‌کشی</b>\n\n" + "\n".join(lines)
+    lines = []
+    for i, r in enumerate(rows):
+        line = f"{medals[i] if i < 3 else str(i + 1) + '.'} {_ulink(r['user_id'], r['name'] or 'کاربر')} — {r['tickets']} {GW_TICKET_CE} ({r['invited']} دعوت)"
+        if staff:
+            line += f"\n      🆔 <code>{r['user_id']}</code>"
+            if r["inviter_id"]:
+                line += f"\n      ↳ دعوت‌کننده: {_ulink(r['inviter_id'], r['inviter_name'] or 'کاربر')} (<code>{r['inviter_id']}</code>)"
+            else:
+                line += "\n      ↳ دعوت‌کننده: ندارد (ورود مستقیم)"
+        lines.append(line)
+    head = "برترین‌های قرعه‌کشی (نمای پشتیبانی)" if staff else "برترین‌های قرعه‌کشی"
+    return f"{GW_WIN_CE} <b>{head}</b>\n\n" + "\n".join(lines)
 
 
 def gw_post(g, bot_un: str, entries: int | None = None, plain: bool = False):
@@ -8011,7 +8495,7 @@ async def gw_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await upsert_user(user.id, user.full_name)
     if is_top:
         if g["top_public"] or has_perm(user.id, "giveaway"):
-            await msg.reply_text(await gw_top_text(gid), parse_mode="HTML")
+            await msg.reply_text(await gw_top_text(gid, staff=has_perm(user.id, "giveaway")), parse_mode="HTML")
         else:
             await msg.reply_text("لیست برترین‌ها برای این قرعه‌کشی فعال نیست.")
         return
@@ -8064,7 +8548,7 @@ async def gw_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not (g["top_public"] or has_perm(user.id, "giveaway")):
             await q.answer("لیست برترین‌ها برای این قرعه‌کشی فعال نیست.", show_alert=True); return
         await q.answer()
-        await bot.send_message(q.message.chat_id, await gw_top_text(gid), parse_mode="HTML")
+        await bot.send_message(q.message.chat_id, await gw_top_text(gid, staff=has_perm(user.id, "giveaway")), parse_mode="HTML")
         return
     if act == "me":
         ex = await pool.fetchval("SELECT status FROM giveaway_entries WHERE gid=$1 AND user_id=$2", gid, user.id)
@@ -8457,7 +8941,7 @@ async def gw_admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
         if not g:
             await q.edit_message_text("پیدا نشد.", reply_markup=gw_menu_kb()); return
         if sub == "top":
-            await q.edit_message_text(re.sub(r"<[^>]+>", "", await gw_top_text(gid)), reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:v:{gid}")]]))
+            await q.edit_message_text(await gw_top_text(gid, staff=True), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:v:{gid}")]]))
             return
         if sub == "pt":
             await pool.execute("UPDATE giveaways SET top_public = NOT top_public WHERE id=$1", gid)
