@@ -414,6 +414,7 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS rift_log (initiator BIGINT NOT NULL, target BIGINT NOT NULL, day TEXT NOT NULL, cnt INT NOT NULL DEFAULT 0, PRIMARY KEY (initiator, target, day))")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_hug DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS jagh_machine BIGINT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_steal DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spouse_id BIGINT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_owned BOOLEAN NOT NULL DEFAULT FALSE")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_day TEXT NOT NULL DEFAULT ''")
@@ -2840,25 +2841,63 @@ def welcome_keyboard(bot_username: str = "") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def guide_text() -> str:
-    return (
-        "📖 <b>راهنمای ربات</b>\n\n"
-        "• «خودم اینارو ببین» — پنل شخصی: بانک، خلاف، ماشین، دست، کازینو و تنظیمات\n"
-        "• «بانک» — مشاهده حساب؛ برای واریز بنویس: <code>واریز 100m</code>\n"
-        "• «برداشت 100m» — انتقال از بانک به جیب\n"
-        "• «دارایی» — نمایش پول جیب و بانک\n"
-        "• «خلاف» — عملیات خلاف در گروه\n"
-        "• «ماشینم» — مشاهده ماشین‌ها و گاراژ\n"
-        "• «دست» — مشاهده و خرید ارتقاهای کاهش زمان جق\n"
-        "در گروه هم با نوشتن «جق» پس از پایان زمان انتظار، جایزه می‌گیری. زمان انتظار با ارتقای دست کمتر می‌شود."
-    )
+def _gq(title: str, body: str) -> str:
+    return f"<blockquote><b>{title}</b>\n{body}</blockquote>"
+
+
+def _guide_sections() -> list:
+    return [
+        _gq("🤛 جق", "<code>جق</code>\nهر ۵ دقیقه یه بار جایزه می‌گیری (با ارتقای دست تا ۴ دقیقه و ۴۰ ثانیه کم میشه). پولش میره تو دستگاه جق. اگه انرژیت کم باشه پولش نصفه."),
+        _gq(f"{JM_CE} دستگاه جق", f"<code>دستگاه جق</code>\nپول جق، بوس و بغل میره تو دستگاه (ظرفیت {JM_CAP:,} تومن). با نوشتن این کلمه همه‌ش میره تو کیف پولت؛ حداقل {JM_MIN:,} تومن باید توش باشه. وقتی پر بشه پول جدید جا نمیشه، پس به موقع برداشت کن. وضعیتش تو پنل «خودم» هم دیده میشه."),
+        _gq("🎖 پنل شخصی", "<code>خودم</code>\nبانک، خلاف، ماشینم، کازینو، قدرت‌ها و تنظیمات (تغییر جنسیت، راهنما، انتقال اکانت) رو از اینجا باز می‌کنی. کاراکتر و شغل و دارایی‌ت هم همین‌جا نوشته میشه."),
+        _gq(f"{POWERS_CE} قدرت‌ها", "از پنل «خودم» ← قدرت‌ها: جاسوسی، دست و دزدی."),
+        _gq(f"{HAND_CE} دست", "<code>دست</code>\n۵ سطح ارتقا داره و هر سطح ۵ ثانیه از زمان انتظار جق کم می‌کنه."),
+        _gq(f"{SPY_CE} جاسوسی", f"<code>خرید جاسوسی</code>\nقیمت: {SPY_PRICE:,} تومن. بعدش روی پیام کاربر ریپلای کن و بنویس <code>جاسوسی</code> تا پول، بانک، شغل و فعالیت‌هاش رو ببینی. روزی {SPY_DAILY_LIMIT} بار."),
+        _gq(f"{THEFT_CE} دزدی", f"روی پیام کاربر ریپلای کن و بنویس <code>دزدی</code>\nهر ۳ ساعت یه بار بین {THEFT_MIN:,} تا {THEFT_MAX:,} تومن از جیبش برمی‌داری. پولی که تو بانکه امنه؛ اگه جیبش خالی باشه فقط می‌فهمی بدبخته."),
+        _gq("🏦 بانک", f"<code>بانک</code>\n<code>واریز 100m</code> (کارمزد {BANK_FEE:,} تومن)\n<code>برداشت 100m</code> (بدون کارمزد)\n{BANK_INTEREST_RATE_PCT}٪ سود هر ۱۲ ساعت روی موجودی بانک؛ مقدار سود بعدی تو پنل بانک نوشته میشه."),
+        _gq("👛 دارایی", "<code>دارایی</code>\nپول جیب، بانک و مجموع دارایی‌ت."),
+        _gq("💼 شغل و شیفت", "<code>شغل</code> لیست شغل‌ها و جق لازم برای هر کدوم\n<code>کار</code> شیفت کاری (هر ۲۰ دقیقه یه بار) و گرفتن حقوق."),
+        _gq("🎖 کاراکتر", "<code>کاراکتر</code>\nکاراکتر و سطحت رو می‌بینی؛ با جق زدن بیشتر سطحت بالا میره."),
+        _gq("🚗 ماشین و گاراژ", f"<code>ماشینم</code> پنل ماشین\n<code>گاراژ</code> جدول ماشین‌ها\nماشین‌ها به ترتیب خریده میشن. هر ۴ قطعه (موتور، بدنه، لاستیک، شیشه و رینگ) تا سطح {CAR_MAX_LEVEL} ارتقا می‌خوره و رنگ ماشین {CAR_COLOR_PRICE:,} تومنه. درآمد ساعتی میره تو صندوق (سقف {CAR_VAULT_CAP:,} تومن برای هر ماشین) و با دکمه «جمع کن» برداشت میشه."),
+        _gq("🏠 خونه", "<code>خونه</code>\nخرید و تعمیر خونه و وسایلش و جمع کردن درآمدش."),
+        _gq("🤗 بوس و بغل", f"روی پیام کاربر ریپلای کن و بنویس <code>بوس</code> یا <code>بغل</code>\nهر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد. به هر دو نفر انرژی و {HUG_MONEY[0]} تا {HUG_MONEY[1]} تومن (تو دستگاه جق) می‌رسه. بوس و بغل روی همسر بقیه ۳ انرژی منفی داره."),
+        _gq("🎁 هدیه", "<code>هدیه</code> لیست هدیه‌ها و قیمتشون\nریپلای + <code>هدیه گل</code>\nهدیه به طرف مقابل انرژی میده."),
+        _gq("⚡ انرژی", "انرژی زیر ۳۰٪ یعنی پول جق نصف، درآمد ماشین ۲۵٪ کمتر و شانس گیر افتادن تو خلاف بیشتر. با بغل، بوس و هدیه بالا میره."),
+        _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code>\n<code>همسرم</code> اطلاعات همسر و میزان رابطه\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
+        _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
+        _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
+        _gq("⚔️ دوئل جقی", "ریپلای + <code>دوئل جقی</code>\nطرف مقابل باید قبول کنه؛ هر ۵ دقیقه یه بار."),
+        _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه و بعد از هر بازی ۱۵ ثانیه استراحت داری."),
+        _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
+        _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
+        _gq("📋 تسک", "<code>تسک</code>\nتسک‌های روزانه و هفتگی با جایزه؛ ربات خودش پیشرفتت رو حساب می‌کنه."),
+        _gq("🏆 لیدربرد", "<code>لیدربرد</code>\nبرترین‌ها بر اساس پول و جق."),
+        _gq("🔥 ایونت درآمد", "گاهی پشتیبانی ایونت می‌ذاره و برای مدت محدود پول جق و کار چند برابر میشه؛ ربات تو همه‌ی گروه‌ها اعلامش می‌کنه."),
+        _gq("🎁 قرعه‌کشی", "پشتیبانی‌ها قرعه‌کشی می‌سازن. با دکمه «شرکت در قرعه‌کشی» وارد میشی و با دعوت دوستات تیکتت بیشتر میشه (اگه دعوت‌شده از کانال‌ها بره تیکت هم میره)."),
+        _gq("🔁 انتقال اکانت", "فقط تو پی‌وی ربات: <code>خودم</code> ← تنظیمات ← انتقال اکانت با آیدی عددی."),
+    ]
+
+
+GUIDE_SPLIT = 14
+
+
+def guide_text(page: int = 0) -> str:
+    secs = _guide_sections()
+    part = secs[:GUIDE_SPLIT] if page == 0 else secs[GUIDE_SPLIT:]
+    head = f"📖 <b>راهنمای ربات — صفحه {1 if page == 0 else 2} از ۲</b>"
+    return head + "\n\n" + "\n".join(part)
+
+
+def guide_kb(page: int, back_cb: str, next_cb: str, prev_cb: str) -> InlineKeyboardMarkup:
+    nav = [btn("صفحه بعد ⬅️", "primary", callback_data=next_cb)] if page == 0 else [btn("➡️ صفحه قبل", "primary", callback_data=prev_cb)]
+    return InlineKeyboardMarkup([nav, [btn("🔙 برگشت", "primary", callback_data=back_cb)]])
 
 
 async def guide_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    guide = guide_text()
+    page = 1 if q.data == "guide:p1" else 0
     await q.answer()
-    await q.edit_message_text(B(guide), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", "primary", callback_data="guide:back")]]))
+    await q.edit_message_text(guide_text(page), parse_mode="HTML", reply_markup=guide_kb(page, "guide:back", "guide:p1", "guide:open"))
 
 JOIN_MSG = "🔒 برای استفاده از ربات باید توی کانال‌های زیر عضو باشی، بعدش دکمه «✅ عضو شدم» رو بزن:"
 
@@ -3531,7 +3570,7 @@ CARS_BTN_ICON = "5323272789824654613"
 
 
 # تو پی‌وی ربات فقط این بخش‌های پنل «خودم» کار می‌کنن؛ بقیه (ماشین، کازینو، خلاف، دست، خونه، ...) باید تو گروه انجام بشن.
-PM_ALLOWED_PANEL_ACTIONS = {"home", "settings", "gender", "guide", "transfer", "bank"}
+PM_ALLOWED_PANEL_ACTIONS = {"home", "settings", "gender", "guide", "guide2", "transfer", "bank"}
 PM_GROUP_ONLY_TEXT = "این بخش فقط تو گروه کار می‌کنه؛ برو تو گروه و همونجا انجامش بده. تو پی‌وی فقط تنظیمات و بانک فعاله."
 
 
@@ -3540,7 +3579,7 @@ def self_panel_keyboard(uid: int, private: bool = False) -> InlineKeyboardMarkup
         return InlineKeyboardMarkup([[btn("⚙️ تنظیمات", None, callback_data=f"sp:settings:{uid}"), btn("بانک", "primary", icon=BANK_ICON_ID, callback_data=f"sp:bank:{uid}")]])
     return InlineKeyboardMarkup([
         [btn("ماشینم", "primary", icon=CARS_BTN_ICON, callback_data=f"sp:cars:{uid}"), btn("کازینو", "primary", icon=DICE_EID, callback_data=f"sp:casino:{uid}")],
-        [btn("خلاف", "danger", icon=EID_SWORDS, callback_data=f"sp:robbery:{uid}"), btn("دست", "success", icon=EID_HAND, callback_data=f"sp:hand:{uid}")],
+        [btn("خلاف", "danger", icon=EID_SWORDS, callback_data=f"sp:robbery:{uid}"), btn("قدرت‌ها", "success", icon=POWERS_EID, callback_data=f"sp:powers:{uid}")],
         [btn("⚙️ تنظیمات", None, callback_data=f"sp:settings:{uid}"), btn("بانک", "primary", icon=BANK_ICON_ID, callback_data=f"sp:bank:{uid}")],
     ])
 
@@ -3670,6 +3709,25 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 car_rows.append([btn(f"مشاهده و ارتقای {title}", "primary", icon=EID_TROPHY, callback_data=f"car:upmenu:{uid}:{idx}:0")])
             text="\n".join(lines)
         await _sp_edit_text(q, B(text),parse_mode="HTML",reply_markup=InlineKeyboardMarkup(car_rows+back)); return
+    back_powers = [[btn("🔙 برگشت به قدرت‌ها", "primary", icon=EID_BACK, callback_data=f"sp:powers:{uid}")]]
+    if action == "powers":
+        rows = [[btn("جاسوسی", "primary", icon=SPY_EID, callback_data=f"sp:spy:{uid}"), btn("دزدی", "danger", icon=THEFT_EID, callback_data=f"sp:theft:{uid}")],
+                [btn("دست", "success", icon=EID_HAND, callback_data=f"sp:hand:{uid}")]] + back
+        await _sp_edit_text(q, B(f"{POWERS_CE} قدرت‌ها\n\nیکی از قدرت‌هات رو انتخاب کن:"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows)); return
+    if action == "spy":
+        row = await get_user(uid)
+        owned = bool(row["spy_owned"])
+        used = int(row["spy_uses"] or 0) if row["spy_day"] == _spy_day_key() else 0
+        st = f"خریداری شده ✅\nامروز {used} از {SPY_DAILY_LIMIT} بار استفاده کردی." if owned else f"هنوز نخریدی ❌\nقیمت: {SPY_PRICE:,} تومن — بنویس <code>خرید جاسوسی</code>"
+        text = (f"{SPY_CE} <b>جاسوسی</b>\n\n{st}\n\nروی پیام یه کاربر ریپلای کن و بنویس <code>جاسوسی</code> تا پول، بانک، شغل، وضعیت تأهل و فعالیت‌هاش رو ببینی.")
+        await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_powers)); return
+    if action == "theft":
+        row = await get_user(uid)
+        left = THEFT_COOLDOWN - (time.time() - float(row["last_steal"] or 0))
+        st = "آماده‌ست ✅" if left <= 0 else f"{_duration_fa(int(left) + 1)} مونده"
+        text = (f"{THEFT_CE} <b>دزدی</b>\n\nوضعیت: {st}\n\nروی پیام یه کاربر ریپلای کن و بنویس <code>دزدی</code> تا بین {THEFT_MIN:,} تا {THEFT_MAX:,} تومن از جیبش برداری. "
+                f"پولی که تو بانکه امنه. هر {_duration_fa(THEFT_COOLDOWN)} یه بار می‌تونی استفاده کنی.")
+        await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_powers)); return
     if action == "hand":
         row=await get_user(uid); level=int(row.get('hand_level',0) or 0); cooldown=COOLDOWN_SECONDS-level*5
         lines=[f"{HAND_CE} <b>ارتقای دست</b>","\nبا هر ارتقا، ۵ ثانیه از زمان انتظار جق کم می‌شه.",f"سطح فعلی: <b>{level}/5</b>",f"زمان فعلی: <b>{_duration_fa(cooldown)}</b>","\n<b>فروشگاه ارتقاها</b>"]
@@ -3678,7 +3736,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status="✅ خریداری شده" if level>=i else (f"{cost:,} تومان" if level==i-1 else "🔒 ابتدا سطح قبلی")
             lines.append(f"{i}. ارتقای {i}: <b>{status}</b>")
             if level==i-1: rows.append([btn(f"ارتقای {i} • {cost:,} تومان", "success", icon=EID_HAND, callback_data=f"sp:upgrade:{uid}:{i}")])
-        rows += back
+        rows += back_powers
         lines.append(f"\n{HAND_DONE_CE} زمان نهایی پس از ۵ ارتقا: <b>۴ دقیقه و ۴۰ ثانیه</b>")
         await _sp_edit_text(q, B("\n".join(lines)),parse_mode="HTML",reply_markup=InlineKeyboardMarkup(rows)); return
     if action == "casino":
@@ -3689,8 +3747,10 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "gender":
         rows = list(gender_keyboard(uid).inline_keyboard) + back_settings
         await _sp_edit_text(q, BP("جنسیتت رو انتخاب کن تا کاراکترت عوض بشه 👇"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows)); return
-    if action == "guide":
-        await _sp_edit_text(q, B(guide_text()), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_settings)); return
+    if action in ("guide", "guide2"):
+        pg = 1 if action == "guide2" else 0
+        kb = guide_kb(pg, f"sp:settings:{uid}", f"sp:guide2:{uid}", f"sp:guide:{uid}")
+        await _sp_edit_text(q, guide_text(pg), parse_mode="HTML", reply_markup=kb); return
     if action == "transfer":
         context.user_data["acc_transfer"] = {"ts": time.time()}
         await _sp_edit_text(q, 
@@ -4491,6 +4551,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await casino_text(update, context, text):
         return
+    if await theft_text(update, context, text):
+        return
     if _word_key(text) in ("خلاف", "دزدی", "سرقت"):
         await show_robbery_menu(update, context)
         return
@@ -4544,7 +4606,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = await get_user(user.id)
         remaining = user_cooldown - (now - row["last_ts"])
         m, s = divmod(int(max(remaining, 0)) + 1, 60)
-        await msg.reply_text(B(f"{ce('jagh', 6, '⏳')} صبر کن! {m} دقیقه و {s} ثانیه دیگه می‌تونی دوباره بنویسی."), parse_mode="HTML")
+        await msg.reply_text(B(f'دستت هنوز خستس<tg-emoji emoji-id="5443048677406940863">🥱</tg-emoji>\nصبر کن {m} دقیقه و {s} ثانیه بعد... دوباره می‌تونی جق بزنی'), parse_mode="HTML")
         return
 
     text = pick_reply(amount, base_amount) + "\n\n" + energy_line(row.get("energy", 0))
@@ -4554,7 +4616,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _jm_added <= 0:
         text += f"\n\n{JM_CE} دستگاه جق پره و پولی بهش اضافه نشد! بنویس «دستگاه جق» تا برداشت کنی."
     else:
-        text += f"\n\n{JM_CE} +{_jm_added:,} رفت تو دستگاه جق ({_jm_new:,} / {JM_CAP:,})"
+        text += f"\n\n{JM_CE} {_jm_added:,} تومن رفت تو دستگاه جق"
         if _jm_new >= JM_MIN:
             text += " — آماده‌ی برداشته ✅"
     text += event_banner()
@@ -10533,6 +10595,57 @@ def energy_line(energy) -> str:
     return f"{ce('energy', 1, '⚡')} انرژی\n{energy_bar(e)} {_fmt_en(e / ENERGY_MAX * 100)}٪"
 
 
+# ───────── قدرت‌ها و دزدی ─────────
+POWERS_EID = "5204118276635892650"
+POWERS_CE = f'<tg-emoji emoji-id="{POWERS_EID}">💪</tg-emoji>'
+THEFT_EID = "5316700038162817675"
+THEFT_CE = f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji>'
+THEFT_COOLDOWN = 3 * 3600
+THEFT_MIN = 100_000
+THEFT_MAX = 350_000
+
+
+async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """ریپلای + «دزدی»: از جیب (نه بانک) طرف ۱۰۰ تا ۳۵۰ هزار تومن؛ هر ۳ ساعت یه بار."""
+    if _word_key(text) != "دزدی":
+        return False
+    msg, user = update.effective_message, update.effective_user
+    target = msg.reply_to_message.from_user if msg.reply_to_message else None
+    if target is None or target.is_bot or target.id == user.id:
+        return False   # بدون ریپلای همون منوی خلاف باز میشه
+    if target.id in ADMIN_IDS or target.id in OWNER_IDS or target.id in STAFF:
+        await msg.reply_text(B(f"{THEFT_CE} از حساب‌های پشتیبانی نمی‌شه دزدی کرد 🛡"), parse_mode="HTML",
+                             reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+        return True
+    await upsert_user(user.id, user.full_name)
+    await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    now = time.time()
+    outcome, amount, left = "ok", 0, 0.0
+    async with pool.acquire() as c:
+        async with c.transaction():
+            rows = await c.fetch("SELECT user_id, balance, last_steal FROM users WHERE user_id = ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", [user.id, target.id])
+            by = {int(r["user_id"]): r for r in rows}
+            left = THEFT_COOLDOWN - (now - float(by[user.id]["last_steal"] or 0))
+            pocket = int(by[target.id]["balance"] or 0)
+            if left > 0:
+                outcome = "cool"
+            elif pocket < THEFT_MIN:
+                outcome = "poor"
+            else:
+                amount = min(random.randint(THEFT_MIN, THEFT_MAX), pocket)
+                await c.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", amount, target.id)
+                await c.execute("UPDATE users SET balance=balance+$1, last_steal=$2 WHERE user_id=$3", amount, now, user.id)
+    if outcome == "cool":
+        await msg.reply_text(B(f"{THEFT_CE} هنوز نمی‌تونی دزدی کنی؛ {_duration_fa(int(left) + 1)} دیگه صبر کن."), parse_mode="HTML", reply_parameters=rp)
+    elif outcome == "poor":
+        await msg.reply_text(B(f"{THEFT_CE} این بدبخت تو خط فقره💔"), parse_mode="HTML", reply_parameters=rp)
+    else:
+        await msg.reply_text(B(f"{THEFT_CE} {_ulink(user.id, user.full_name)} از جیب {_ulink(target.id, target.full_name)} {amount:,} تومن دزدید!"),
+                             parse_mode="HTML", reply_parameters=rp)
+    return True
+
+
 # ───────── دستگاه جق: پول جق، بوس و بغل میره تو دستگاه؛ با نوشتن «دستگاه جق» برداشت میشه ─────────
 JM_EID = "5190526908462292507"
 JM_CE = f'<tg-emoji emoji-id="{JM_EID}">🎰</tg-emoji>'
@@ -11793,7 +11906,7 @@ def main():
     app.add_handler(CallbackQueryHandler(self_panel_cb, pattern=r"^sp:(home|bank|robbery|cars|hand|casino|settings|gender|guide|transfer):\d+$"))
     app.add_handler(CallbackQueryHandler(hand_upgrade_cb, pattern=r"^sp:upgrade:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(account_transfer_cb, pattern=r"^at:(go|ok|no):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(guide_callback, pattern=r"^guide:(open|back)$"))
+    app.add_handler(CallbackQueryHandler(guide_callback, pattern=r"^guide:(open|back|p1)$"))
     app.add_handler(CallbackQueryHandler(robbery_cb, pattern=r"^rb:"))
     app.add_handler(CallbackQueryHandler(home_cb, pattern=r"^hm:"))
     app.add_handler(CallbackQueryHandler(bank_cb, pattern=r"^bk:(dep|wd):\d+$"))
