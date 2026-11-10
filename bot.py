@@ -839,7 +839,6 @@ textarea.inp{min-height:130px;resize:vertical}
     <button data-k="myself"><i data-ce="6233367447789899509"></i><span>خودم</span></button>
     <button data-k="room"><i data-ce="5805493678956875998"></i><span>چت‌روم</span></button>
     <button data-k="leaderboard"><i data-ce="5307866815148335163"></i><span>لیدربرد</span></button>
-    <button data-k="myself"><i data-ce="6233367447789899509"></i><span>خودم</span></button>
     <button data-k="chats"><i data-ce="5805161437466726782"></i><span>گپ‌ها</span></button>
     <button data-k="users"><i data-ce="6213060666320754449"></i><span>کاربران</span></button>
     <button data-k="panel"><i data-ce="5204118276635892650"></i><span>پشتیبانی</span></button>
@@ -1773,45 +1772,66 @@ function SocialScreen(){
           amt,chips,go);
       });
     }
+    function findGame(id){return((pg&&pg.games)||[]).find(g=>g.id===id)}
+    async function joinGame(id){
+      const g=findGame(id);if(!g){toast('این بازی دیگه فعال نیست',1);return}
+      if(!await ask('مبلغ '+num(g.bet)+' تومن پرداخت بشه و به بازی '+g.creator_name+' بپیوندی؟'))return;
+      poisonCall('/api/social/room/poison/join',{game_id:id},'پیوستی! حالا سمت رو مخفی کن 😈');
+    }
+    function syncBtn(b){
+      const id=Number(b.dataset.gid),g=findGame(id);let t='⚔️ پیوستن',dis=false,cls='rp-join';
+      if(pg){
+        if(!g){t='🏁 پایان یافته';dis=true;cls+=' end'}
+        else if(g.phase==='lobby'){if(g.creator===me.id){t='⏳ منتظر حریف…';dis=true;cls+=' wait'}else t='⚔️ پیوستن • '+num(g.bet)}
+        else if(g.phase==='done'){t='🏁 پایان یافته';dis=true;cls+=' end'}
+        else{t='🎮 بازی در جریانه';dis=true;cls+=' wait'}
+      }
+      b.textContent=t;b.disabled=dis;b.className=cls;
+    }
+    function joinBtn(id){const b=h('button',{class:'rp-join','data-gid':String(id),onclick:()=>joinGame(id)},'⚔️ پیوستن');syncBtn(b);return b}
+    function syncJoinBtns(){msgs.querySelectorAll('[data-gid]').forEach(syncBtn)}
     function poisonCard(g){
-      const mine=g.me,iAmCreator=g.creator===me.id;
-      const card=h('div',{class:'rpc'},h('div',{class:'rp-h'},h('b',{},'☠️ سم یا خوراکی'),h('span',{class:'rp-bet'},'شرط: '+num(g.bet)+' • جایزه: '+num(g.pot))));
+      const mine=g.me,iAmCreator=g.creator===me.id,done=g.phase==='done';
       const nm=id=>id===g.creator?g.creator_name:g.opponent_name;
+      const side=(id,name)=>h('div',{class:'rp-side'+(g.turn===id&&!done?' act':'')+(done&&g.winner===id?' won':'')+(done&&g.winner&&g.winner!==id?' lost':'')},
+        id?avatar('user',id,name,46):h('div',{class:'av rp-q'},'؟'),h('b',{},id?oneLine(name,12):'منتظر حریف…'));
+      const card=h('div',{class:'rpc'+(done&&g.winner===me.id?' champ':'')+(g.phase==='lobby'?' lobby':'')});
+      card.append(h('div',{class:'rp-top'},side(g.creator,g.creator_name),
+        h('div',{class:'rp-mid'},h('div',{class:'rp-vs'},'VS'),h('div',{class:'rp-pot'},'🏆 '+num(g.pot)),h('div',{class:'rp-bet'},'شرط هر نفر '+num(g.bet))),
+        side(g.opponent,g.opponent_name)));
+      const total=(g.phase==='lobby'?600:60)*1000;
       const timer=()=>h('span',{class:'rp-t','data-dl':String(Date.now()+(g.left||0)*1000)},'⏱ '+num(g.left||0)+'″');
+      const bar=()=>h('div',{class:'rp-bar'},h('i',{'data-bdl':String(Date.now()+(g.left||0)*1000),'data-tot':String(total),style:'width:'+Math.min(100,(g.left||0)*1000/total*100)+'%'}));
       if(g.phase==='lobby'){
-        if(iAmCreator){
-          card.append(h('div',{class:'rp-s'},'منتظر بازیکن دوم هستی…  ',timer()),
-            h('button',{class:'btn s gh',onclick:async()=>{if(await ask('بازی لغو بشه و شرطت برگرده؟'))poisonCall('/api/social/room/poison/cancel',{game_id:g.id},'بازی لغو شد و شرط برگشت')}},'لغو بازی'));
-        }else{
-          card.append(h('div',{class:'rp-s'},g.creator_name+' منتظر حریفه…'),
-            h('button',{class:'btn s',style:'background:#b12bd5',onclick:async()=>{if(await ask('مبلغ '+num(g.bet)+' تومن پرداخت بشه و وارد بازی بشی؟'))poisonCall('/api/social/room/poison/join',{game_id:g.id},'وارد بازی شدی! سمت رو مخفی کن')}},'پرداخت '+num(g.bet)+' و ورود'));
-        }
+        card.append(bar(),h('div',{class:'rp-s'},iAmCreator?'شرطت کم شده و منتظر حریف هستی…  ':g.creator_name+' منتظر یه حریفه…  ',timer()));
+        if(iAmCreator)card.append(h('button',{class:'btn s gh',onclick:async()=>{if(await ask('بازی لغو بشه و شرطت برگرده؟'))poisonCall('/api/social/room/poison/cancel',{game_id:g.id},'بازی لغو شد و شرط برگشت')}},'لغو بازی'));
+        else card.append(h('button',{class:'rp-join big',onclick:()=>joinGame(g.id)},'⚔️ پیوستن • '+num(g.bet)+' تومن'));
         return card;
       }
-      const done=g.phase==='done';
       let status;
       if(done){
-        const w=g.winner;
-        status=w?h('div',{class:'rp-s win'},'🏆 برنده: '+nm(w)+' — '+num(g.pot)+' تومن',h('div',{class:'sub'},g.reason||'')):h('div',{class:'rp-s'},'🤝 '+(g.reason||'بازی بدون برنده تموم شد'));
+        status=g.winner?h('div',{class:'rp-s win'},'🏆 '+nm(g.winner)+' برنده شد!',h('div',{class:'sub'},g.reason||'')):h('div',{class:'rp-s'},'🤝 '+(g.reason||'بازی بدون برنده تموم شد'));
       }else if(g.phase==='hide'){
         const iHid=g.my_cell!=null;
-        status=h('div',{class:'rp-s'},mine?(iHid?'سمت مخفی شد؛ منتظر حریف…':'سم خودت رو پشت یکی از ۲۴ خانه مخفی کن (فقط خودت می‌بینی)'):'بازیکن‌ها دارن سم‌هاشون رو مخفی می‌کنن…','  ',timer());
+        status=h('div',{class:'rp-s'},mine?(iHid?'☠️ سمت مخفی شد؛ منتظر حریف…':'☠️ سم خودت رو پشت یکی از خانه‌ها مخفی کن (فقط خودت می‌بینی)'):'👀 بازیکن‌ها دارن سم‌هاشون رو مخفی می‌کنن…','  ',timer());
+        card.append(bar());
       }else{
-        status=h('div',{class:'rp-s'},g.turn===me.id?'نوبت توئه! یه خانه انتخاب کن؛ سم حریف رو پیدا کنی می‌بازی 😬':'نوبت '+nm(g.turn)+' است…','  ',timer());
+        status=h('div',{class:'rp-s'},g.turn===me.id?'🎯 نوبت توئه! خانه انتخاب کن؛ سم حریف رو بزنی می‌بازی 😬':'⏳ نوبت '+nm(g.turn)+' است…','  ',timer());
+        card.append(bar());
       }
-      card.append(h('div',{class:'rp-p'},nm(g.creator)||'',' ⚔️ ',nm(g.opponent)||''),status);
+      card.append(status);
       const canHide=!done&&mine&&g.phase==='hide'&&g.my_cell==null;
       const canGuess=!done&&mine&&g.phase==='guess'&&g.turn===me.id;
       const grid=h('div',{class:'rp-g'});
       for(let i=0;i<24;i++){
         const opened=g.opened.includes(i),poison=done&&(g.poisons||[]).includes(i),own=g.my_cell===i;
-        const can=(canHide&&true)||(canGuess&&!opened&&!own);
-        const b=h('button',{class:'rp-c'+(opened?' ok':'')+(poison?' bad':'')+(own&&!done?' own':''),disabled:!can},poison?'☠️':opened?'🍬':own?'☠️':'▫️');
+        const can=canHide||(canGuess&&!opened&&!own);
+        const b=h('button',{class:'rp-c'+(opened?' ok':'')+(poison?' bad':'')+(own&&!done?' own':'')+(can?' hot':''),disabled:!can},poison?'☠️':opened?'🍬':own?'☠️':'▫️');
         if(can)b.onclick=async()=>{
           if(canHide&&!await ask('سمت پشت خانه‌ی '+num(i+1)+' مخفی بشه؟'))return;
           grid.querySelectorAll('button').forEach(x=>x.disabled=true);
           const r=await poisonCall('/api/social/room/poison/move',{game_id:g.id,cell:i});
-          if(!r)pgSig='',drawPoison();
+          if(!r){pgSig='';drawPoison()}
         };
         grid.append(b);
       }
@@ -1819,6 +1839,7 @@ function SocialScreen(){
     }
     function drawPoison(){
       const gs=(pg&&pg.games)||[];
+      syncJoinBtns();
       const sig=JSON.stringify(gs.map(g=>[g.id,g.phase,g.turn,g.opened,g.my_cell,g.hid,g.winner,g.opponent,g.poisons]));
       if(sig===pgSig)return;pgSig=sig;
       gamebox.replaceChildren(...gs.map(poisonCard));
@@ -1834,10 +1855,13 @@ function SocialScreen(){
     function renderMessage(m){
       const name=m.display_name||m.username||m.uname||String(m.user_id);
       const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});
-      const identity=h('button',{class:'sidentity',type:'button',onclick:()=>openUser(Number(m.user_id))},avatar('user',m.user_id,name,34),h('span',{class:'sub'},name));
+      const isBot=!!m.is_bot;
+      const identity=h('button',{class:'sidentity'+(isBot?' botid':''),type:'button',onclick:()=>{if(!isBot)openUser(Number(m.user_id))}},avatar('user',m.user_id,name,34),h('span',{class:'sub'},name,isBot&&m.name_ce?ceImg(m.name_ce,'bn'):null,isBot?h('span',{class:'bbadge'},'ربات'):null));
       node.append(identity);
       if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text?plain(m.reply_text):'پاسخ به پیام')));
-      if(m.text)node.append(h('div',{class:'tx',dir:'auto'},...richText(m.text)));
+      const gm=/\{game:(\d+)\}/.exec(m.text||'');
+      if(m.text)node.append(h('div',{class:'tx',dir:'auto'},...richText(gm?m.text.replace(/\s*\{game:\d+\}/,''):m.text)));
+      if(gm&&isBot)node.append(joinBtn(Number(gm[1])));
       if(m.premium_emoji_id){const tag=h('span',{class:'prem',title:'ایموجی پرمیوم'},'⭐');node.append(tag);blob('ce'+m.premium_emoji_id,'/api/social/emoji?id='+encodeURIComponent(m.premium_emoji_id)).then(u=>{if(u){tag.replaceChildren(h('img',{src:u,alt:'ایموجی پرمیوم',style:'width:26px;height:26px;object-fit:contain;vertical-align:middle'}))}})}
       const rx=Array.isArray(m.reactions)?m.reactions:[];
       const rs=h('div',{class:'sreacts'},...rx.map(r=>h('button',{style:r.mine?'border-color:#b12bd5':'',onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));
@@ -1863,7 +1887,7 @@ function SocialScreen(){
           const first=!lastSig,near=first||msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<140;
           lastSig=sig;
           msgs.replaceChildren(...(arr.length?arr.map(renderMessage):[h('div',{class:'empty'},'هنوز پیامی نیست؛ اولین نفر باش 👋')]));
-          if(near||force)msgs.scrollTop=msgs.scrollHeight;
+          syncJoinBtns();if(near||force)msgs.scrollTop=msgs.scrollHeight;
         }
       }catch(e){if(!lastSig)toast(e.message||'دریافت پیام‌ها ناموفق بود',1)}
       finally{roomBusy=false}
@@ -1884,6 +1908,7 @@ function SocialScreen(){
     const rpClock=setInterval(()=>{
       if(!gamebox.isConnected){clearInterval(rpClock);return}
       gamebox.querySelectorAll('[data-dl]').forEach(e=>{const sec=Math.max(0,Math.ceil((Number(e.dataset.dl)-Date.now())/1000));e.textContent='⏱ '+num(sec)+'″'});
+      gamebox.querySelectorAll('[data-bdl]').forEach(e=>{const left=Math.max(0,Number(e.dataset.bdl)-Date.now());e.style.width=Math.min(100,left/Number(e.dataset.tot)*100)+'%';e.classList.toggle('low',left<10000)});
     },1000);
     root._destroy=()=>{clearInterval(roomTimer);roomTimer=null;clearInterval(rpClock)};
   }
@@ -1969,16 +1994,38 @@ const chatCss=document.createElement('style');chatCss.textContent=`
 .ecell{border:0;background:transparent;border-radius:10px;aspect-ratio:1;padding:3px;font-size:22px;display:flex;align-items:center;justify-content:center;color:var(--fg)}
 .ecell:active{background:#b12bd522}.ecell img{width:100%;height:100%;object-fit:contain;pointer-events:none}
 .enote{font-size:12.5px;color:var(--hint);padding:6px 4px;line-height:1.7}
-.rpg{flex:none;max-height:52vh;overflow-y:auto;padding:8px;background:var(--sec);border-bottom:1px solid var(--line)}
-.rpc{background:var(--bg);border:1px solid #b12bd566;border-radius:16px;padding:10px;margin-bottom:8px}
-.rp-h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px}.rp-bet{font-size:12px;color:var(--hint)}
-.rp-p{text-align:center;font-size:13px;margin:6px 0 2px}
-.rp-s{font-size:13px;line-height:1.8;margin:6px 0;text-align:center}.rp-s.win{color:#16a34a;font-weight:700}
-.rp-t{display:inline-block;min-width:44px;font-variant-numeric:tabular-nums;color:#b12bd5;font-weight:700}
+.rpg{flex:none;max-height:56vh;overflow-y:auto;padding:8px;background:var(--sec);border-bottom:1px solid var(--line)}
+.rpc{position:relative;background:linear-gradient(160deg,#2b0f3d,#14091f);color:#f4e9ff;border:1px solid #b12bd588;border-radius:18px;padding:12px;margin-bottom:8px;box-shadow:0 6px 22px #b12bd533;animation:rpin .3s}
+@keyframes rpin{from{transform:translateY(10px) scale(.97);opacity:0}}
+.rpc .sub,.rpc .rp-bet{color:#cdb4e6}
+.rpc.champ{border-color:#facc15;box-shadow:0 0 0 2px #facc1555,0 8px 30px #facc1566;animation:rpglow 1.4s infinite alternate}
+@keyframes rpglow{to{box-shadow:0 0 0 3px #facc1599,0 8px 38px #facc1599}}
+.rp-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.rp-side{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12.5px;text-align:center;transition:.2s}
+.rp-side .av{box-shadow:0 0 0 2px #ffffff22}.rp-side.act .av{box-shadow:0 0 0 3px #22d3ee,0 0 14px #22d3ee99;animation:rppulse 1s infinite alternate}
+@keyframes rppulse{to{transform:scale(1.08)}}
+.rp-side.won .av{box-shadow:0 0 0 3px #facc15,0 0 16px #facc15aa}.rp-side.lost{opacity:.5;filter:grayscale(.6)}
+.rp-q{display:grid;place-items:center;background:#ffffff18;font-weight:700;width:46px;height:46px;border-radius:50%}
+.rp-mid{flex:none;text-align:center;display:flex;flex-direction:column;align-items:center;gap:1px}
+.rp-vs{font-weight:900;font-size:20px;letter-spacing:1px;background:linear-gradient(90deg,#f472b6,#a78bfa);-webkit-background-clip:text;background-clip:text;color:transparent}
+.rp-pot{font-size:14px;font-weight:800;color:#facc15}.rp-bet{font-size:11px}
+.rp-bar{height:6px;border-radius:4px;background:#ffffff1c;margin:10px 0 2px;overflow:hidden}
+.rp-bar i{display:block;height:100%;background:linear-gradient(90deg,#22d3ee,#a78bfa);border-radius:4px;transition:width 1s linear}.rp-bar i.low{background:linear-gradient(90deg,#f43f5e,#fb923c)}
+.rp-s{font-size:13px;line-height:1.8;margin:6px 0;text-align:center}.rp-s.win{color:#facc15;font-weight:800;font-size:14.5px}
+.rp-t{display:inline-block;min-width:46px;font-variant-numeric:tabular-nums;color:#22d3ee;font-weight:700}
 .rp-g{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:6px}
-.rp-c{aspect-ratio:1;border:1px solid var(--line);background:var(--sec);border-radius:12px;font-size:20px;color:var(--fg);padding:0}
-.rp-c:not(:disabled):active{transform:scale(.92)}.rp-c:disabled{opacity:.85}
-.rp-c.ok{background:#14532d33}.rp-c.bad{background:#b9162633;border-color:#b91626}.rp-c.own{border-color:#b12bd5;background:#b12bd522}
+.rp-c{aspect-ratio:1;border:1px solid #ffffff22;background:#ffffff12;border-radius:12px;font-size:20px;color:#fff;padding:0;transition:.12s}
+.rp-c.hot{background:#a78bfa33;border-color:#a78bfa;animation:rphot 1.2s infinite alternate}
+@keyframes rphot{to{background:#a78bfa55}}
+.rp-c:not(:disabled):active{transform:scale(.88)}.rp-c:disabled{opacity:.9}
+.rp-c.ok{background:#16a34a40;border-color:#22c55e}.rp-c.bad{background:#e11d4866;border-color:#f43f5e;animation:rpshk .4s}.rp-c.own{border-color:#f472b6;background:#f472b633}
+@keyframes rpshk{25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.rp-join{display:inline-flex;align-items:center;justify-content:center;gap:6px;margin-top:8px;border:0;border-radius:12px;padding:8px 16px;font-size:14px;font-weight:700;color:#fff;background:linear-gradient(135deg,#7c3aed,#db2777);box-shadow:0 4px 14px #db277755;cursor:pointer;animation:rpbeat 1.6s infinite}
+@keyframes rpbeat{50%{transform:scale(1.035)}}
+.rp-join.big{width:100%;padding:11px;font-size:15px}.rp-join:disabled{animation:none;box-shadow:none;opacity:.7;cursor:default;background:#6b7280}
+.rp-join.wait{background:linear-gradient(135deg,#0891b2,#6366f1)}
+.sidentity.botid .sub{display:inline-flex;align-items:center;gap:5px;font-weight:700}.sidentity .ce.bn{width:18px;height:18px;vertical-align:middle}
+.bbadge{font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,#7c3aed,#db2777);border-radius:8px;padding:1px 6px}
 `;document.head.append(chatCss);
 const coolCss=document.createElement('style');coolCss.textContent=`
 .cei{object-fit:contain;vertical-align:middle;flex:none;display:inline-block}
@@ -2387,6 +2434,7 @@ function LeaderboardScreen(){
  }
  async function load(){body.replaceChildren(h('div',{class:'empty'},'در حال دریافت رتبه‌بندی…'));try{
   const d=await api('/api/social/leaderboard'),track=h('div',{class:'lb-track'});
+  if(!(d.jaghs||[]).length&&!(d.assets||[]).length){body.replaceChildren(h('div',{class:'empty'},'هنوز کسی تو لیدربرد نیست؛ مالک‌ها و پشتیبان‌ها تو لیدربرد عمومی نمایش داده نمی‌شن.'));return}
   track.append(section('بیشترین جق','5834455158829879029',d.jaghs||[],'جق'),section('بیشترین دارایی','5413715090157359985',d.assets||[],'تومان'));
   body.replaceChildren(h('div',{class:'lb-hint'},'برای دیدن بیشترین دارایی به چپ بکشید ←'),track);
  }catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
@@ -3364,6 +3412,7 @@ async def _social_room(qs, user):
         "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id LEFT JOIN users u ON u.user_id=m.user_id "
         "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]))
     out = []
+    bot = await _rp_bot()
     for r in reversed(rows):
         d = dict(r)
         rx = d.get("reactions")
@@ -3371,6 +3420,10 @@ async def _social_room(qs, user):
             try: rx = json.loads(rx)
             except Exception: rx = []
         d["reactions"] = rx or []
+        if int(d["user_id"]) == int(bot["id"]):
+            d["display_name"] = bot["name"]
+            d["is_bot"] = True
+            d["name_ce"] = RP_BOT_EMOJI
         out.append(d)
     return _j(out)
 
@@ -3523,10 +3576,30 @@ async def _rp_store(g: dict):
         json.dumps({"hidden": {str(k): v for k, v in g["hidden"].items()}, "opened": g["opened"]}), g.get("finished_at"))
 
 
-async def _rp_say(uid: int, text: str):
-    """یه پیام تو چت‌روم می‌ذاره تا همه ببینن چی شد."""
+RP_BOT_EMOJI = "5805662179113832818"   # ایموجی پرمیوم کنار اسم ربات
+_RP_BOT: dict = {}
+
+
+async def _rp_bot() -> dict:
+    """اکانت خود ربات تو چت‌روم (آیدی از روی توکن، اسم از getMe)."""
+    if not _RP_BOT.get("ok"):
+        _RP_BOT.setdefault("id", int(BOT_TOKEN.split(":")[0]))
+        _RP_BOT.setdefault("name", "ربات")
+        try:
+            if BOT_REF is not None:
+                me = await _tg_call(BOT_REF.get_me)
+                _RP_BOT["name"] = (me.full_name or me.first_name or "ربات")
+                _RP_BOT["ok"] = True
+        except Exception:
+            log.debug("room bot getMe failed", exc_info=True)
+    return _RP_BOT
+
+
+async def _rp_say(text: str):
+    """ربات یه پیام تو چت‌روم می‌ذاره تا همه ببینن چی شد."""
     try:
-        await pool.execute("INSERT INTO social_room_messages(user_id,text,created_at) VALUES($1,$2,$3)", int(uid), text, time.time())
+        bot = await _rp_bot()
+        await pool.execute("INSERT INTO social_room_messages(user_id,text,created_at) VALUES($1,$2,$3)", int(bot["id"]), text, time.time())
     except Exception:
         log.debug("room poison say failed", exc_info=True)
 
@@ -3545,10 +3618,13 @@ async def _rp_finish(g: dict, winner, reason: str, say: bool = True):
         await _give(winner, bet * 2)
     await _rp_store(g)
     if say:
+        nm = await _rp_names([g["creator"], g.get("opponent")])
+        a, b = nm.get(g["creator"], "بازیکن"), nm.get(g.get("opponent"), "بازیکن")
         if winner is not None:
-            await _rp_say(winner, f"🏆 بازی سم یا خوراکی رو بردم! جایزه: {bet * 2:,} تومن")
+            win = a if winner == g["creator"] else b
+            await _rp_say(f"🏆 {win} برنده‌ی «سم یا خوراکی» شد!\n⚔️ {a} در برابر {b}\n📌 {reason}\n💰 جایزه: {bet * 2:,} تومن به حسابش رفت 🎉")
         elif g.get("opponent"):
-            await _rp_say(g["creator"], f"🤝 بازی سم یا خوراکی مساوی شد؛ شرط {bet:,} تومنی به هر دو برگشت.")
+            await _rp_say(f"🤝 بازی «سم یا خوراکی» بین {a} و {b} مساوی شد؛ شرط {bet:,} تومنی به هر دو برگشت.")
 
 
 async def _rp_tick(g: dict):
@@ -3652,7 +3728,8 @@ async def _social_poison_create(b, user):
         except Exception:
             await _give(uid, bet)
             raise
-    await _rp_say(uid, f"☠️ یه بازی «سم یا خوراکی» ساختم!\nشرط هر نفر: {bet:,} تومن • جایزه: {bet * 2:,} تومن\nحریف می‌خواد؛ بیا تو بازی! 🎮")
+    nm = await _rp_names([uid])
+    await _rp_say(f"☠️ {nm.get(uid, 'یه بازیکن')} یه بازی «سم یا خوراکی» ساخت!\n💰 شرط هر نفر: {bet:,} تومن\n🏆 جایزه‌ی برنده: {bet * 2:,} تومن\nکی جرئت داره؟ 😈 روی «پیوستن» بزن 👇 {{game:{gid}}}")
     return _j({"ok": True, "game_id": gid, "balance": await _mini_balance(uid)})
 
 
@@ -3676,7 +3753,8 @@ async def _social_poison_join(b, user):
         except Exception:
             await _give(uid, int(g["bet"]))
             raise
-    await _rp_say(uid, f"✅ وارد بازی سم یا خوراکی شدم! شرط: {int(g['bet']):,} تومن 😈")
+    nm = await _rp_names([uid, g["creator"]])
+    await _rp_say(f"⚔️ {nm.get(uid, 'یه بازیکن')} به بازی {nm.get(g['creator'], 'سازنده')} پیوست!\n💰 جایزه: {int(g['bet']) * 2:,} تومن — بازی شروع شد، تماشا کنید 👀")
     return _j({"ok": True, "balance": await _mini_balance(uid)})
 
 
