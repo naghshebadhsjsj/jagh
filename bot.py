@@ -315,7 +315,7 @@ ME_WORD = "کاراکتر"  # این کلمه کاراکتر رو نشون می�
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "کازینو سم یا خوراکی + جاسوسی + پشتیبانی v6"
+BOT_VERSION = "کازینو سم یا خوراکی + خط و نشان + جاسوسی + پشتیبانی v7"
 
 
 def norm_word(text: str) -> str:
@@ -577,6 +577,22 @@ async def init_db(app: Application):
             finished_at DOUBLE PRECISION
         )""")
         await c.execute("CREATE INDEX IF NOT EXISTS room_poison_phase_idx ON room_poison_games(phase, game_id DESC)")
+        await c.execute("""CREATE TABLE IF NOT EXISTS room_carrom_games (
+            game_id BIGSERIAL PRIMARY KEY,
+            creator BIGINT NOT NULL,
+            opponent BIGINT,
+            bet BIGINT NOT NULL,
+            phase TEXT NOT NULL,
+            turn BIGINT,
+            deadline DOUBLE PRECISION,
+            winner BIGINT,
+            reason TEXT,
+            state TEXT NOT NULL DEFAULT '{}',
+            created_at DOUBLE PRECISION NOT NULL,
+            finished_at DOUBLE PRECISION
+        )""")
+        await c.execute("CREATE INDEX IF NOT EXISTS room_carrom_phase_idx ON room_carrom_games(phase, game_id DESC)")
+        await c.execute("CREATE TABLE IF NOT EXISTS room_carrom_shots (game_id BIGINT PRIMARY KEY, seq INT NOT NULL DEFAULT 0, data TEXT NOT NULL DEFAULT '{}')")
         await c.execute("CREATE TABLE IF NOT EXISTS social_comments (comment_id BIGSERIAL PRIMARY KEY, post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, text TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE INDEX IF NOT EXISTS social_comments_post_idx ON social_comments(post_id, comment_id)")
         await c.execute("CREATE TABLE IF NOT EXISTS social_quota (user_id BIGINT NOT NULL, day TEXT NOT NULL, posts INT NOT NULL DEFAULT 0, stories INT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day))")
@@ -1845,10 +1861,338 @@ function SocialScreen(){
       gamebox.replaceChildren(...gs.map(poisonCard));
       gamebox.classList.toggle('hid',!gs.length);
     }
+    /* ───── بازی خط و نشان (کارام دونفره، دکمه الماس) ───── */
+    const cbox=h('div',{class:'rpg hid',style:'max-height:38vh'});
+    let cg=[],cgSig='',cgBusy=false,cgSeen={},cOv=null,cOpenId=null,cDismiss={},cPoll=null,cStop=null;
+    const CW=1000,CRAD=21,CSR=27,CBMIN=215,CBMAX=785,CMAXPULL=240;
+    function cSeenStr(){return(cOpenId!=null&&cgSeen[cOpenId]!==undefined)?cOpenId+':'+cgSeen[cOpenId]:''}
+    async function loadCarrom(){
+      if(cgBusy||(!cbox.isConnected&&!cOv))return;cgBusy=true;
+      try{const r=await api('/api/social/room/carrom?seen='+encodeURIComponent(cSeenStr()));cgIngest(r.games)}catch(e){}
+      finally{cgBusy=false}
+    }
+    async function carromCall(path,body,okMsg){
+      try{
+        const r=await api(path,body);if(okMsg||r.msg)toast(okMsg||r.msg);
+        if(r.game)cgIngest([r.game],true);else{cgBusy=false;await loadCarrom()}
+        if(r.done){roomBusy=false;loadRoom(true)}
+        return r;
+      }catch(e){toast(e.message,1);return null}
+    }
+    function cgIngest(list,partial){
+      if(partial){const m=new Map(cg.map(g=>[g.id,g]));list.forEach(g=>m.set(g.id,g));cg=[...m.values()]}else cg=list;
+      for(const g of list){
+        if(cOv&&cOpenId===g.id){cOv.upd(g);cgSeen[g.id]=g.seq}
+      }
+      if(!cOv&&cbox.isConnected){
+        const g=cg.find(x=>x.me&&x.phase==='play'&&!cDismiss[x.id]);
+        if(g)openCarrom(g.id);
+      }
+      cgDraw();
+    }
+    function carromCreateSheet(){
+      sheet('🎯 بازی خط و نشان',close=>{
+        const amt=h('input',{class:'inp',type:'number',inputmode:'numeric',min:'1',placeholder:'مبلغ شرط (تومن)'});
+        const go=h('button',{class:'btn',style:'width:100%;margin-top:10px;background:#15803d',onclick:async()=>{
+          const bet=Math.floor(Number(amt.value));if(!(bet>0)){toast('مبلغ شرط رو وارد کن',1);return}
+          go.disabled=true;
+          const r=await carromCall('/api/social/room/carrom/create',{bet},'بازی ساخته شد؛ منتظر حریف…');
+          go.disabled=false;if(r)close();
+        }},'ساخت بازی و انتظار برای حریف');
+        const chips=h('div',{class:'chips'},[10000,50000,100000,500000,1000000].map(v=>h('button',{class:'chip',onclick:()=>{amt.value=v}},num(v))));
+        return h('div',{},
+          h('div',{class:'sub',style:'line-height:1.9;margin-bottom:8px'},'کارام دونفره: تو مهره‌های سفید داری و حریف سیاه. مبلغ شرط همون لحظه از حسابت کم میشه و نفر دوم باید همون مبلغ رو بده. هر نوبت فقط ۱۲ ثانیه وقت داری؛ هر کی اول همه‌ی مهره‌هاش رو توی جیب بندازه برنده‌ست و ۲ برابر شرط می‌گیره. وقتی مهره‌ی خودت رو بندازی دوباره نوبت توئه، ملکه‌ی قرمز رو باید با یه مهره‌ی خودت «بپوشونی».'),
+          amt,chips,go);
+      });
+    }
+    async function carromJoin(id){
+      const g=cg.find(x=>x.id===id);if(!g){toast('این بازی دیگه فعال نیست',1);return}
+      if(!await ask('مبلغ '+num(g.bet)+' تومن پرداخت بشه و به بازی خط و نشان '+g.creator_name+' بپیوندی؟'))return;
+      const r=await carromCall('/api/social/room/carrom/join',{game_id:id},'پیوستی! بازی شروع شد 🎯');
+      if(r){cDismiss[id]=false;await loadCarrom();openCarrom(id)}
+    }
+    function syncCBtn(b){
+      const id=Number(b.dataset.cid),g=cg.find(x=>x.id===id);let t='⚔️ پیوستن',dis=false,cls='rp-join';
+      if(cgSig){
+        if(!g){t='🏁 پایان یافته';dis=true;cls+=' end'}
+        else if(g.phase==='lobby'){if(g.creator===me.id){t='⏳ منتظر حریف…';dis=true;cls+=' wait'}else t='⚔️ پیوستن • '+num(g.bet)}
+        else if(g.phase==='done'){t='🏁 پایان یافته';dis=true;cls+=' end'}
+        else if(g.me){t='🎯 برگشت به بازی';cls+=' wait';b.onclick=()=>{cDismiss[id]=false;openCarrom(id)};b.textContent=t;b.disabled=false;b.className=cls;return}
+        else{t='👀 تماشای بازی';cls+=' wait';b.onclick=()=>openCarrom(id);b.textContent=t;b.disabled=false;b.className=cls;return}
+      }
+      b.onclick=()=>carromJoin(id);b.textContent=t;b.disabled=dis;b.className=cls;
+    }
+    function cJoinBtn(id){const b=h('button',{class:'rp-join','data-cid':String(id)},'⚔️ پیوستن');syncCBtn(b);return b}
+    function syncCBtns(){msgs.querySelectorAll('[data-cid]').forEach(syncCBtn)}
+    function cgCard(g){
+      const iAmCreator=g.creator===me.id,done=g.phase==='done';
+      const side=(id,name,col)=>h('div',{class:'rp-side'+(id&&g.turn===id&&!done?' act':'')+(done&&g.winner===id?' won':'')+(done&&g.winner&&g.winner!==id?' lost':'')},
+        id?avatar('user',id,name,46):h('div',{class:'av rp-q'},'؟'),h('b',{},id?oneLine(name,12):'منتظر حریف…'));
+      const card=h('div',{class:'rpc crc'+(done&&g.winner===me.id?' champ':'')+(g.phase==='lobby'?' lobby':'')});
+      card.append(h('div',{class:'rp-top'},side(g.creator,g.creator_name),
+        h('div',{class:'rp-mid'},h('div',{style:'font-size:26px;line-height:1.2'},'🎯'),h('div',{class:'rp-pot'},'🏆 '+num(g.pot)),h('div',{class:'rp-bet'},'خط و نشان • شرط '+num(g.bet))),
+        side(g.opponent,g.opponent_name)));
+      if(g.phase==='lobby'){
+        card.append(h('div',{class:'rp-s'},iAmCreator?'شرطت کم شده و منتظر حریف هستی…':g.creator_name+' منتظر یه حریفه…'));
+        if(iAmCreator)card.append(h('button',{class:'btn s gh',onclick:async()=>{if(await ask('بازی لغو بشه و شرطت برگرده؟'))carromCall('/api/social/room/carrom/cancel',{game_id:g.id},'بازی لغو شد و شرط برگشت')}},'لغو بازی'));
+        else card.append(h('button',{class:'rp-join big',onclick:()=>carromJoin(g.id)},'⚔️ پیوستن • '+num(g.bet)+' تومن'));
+      }else if(done){
+        card.append(h('div',{class:'rp-s'+(g.winner?' win':'')},g.winner?'🏆 '+(g.winner===g.creator?g.creator_name:g.opponent_name)+' برنده شد!':'🤝 بازی مساوی شد',h('div',{class:'sub'},g.reason||'')));
+      }else{
+        card.append(h('div',{class:'rp-s'},'🎮 بازی در جریانه • نوبت '+(g.turn===g.creator?g.creator_name:g.opponent_name)));
+        card.append(h('button',{class:'rp-join big',onclick:()=>{cDismiss[g.id]=false;openCarrom(g.id)}},g.me?'🎯 برگشت به میز':'👀 تماشا'));
+      }
+      return card;
+    }
+    function cgDraw(){
+      syncCBtns();
+      const gs=cg.filter(g=>g.phase==='lobby'||g.phase==='play'||(g.phase==='done'&&g.me&&!cOv));
+      const sig=JSON.stringify(gs.map(g=>[g.id,g.phase,g.turn,g.opponent,g.winner,g.me]));
+      if(sig===cgSig)return;cgSig=sig;
+      cbox.replaceChildren(...gs.map(cgCard));
+      cbox.classList.toggle('hid',!gs.length);
+      syncCBtns();
+    }
+    function closeCarrom(){
+      if(cStop){cStop();cStop=null}
+      clearInterval(cPoll);cPoll=null;
+      if(cOv){cOv.remove();cOv=null}cOpenId=null;
+    }
+    function openCarrom(id){
+      const g0=cg.find(x=>x.id===id);if(!g0)return;
+      closeCarrom();
+      if(window.__carromClose&&window.__carromClose!==closeCarrom){try{window.__carromClose()}catch(e){}}
+      window.__carromClose=closeCarrom;
+      cOpenId=id;cgSeen[id]=g0.seq;
+      const spectate=!(g0.creator===me.id||g0.opponent===me.id);
+      const rot=g0.opponent===me.id;
+      const V={g:g0,bodies:new Map(),anim:null,aim:null,vx:500,dlTs:0,readyTs:0,sending:false,overlap:false,lastSec:-1,resShown:false,pk:new Map()};
+      const ov=h('div',{class:'cov'});
+      const potEl=h('div',{class:'cov-pot'});
+      const xb=h('button',{class:'cov-x',onclick:()=>{cDismiss[id]=true;closeCarrom();cgSig='';cgDraw()}},'✕ بستن');
+      const colOf=uid=>uid===V.g.creator?'w':'b';
+      const mkSide=()=>{
+        const nm=h('b',{}),av=h('div',{}),dot=h('i',{class:'cov-dot'}),sc=h('span',{}),q=h('span',{class:'cov-q'});
+        const el=h('div',{class:'cov-p'},av,nm,h('div',{class:'cov-sc'},dot,sc,q));
+        return{el,nm,av,dot,sc,q,uid:null};
+      };
+      const sL=mkSide(),sR=mkSide();
+      const barI=h('i'),tEl=h('div',{class:'cov-t'});
+      const statusEl=h('div',{class:'cov-s'}),lastEl=h('div',{class:'cov-last'});
+      const cvs=h('canvas',{class:'cov-cv'});
+      const size=Math.max(240,Math.floor(Math.min(innerWidth-30,innerHeight-330,520)));
+      const dpr=Math.min(2.5,window.devicePixelRatio||1);
+      cvs.width=cvs.height=Math.round(size*dpr);cvs.style.width=cvs.style.height=size+'px';
+      const rng=h('input',{type:'range',min:String(CBMIN),max:String(CBMAX),value:'500',step:'1'});
+      rng.oninput=()=>{V.vx=Number(rng.value)};
+      const sl=h('div',{class:'cov-sl'},rng);
+      const resBox=h('div',{class:'cov-res hid'});
+      ov.append(
+        h('div',{class:'cov-top'},xb,h('div',{class:'cov-title'},'🎯 خط و نشان'),potEl),
+        h('div',{class:'cov-hdr'},sL.el,h('div',{class:'cov-mid'},h('div',{class:'cov-coin'},'🪙'),h('div',{class:'cov-pn'},'')),sR.el),
+        h('div',{class:'cov-bar'},barI),tEl,statusEl,lastEl,
+        h('div',{class:'cov-board'},cvs),
+        spectate?h('div',{class:'cov-s'},'👀 داری تماشا می‌کنی'):sl,
+        resBox);
+      document.body.append(ov);cOv=ov;
+      const midPot=ov.querySelector('.cov-pn');
+      const fillSide=(s,uid,name)=>{
+        if(s.uid!==uid){s.uid=uid;s.av.replaceChildren(uid?avatar('user',uid,name,46):h('div',{class:'av rp-q'},'؟'))}
+        s.nm.textContent=uid?oneLine(name,12)+(uid===me.id?' (تو)':''):'…';
+      };
+      const lastText=l=>{
+        if(!l||!l.by)return '';
+        const g=V.g,who=l.by===g.creator?g.creator_name:g.opponent_name;
+        if(l.timeout)return '⏱ '+who+' وقتش تموم شد؛ نوبت رد شد';
+        const p=[];
+        if(l.foul)p.push('⚠️ فاول! استرایکر توی جیب افتاد'+(l.returned?' و یه مهره‌اش برگشت وسط':''));
+        if(l.own)p.push(num(l.own)+' مهره‌ی خودش رو انداخت');
+        if(l.opp)p.push(num(l.opp)+' مهره‌ی حریف رو انداخت');
+        if(l.queen==='won')p.push('👑 ملکه رو برد!');
+        if(l.queen==='pending')p.push('👑 ملکه افتاد؛ باید با یه مهره‌ی خودش بپوشونه');
+        if(l.queen==='back')p.push('👑 ملکه برگشت وسط');
+        if(l.last_back)p.push('آخرین مهره تا برداشتن ملکه برنمی‌گرده وسط');
+        return p.length?who+': '+p.join(' • '):who+': ضربه به جایی نرسید';
+      };
+      const canShoot=()=>!spectate&&V.g.phase==='play'&&V.g.turn===me.id&&!V.anim&&Date.now()>=V.readyTs&&!V.sending;
+      const snap=g=>{V.bodies=new Map(g.coins.map(c=>[c[0],{x:c[1],y:c[2],s:1}]))};
+      const refresh=()=>{
+        const g=V.g;
+        const L=spectate?{id:g.creator,n:g.creator_name}:(rot?{id:g.opponent,n:g.opponent_name}:{id:g.creator,n:g.creator_name});
+        const R=spectate?{id:g.opponent,n:g.opponent_name}:(rot?{id:g.creator,n:g.creator_name}:{id:g.opponent,n:g.opponent_name});
+        fillSide(sL,L.id,L.n);fillSide(sR,R.id,R.n);
+        const cnt=c=>g.out.filter(i=>c==='w'?(i>=2&&i<=10):i>=11).length;
+        for(const[s,u]of[[sL,L.id],[sR,R.id]]){
+          const c=u?colOf(u):'w';s.dot.className='cov-dot '+c;s.sc.textContent=num(cnt(c));
+          s.q.textContent=g.qown===u?' 👑':(g.qpend===u?' 👑?':'');
+          s.el.classList.toggle('on',g.phase==='play'&&g.turn===u&&!V.anim);
+        }
+        potEl.textContent='🏆 '+num(g.pot);midPot.textContent=num(g.pot);
+      };
+      const showResult=()=>{
+        const g=V.g;if(g.phase!=='done'||V.anim||V.resShown)return;V.resShown=true;
+        const wn=g.winner?(g.winner===g.creator?g.creator_name:g.opponent_name):'';
+        const won=g.winner===me.id;
+        resBox.className='cov-res'+(won?' champ':'');
+        resBox.replaceChildren(h('div',{class:'cov-rt'},g.winner?(won?'🏆 بردی!':(spectate?'🏆 '+wn+' برنده شد':'😔 باختی')):'🤝 مساوی'),
+          h('div',{class:'sub',style:'color:#e5d7f3;line-height:1.8'},g.winner?(spectate||!won?wn+' برنده شد. ':'')+(g.reason||''):(g.reason||'')),
+          g.winner&&won?h('div',{class:'rp-pot',style:'font-size:18px;margin:6px 0'},'💰 '+num(g.pot)+' تومن به حسابت رفت'):null,
+          h('button',{class:'rp-join big',onclick:()=>{cDismiss[id]=true;closeCarrom();cgSig='';cgDraw()}},'بستن'));
+      };
+      const startAnim=sh=>{
+        const ev={};for(const e of sh.ev)ev[sh.ids[sh.ids.indexOf(e[1])]]=e[0];
+        V.anim={f:sh.frames,ids:sh.ids,ev,t0:performance.now(),seq:sh.seq};
+        V.pk=new Map();
+      };
+      const endAnim=()=>{V.anim=null;V.sending=false;snap(V.g);refresh();showResult()};
+      ov.upd=g=>{
+        V.g=g;V.dlTs=Date.now()+(g.left||0)*1000;V.readyTs=Date.now()+(g.ready_in||0)*1000;
+        if(g.shot&&(!V.anim||V.anim.seq!==g.shot.seq)){startAnim(g.shot)}
+        else if(!V.anim)snap(g);
+        if(!V.anim){V.sending=false}
+        refresh();showResult();
+      };
+      // ───── رسم ─────
+      const drawBoard=c=>{
+        const gr=c.createRadialGradient(500,500,80,500,500,760);gr.addColorStop(0,'#f0bb7f');gr.addColorStop(1,'#d19558');
+        c.fillStyle=gr;c.fillRect(0,0,CW,CW);
+        c.globalAlpha=.07;c.strokeStyle='#5a3416';c.lineWidth=2;
+        for(let y=18;y<CW;y+=26){c.beginPath();c.moveTo(0,y);c.bezierCurveTo(300,y+9,700,y-9,CW,y+4);c.stroke()}
+        c.globalAlpha=1;
+        c.strokeStyle='#7b4a22';c.lineWidth=3;
+        c.strokeRect(120,120,760,760);
+        for(const y of[190,810]){c.beginPath();c.moveTo(CBMIN,y-18);c.lineTo(CBMAX,y-18);c.moveTo(CBMIN,y+18);c.lineTo(CBMAX,y+18);c.stroke();
+          for(const x of[CBMIN,CBMAX]){c.beginPath();c.arc(x,y,18,0,7);c.stroke();c.beginPath();c.arc(x,y,9,0,7);c.stroke()}}
+        for(const x of[190,810]){c.beginPath();c.moveTo(x-18,CBMIN);c.lineTo(x-18,CBMAX);c.moveTo(x+18,CBMIN);c.lineTo(x+18,CBMAX);c.stroke()}
+        c.beginPath();c.arc(500,500,150,0,7);c.stroke();c.beginPath();c.arc(500,500,64,0,7);c.stroke();
+        c.lineWidth=2;
+        for(const[x,y,dx,dy]of[[70,70,1,1],[930,70,-1,1],[70,930,1,-1],[930,930,-1,-1]]){
+          c.beginPath();c.moveTo(x+dx*40,y+dy*40);c.lineTo(x+dx*110,y+dy*110);c.stroke();
+          c.beginPath();c.arc(x+dx*125,y+dy*125,14,0,7);c.stroke();
+          for(let k=0;k<8;k++){const a=k*Math.PI/4;c.beginPath();c.arc(x+Math.cos(a)*30,y+Math.sin(a)*30,9,0,7);c.stroke()}}
+        for(const[x,y]of[[20,20],[980,20],[20,980],[980,980]]){
+          const pg=c.createRadialGradient(x,y,6,x,y,52);pg.addColorStop(0,'#000');pg.addColorStop(.8,'#111');pg.addColorStop(1,'#2a1a10');
+          c.fillStyle=pg;c.beginPath();c.arc(x,y,50,0,7);c.fill()}
+      };
+      const drawCoin=(c,id,b)=>{
+        if(b.s<=0)return;
+        const r=(id===0?CSR:CRAD)*b.s;
+        c.save();c.shadowColor='rgba(0,0,0,.35)';c.shadowBlur=6;c.shadowOffsetY=3;
+        let g1;
+        if(id===0){g1=c.createRadialGradient(b.x-8,b.y-8,2,b.x,b.y,r);g1.addColorStop(0,V.overlap?'#ff7a7a':'#b6425a');g1.addColorStop(1,V.overlap?'#a11':'#5c1022')}
+        else if(id===1){g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);g1.addColorStop(0,'#fb7185');g1.addColorStop(1,'#be123c')}
+        else if(id<=10){g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);g1.addColorStop(0,'#fffdf5');g1.addColorStop(1,'#e3cf9f')}
+        else{g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);g1.addColorStop(0,'#6b6b6b');g1.addColorStop(1,'#151515')}
+        c.fillStyle=g1;c.beginPath();c.arc(b.x,b.y,r,0,7);c.fill();
+        c.shadowColor='transparent';
+        c.strokeStyle=id===0?'#e8b84a':(id===1?'#7f0d2b':(id<=10?'#a8895a':'#000'));c.lineWidth=2.5*b.s;
+        c.beginPath();c.arc(b.x,b.y,r*.62,0,7);c.stroke();
+        if(id===0){c.strokeStyle='#e8b84a';c.lineWidth=2;c.beginPath();c.arc(b.x,b.y,r-2,0,7);c.stroke();
+          for(let k=0;k<8;k++){const a=k*Math.PI/4;c.beginPath();c.moveTo(b.x+Math.cos(a)*r*.15,b.y+Math.sin(a)*r*.15);c.lineTo(b.x+Math.cos(a)*r*.5,b.y+Math.sin(a)*r*.5);c.stroke()}}
+        c.restore();
+      };
+      const strikerW=()=>({x:rot?CW-V.vx:V.vx,y:rot?190:810});
+      const aimVec=()=>{
+        const a=V.aim;if(!a)return null;
+        const dx=a.p.x-a.p0.x,dy=a.p.y-a.p0.y,pull=Math.hypot(dx,dy);if(pull<1)return null;
+        const k=rot?1:-1;
+        return{wx:k*dx/pull,wy:k*dy/pull,pull,power:Math.min(1,pull/CMAXPULL)};
+      };
+      const drawAim=(c,s)=>{
+        const av=aimVec();if(!av||av.pull<22||V.overlap)return;
+        // خط هدف تا اولین برخورد
+        let best=1400,hit=null;
+        for(const[id,b]of V.bodies){if(id===0)continue;
+          const ox=b.x-s.x,oy=b.y-s.y,t=ox*av.wx+oy*av.wy;if(t<=0)continue;
+          const d2=ox*ox+oy*oy-t*t,R=CRAD+CSR;if(d2>R*R)continue;
+          const tt=t-Math.sqrt(R*R-d2);if(tt>0&&tt<best){best=tt;hit=b}}
+        const ex=s.x+av.wx*best,ey=s.y+av.wy*best;
+        c.save();c.setLineDash([14,12]);c.lineWidth=4;c.strokeStyle='rgba(255,255,255,.85)';
+        c.beginPath();c.moveTo(s.x,s.y);c.lineTo(ex,ey);c.stroke();c.setLineDash([]);
+        c.strokeStyle='rgba(255,255,255,.7)';c.lineWidth=3;c.beginPath();c.arc(ex,ey,CSR,0,7);c.stroke();
+        if(hit){const nx=hit.x-ex,ny=hit.y-ey,nl=Math.hypot(nx,ny)||1;c.strokeStyle='rgba(250,204,21,.9)';c.lineWidth=4;c.beginPath();c.moveTo(hit.x,hit.y);c.lineTo(hit.x+nx/nl*110,hit.y+ny/nl*110);c.stroke()}
+        // کشش (قدرت)
+        const bx=s.x-av.wx*(CSR+14),by=s.y-av.wy*(CSR+14),ln=av.power*170;
+        c.lineCap='round';c.lineWidth=12;c.strokeStyle=av.power>.75?'#f43f5e':(av.power>.4?'#fb923c':'#4ade80');
+        c.beginPath();c.moveTo(bx,by);c.lineTo(bx-av.wx*ln,by-av.wy*ln);c.stroke();
+        c.restore();
+      };
+      const frame=now=>{
+        // انیمیشن ضربه
+        if(V.anim){
+          const A=V.anim,f=(now-A.t0)/1000*30,i=Math.floor(f);
+          if(i>=A.f.length-1){endAnim()}
+          else{
+            const t=f-i,F0=A.f[i],F1=A.f[i+1];V.bodies=new Map();
+            A.ids.forEach((id,k)=>{
+              let s=1;const ef=A.ev[id];
+              if(ef!==undefined&&f>=ef){s=Math.max(0,1-(f-ef)/8)}
+              V.bodies.set(id,{x:F0[2*k]+(F1[2*k]-F0[2*k])*t,y:F0[2*k+1]+(F1[2*k+1]-F0[2*k+1])*t,s});
+            });
+          }
+        }
+        const can=canShoot();
+        const s=strikerW();
+        V.overlap=false;
+        if(can){for(const[id,b]of V.bodies){if(id!==0&&(b.x-s.x)**2+(b.y-s.y)**2<(CRAD+CSR-1)**2){V.overlap=true;break}}}
+        const c=cvs.getContext('2d'),S=cvs.width/CW;
+        c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cvs.width,cvs.height);
+        c.save();if(rot){c.translate(cvs.width,cvs.height);c.rotate(Math.PI)}c.scale(S,S);
+        drawBoard(c);
+        for(const[id,b]of V.bodies)if(id!==0)drawCoin(c,id,b);
+        if(V.anim){const b=V.bodies.get(0);if(b)drawCoin(c,0,b)}
+        else if(can){drawCoin(c,0,{x:s.x,y:s.y,s:1});drawAim(c,s)}
+        c.restore();
+        rng.disabled=!can;
+        // تایمر
+        const g=V.g;
+        let txt='',w=100,low=false;
+        if(g.phase==='play'){
+          const rem=Math.max(0,(V.dlTs-Date.now())/1000),shown=Math.min(g.secs||12,rem);
+          w=shown/(g.secs||12)*100;low=shown<=4;txt='⏱ '+num(Math.ceil(shown))+'″';
+        }
+        const sec=txt+(can?'1':'0')+(V.anim?'a':'')+g.turn;
+        barI.style.width=w+'%';barI.classList.toggle('low',low);
+        if(sec!==V.lastSec){
+          V.lastSec=sec;tEl.textContent=txt;
+          let st='';
+          if(g.phase==='done')st=V.anim?'…':'🏁 بازی تموم شد';
+          else if(V.anim)st='🎬 ضربه در حال پخشه…';
+          else if(spectate)st='⏳ نوبت '+(g.turn===g.creator?g.creator_name:g.opponent_name);
+          else if(g.turn===me.id)st=can?'🎯 نوبت توئه! استرایکر رو جابه‌جا کن، روی میز بکش و رها کن':'🎯 نوبت توئه…';
+          else st='⏳ نوبت '+(g.turn===g.creator?g.creator_name:g.opponent_name)+' است…';
+          statusEl.textContent=st;
+          if(!V.anim)lastEl.textContent=lastText(g.last)||(g.miss?'⚠️ '+num(g.miss)+' بار نوبتت رد شده؛ سومی میبازی!':'');
+        }
+        raf=requestAnimationFrame(frame);
+      };
+      let raf=0;
+      cStop=()=>{cancelAnimationFrame(raf);window.removeEventListener('resize',onRs)};
+      const onRs=()=>{};window.addEventListener('resize',onRs);
+      // ───── ورودی ─────
+      const vp=e=>{const r=cvs.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*CW,y:(e.clientY-r.top)/r.height*CW}};
+      cvs.onpointerdown=e=>{if(!canShoot())return;try{cvs.setPointerCapture(e.pointerId)}catch(x){}const p=vp(e);V.aim={p0:p,p};e.preventDefault()};
+      cvs.onpointermove=e=>{if(V.aim)V.aim.p=vp(e)};
+      cvs.onpointercancel=()=>{V.aim=null};
+      cvs.onpointerup=async e=>{
+        if(!V.aim)return;const av=aimVec();V.aim=null;
+        if(!av||av.pull<22)return;
+        if(!canShoot())return;
+        if(V.overlap){toast('استرایکر روی یه مهره‌ست؛ جاش رو عوض کن',1);return}
+        const s=strikerW();V.sending=true;
+        const r=await carromCall('/api/social/room/carrom/shoot',{game_id:id,x:s.x,angle:Math.atan2(av.wy,av.wx),power:av.power});
+        if(!r){V.sending=false;loadCarrom()}
+      };
+      cPoll=setInterval(loadCarrom,800);
+      snap(g0);refresh();V.dlTs=Date.now()+(g0.left||0)*1000;V.readyTs=Date.now()+(g0.ready_in||0)*1000;
+      raf=requestAnimationFrame(frame);
+      showResult();
+    }
     const premium=h('button',{class:'ib',title:'ایموجی پرمیوم و بازی',onmousedown:e=>e.preventDefault(),onclick:()=>{
       sheet('💎 منو',close=>h('div',{},
         sact('⭐ ایموجی پرمیوم',()=>{close();togglePanel()}),
-        sact('☠️ بازی سم یا خوراکی',()=>{close();poisonCreateSheet()})));
+        sact('☠️ بازی سم یا خوراکی',()=>{close();poisonCreateSheet()}),
+        sact('🎯 بازی خط و نشان',()=>{close();const mg=cg.find(x=>x.me&&x.phase==='play');if(mg){cDismiss[mg.id]=false;openCarrom(mg.id)}else carromCreateSheet()})));
     }},'💎');
     composer.append(premium,inp,send);
     function setReply(m,name){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(plain(m.text),60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}
@@ -1859,9 +2203,10 @@ function SocialScreen(){
       const identity=h('button',{class:'sidentity'+(isBot?' botid':''),type:'button',onclick:()=>{if(!isBot)openUser(Number(m.user_id))}},avatar('user',m.user_id,name,34),h('span',{class:'sub'},name,isBot&&m.name_ce?ceImg(m.name_ce,'bn'):null,isBot?h('span',{class:'bbadge'},'ربات'):null));
       node.append(identity);
       if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text?plain(m.reply_text):'پاسخ به پیام')));
-      const gm=/\{game:(\d+)\}/.exec(m.text||'');
-      if(m.text)node.append(h('div',{class:'tx',dir:'auto'},...richText(gm?m.text.replace(/\s*\{game:\d+\}/,''):m.text)));
+      const gm=/\{game:(\d+)\}/.exec(m.text||''),cm=/\{carrom:(\d+)\}/.exec(m.text||'');
+      if(m.text)node.append(h('div',{class:'tx',dir:'auto'},...richText((gm||cm)?m.text.replace(/\s*\{(?:game|carrom):\d+\}/,''):m.text)));
       if(gm&&isBot)node.append(joinBtn(Number(gm[1])));
+      if(cm&&isBot)node.append(cJoinBtn(Number(cm[1])));
       if(m.premium_emoji_id){const tag=h('span',{class:'prem',title:'ایموجی پرمیوم'},'⭐');node.append(tag);blob('ce'+m.premium_emoji_id,'/api/social/emoji?id='+encodeURIComponent(m.premium_emoji_id)).then(u=>{if(u){tag.replaceChildren(h('img',{src:u,alt:'ایموجی پرمیوم',style:'width:26px;height:26px;object-fit:contain;vertical-align:middle'}))}})}
       const rx=Array.isArray(m.reactions)?m.reactions:[];
       const rs=h('div',{class:'sreacts'},...rx.map(r=>h('button',{style:r.mine?'border-color:#b12bd5':'',onclick:()=>react(m.message_id,r.emoji)},r.emoji+' '+r.n)));
@@ -1887,7 +2232,7 @@ function SocialScreen(){
           const first=!lastSig,near=first||msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<140;
           lastSig=sig;
           msgs.replaceChildren(...(arr.length?arr.map(renderMessage):[h('div',{class:'empty'},'هنوز پیامی نیست؛ اولین نفر باش 👋')]));
-          syncJoinBtns();if(near||force)msgs.scrollTop=msgs.scrollHeight;
+          syncJoinBtns();syncCBtns();if(near||force)msgs.scrollTop=msgs.scrollHeight;
         }
       }catch(e){if(!lastSig)toast(e.message||'دریافت پیام‌ها ناموفق بود',1)}
       finally{roomBusy=false}
@@ -1902,15 +2247,15 @@ function SocialScreen(){
       send.disabled=false;
     }
     inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
-    body.replaceChildren(gamebox,msgs,replyBar,composer,epanel);
-    await loadRoom(true);loadPoison();let tick=0;
-    roomTimer=setInterval(()=>{tick++;loadPoison();if(tick%2===0)loadRoom(false)},1800);
+    body.replaceChildren(cbox,gamebox,msgs,replyBar,composer,epanel);
+    await loadRoom(true);loadPoison();loadCarrom();let tick=0;
+    roomTimer=setInterval(()=>{tick++;loadPoison();loadCarrom();if(tick%2===0)loadRoom(false)},1800);
     const rpClock=setInterval(()=>{
       if(!gamebox.isConnected){clearInterval(rpClock);return}
       gamebox.querySelectorAll('[data-dl]').forEach(e=>{const sec=Math.max(0,Math.ceil((Number(e.dataset.dl)-Date.now())/1000));e.textContent='⏱ '+num(sec)+'″'});
       gamebox.querySelectorAll('[data-bdl]').forEach(e=>{const left=Math.max(0,Number(e.dataset.bdl)-Date.now());e.style.width=Math.min(100,left/Number(e.dataset.tot)*100)+'%';e.classList.toggle('low',left<10000)});
     },1000);
-    root._destroy=()=>{clearInterval(roomTimer);roomTimer=null;clearInterval(rpClock)};
+    root._destroy=()=>{clearInterval(roomTimer);roomTimer=null;clearInterval(rpClock);closeCarrom()};
   }
   async function renderSection(){
     clearInterval(roomTimer);roomTimer=null;body.classList.remove('sg-flex');
@@ -2024,6 +2369,27 @@ const chatCss=document.createElement('style');chatCss.textContent=`
 @keyframes rpbeat{50%{transform:scale(1.035)}}
 .rp-join.big{width:100%;padding:11px;font-size:15px}.rp-join:disabled{animation:none;box-shadow:none;opacity:.7;cursor:default;background:#6b7280}
 .rp-join.wait{background:linear-gradient(135deg,#0891b2,#6366f1)}
+.cov{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 8px calc(10px + env(safe-area-inset-bottom));background:radial-gradient(circle at 50% 0,#2fa468,#14633f 60%,#0b3d27);color:#fff;overflow:hidden;user-select:none;-webkit-user-select:none;animation:rpin .25s}
+.cov-top{width:100%;max-width:560px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cov-x{border:0;background:#00000040;color:#fff;border-radius:12px;padding:6px 12px;font-size:13.5px}
+.cov-title{font-weight:900;font-size:17px;text-shadow:0 2px 0 #00000055}.cov-pot{font-weight:800;color:#fde047;font-size:14px;min-width:70px;text-align:left}
+.cov-hdr{width:100%;max-width:520px;display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+.cov-p{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:12px;min-width:0;text-align:center}
+.cov-p .av{box-shadow:0 0 0 3px #ffffff33;transition:.2s}.cov-p.on .av{box-shadow:0 0 0 3px #facc15,0 0 16px #facc15bb;animation:rppulse 1s infinite alternate}
+.cov-sc{display:flex;align-items:center;gap:6px;font-weight:900;font-size:22px;text-shadow:0 2px 0 #0006}
+.cov-dot{display:inline-block;width:22px;height:22px;border-radius:50%;border:2px solid #0006}
+.cov-dot.w{background:radial-gradient(circle at 35% 30%,#fff,#e3cf9f)}.cov-dot.b{background:radial-gradient(circle at 35% 30%,#777,#111)}
+.cov-mid{flex:none;display:flex;flex-direction:column;align-items:center;padding-top:4px}.cov-coin{font-size:28px;line-height:1}.cov-pn{font-weight:900;font-size:20px;color:#fff;text-shadow:0 2px 0 #0007}
+.cov-bar{width:min(92%,500px);height:9px;border-radius:5px;background:#00000040;overflow:hidden}
+.cov-bar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#fde047,#fb923c);transition:width .25s linear}.cov-bar i.low{background:linear-gradient(90deg,#f43f5e,#fb923c)}
+.cov-t{font-weight:800;font-size:14px;color:#fde047;min-height:20px;font-variant-numeric:tabular-nums}
+.cov-s{font-size:13.5px;text-align:center;line-height:1.7;min-height:22px;font-weight:700;padding:0 8px}.cov-last{font-size:12px;opacity:.9;text-align:center;min-height:18px;padding:0 10px;line-height:1.6}
+.cov-board{padding:7px;border-radius:26px;background:linear-gradient(145deg,#3f8f5e,#1d5a3a);box-shadow:0 8px 24px #0008,inset 0 0 0 2px #ffffff22;flex:none}
+.cov-cv{display:block;border-radius:18px;touch-action:none;background:#d9a46a;cursor:crosshair}
+.cov-sl{width:min(92%,460px);padding:11px 20px;border-radius:30px;background:linear-gradient(#cdebd5,#97cba7);border:4px solid #1d5a3a;box-shadow:0 5px 14px #0006;flex:none}
+.cov-sl input{width:100%;accent-color:#7a1f2e;height:26px}.cov-sl input:disabled{opacity:.45}
+.cov-res{position:absolute;inset-inline:18px;top:28%;max-width:420px;margin:auto;background:linear-gradient(160deg,#2b0f3d,#14091f);color:#f4e9ff;border:2px solid #b12bd5;border-radius:22px;padding:18px;text-align:center;box-shadow:0 10px 40px #000a;animation:rpin .3s;z-index:3}
+.cov-res.champ{border-color:#facc15;box-shadow:0 0 0 3px #facc1566,0 10px 40px #000a}.cov-rt{font-size:22px;font-weight:900;margin-bottom:6px}
 .sidentity.botid .sub{display:inline-flex;align-items:center;gap:5px;font-weight:700}.sidentity .ce.bn{width:18px;height:18px;vertical-align:middle}
 .bbadge{font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,#7c3aed,#db2777);border-radius:8px;padding:1px 6px}
 `;document.head.append(chatCss);
@@ -3827,6 +4193,578 @@ async def _social_poison_move(b, user):
     return _j({"ok": True, "msg": msg, "done": done, "balance": await _mini_balance(uid)})
 
 
+# ───── بازی دونفره «خط و نشان» (کارام) داخل چت‌روم مینی‌اپ ─────
+# سازنده شرط رو تعیین می‌کنه (پولش همون لحظه کم میشه) و منتظر حریف می‌مونه؛ نفر دوم همون مبلغ رو می‌ده.
+# سازنده مهره‌های سفید (۹ تا) و حریف مهره‌های سیاه (۹ تا) داره، ملکه (قرمز) وسط میزه.
+# فیزیک کامل سمت سرور شبیه‌سازی میشه (کلاینت فقط زاویه/قدرت/جای استرایکر می‌فرسته) پس تقلب ممکن نیست.
+# هر نوبت ۱۲ ثانیه مهلت داره؛ سه بار پشت‌سرهم نوبت رو از دست بدی می‌بازی. برنده ۲ برابر شرط می‌گیره.
+CR_W = 1000                 # میز مربعی ۱۰۰۰×۱۰۰۰ واحد
+CR_R = 21                   # شعاع مهره
+CR_SR = 27                  # شعاع استرایکر
+CR_POCKET = 20              # فاصله‌ی مرکز جیب از گوشه
+CR_CAP = 40                 # شعاع جذب جیب
+CR_BASE_Y = (810.0, 190.0)  # خط شروع سازنده (پایین) / حریف (بالا)
+CR_BASE_MIN, CR_BASE_MAX = 215.0, 785.0
+CR_DT = 1.0 / 240.0
+CR_REC = 8                  # هر ۸ گام یه فریم = ۳۰ فریم در ثانیه
+CR_MAXT = 9.0
+CR_DEC = 560.0
+CR_DRAG = 0.45
+CR_STOP = 14.0
+CR_REST_W = 0.8
+CR_REST_C = 0.92
+CR_MASS_S = 1.5
+CR_VMIN, CR_VMAX = 420.0, 2600.0
+CR_TURN_SECS = 12
+CR_LOBBY_SECS = 600
+CR_DONE_SHOW = 60
+CR_MAX_LOBBIES = 8
+CR_MAX_SHOTS = 120
+CR_MISS_LIMIT = 3
+_CR_LOCK = asyncio.Lock()
+
+
+def _cr_ids(side: str):
+    return range(2, 11) if side == "w" else range(11, 20)
+
+
+def _cr_initial() -> dict:
+    """چیدمان اولیه: ملکه وسط، حلقه‌ی داخلی ۶ تایی، حلقه‌ی بیرونی ۱۲ تایی؛ رنگ‌ها یکی‌درمیان."""
+    c = CR_W / 2
+    g = 1.04
+    pos = []
+    for k in range(6):
+        a = math.radians(90 + 60 * k)
+        pos.append((a, 2 * CR_R * g))
+    outer = []
+    for k in range(6):
+        a = math.radians(90 + 60 * k)
+        outer.append((a, 4 * CR_R * g))
+        outer.append((a + math.radians(30), 2 * math.sqrt(3) * CR_R * g))
+    outer.sort(key=lambda t: t[0])
+    coins = {1: [c, c]}
+    nw, nb = 2, 11
+    for idx, (a, r) in enumerate(pos + outer):
+        white = idx % 2 == 0
+        if idx >= 6:
+            white = (idx - 6) % 2 == 0
+        cid = nw if white else nb
+        if white:
+            nw += 1
+        else:
+            nb += 1
+        coins[cid] = [round(c + r * math.cos(a), 1), round(c + r * math.sin(a), 1)]
+    return coins
+
+
+def _cr_sim(coins: dict, sx: float, sy: float, ang: float, power: float):
+    """شبیه‌سازی یه ضربه. خروجی: مهره‌های باقی‌مونده، مهره‌های توی جیب، آیا استرایکر افتاد، فریم‌ها و رویدادها."""
+    ids = [0] + sorted(coins)
+    n = len(ids)
+    x = [float(sx)] + [float(coins[i][0]) for i in ids[1:]]
+    y = [float(sy)] + [float(coins[i][1]) for i in ids[1:]]
+    v0 = CR_VMIN + (CR_VMAX - CR_VMIN) * power
+    vx = [math.cos(ang) * v0] + [0.0] * (n - 1)
+    vy = [math.sin(ang) * v0] + [0.0] * (n - 1)
+    rad = [CR_SR] + [CR_R] * (n - 1)
+    imass = [1.0 / CR_MASS_S] + [1.0] * (n - 1)
+    alive = [True] * n
+    events, frames = [], []
+    P, W = CR_POCKET, CR_W
+    pockets = ((P, P), (W - P, P), (P, W - P), (W - P, W - P))
+    cap2 = CR_CAP * CR_CAP
+    dt = CR_DT
+
+    def snap():
+        fr = []
+        for i in range(n):
+            fr.append(int(round(x[i])))
+            fr.append(int(round(y[i])))
+        frames.append(fr)
+
+    snap()
+    last_snap = 0
+    steps = int(CR_MAXT / dt)
+    step = 0
+    for step in range(1, steps + 1):
+        mv = [i for i in range(n) if alive[i] and (vx[i] or vy[i])]
+        if not mv:
+            break
+        for i in mv:
+            sp = math.hypot(vx[i], vy[i])
+            ns = sp * (1.0 - CR_DRAG * dt) - CR_DEC * dt
+            if ns < CR_STOP:
+                vx[i] = vy[i] = 0.0
+                continue
+            k = ns / sp
+            vx[i] *= k
+            vy[i] *= k
+            x[i] += vx[i] * dt
+            y[i] += vy[i] * dt
+            r = rad[i]
+            if x[i] < r:
+                x[i] = r
+                vx[i] = abs(vx[i]) * CR_REST_W
+            elif x[i] > W - r:
+                x[i] = W - r
+                vx[i] = -abs(vx[i]) * CR_REST_W
+            if y[i] < r:
+                y[i] = r
+                vy[i] = abs(vy[i]) * CR_REST_W
+            elif y[i] > W - r:
+                y[i] = W - r
+                vy[i] = -abs(vy[i]) * CR_REST_W
+            for ci, (px, py) in enumerate(pockets):
+                if (x[i] - px) ** 2 + (y[i] - py) ** 2 < cap2:
+                    alive[i] = False
+                    x[i], y[i] = float(px), float(py)
+                    vx[i] = vy[i] = 0.0
+                    events.append([len(frames), ids[i], ci])
+                    break
+        mvset = set(mv)
+        for i in mv:
+            if not alive[i]:
+                continue
+            for j in range(n):
+                if j == i or not alive[j] or (j in mvset and j < i):
+                    continue
+                dx = x[j] - x[i]
+                dy = y[j] - y[i]
+                rr = rad[i] + rad[j]
+                d2 = dx * dx + dy * dy
+                if d2 >= rr * rr:
+                    continue
+                d = math.sqrt(d2)
+                if d < 1e-6:
+                    dx, dy, d = 1.0, 0.0, 1.0
+                nx, ny = dx / d, dy / d
+                im = imass[i] + imass[j]
+                ov = rr - d
+                x[i] -= nx * ov * imass[i] / im
+                y[i] -= ny * ov * imass[i] / im
+                x[j] += nx * ov * imass[j] / im
+                y[j] += ny * ov * imass[j] / im
+                rv = (vx[j] - vx[i]) * nx + (vy[j] - vy[i]) * ny
+                if rv < 0:
+                    jj = -(1.0 + CR_REST_C) * rv / im
+                    vx[i] -= jj * imass[i] * nx
+                    vy[i] -= jj * imass[i] * ny
+                    vx[j] += jj * imass[j] * nx
+                    vy[j] += jj * imass[j] * ny
+        if step % CR_REC == 0:
+            snap()
+            last_snap = step
+    else:
+        for i in range(n):
+            vx[i] = vy[i] = 0.0
+    if last_snap != step or len(frames) < 2:
+        snap()
+    final, pocketed = {}, []
+    for i in range(1, n):
+        if alive[i]:
+            final[ids[i]] = [round(x[i], 1), round(y[i], 1)]
+        else:
+            pocketed.append(ids[i])
+    return {"final": final, "pocketed": pocketed, "striker_in": not alive[0], "ids": ids, "frames": frames, "ev": events}
+
+
+def _cr_place(coins: dict, cid: int):
+    """مهره رو (مثلاً ملکه یا مهره‌ی جریمه) وسط میز یا نزدیک‌ترین جای خالی برمی‌گردونه."""
+    c = CR_W / 2
+    gap = 2 * CR_R + 2
+    cand = [(c, c)]
+    for ring in range(1, 8):
+        for k in range(12 * ring):
+            a = 2 * math.pi * k / (12 * ring)
+            cand.append((c + ring * gap * 0.9 * math.cos(a), c + ring * gap * 0.9 * math.sin(a)))
+    for px, py in cand:
+        if all((px - o[0]) ** 2 + (py - o[1]) ** 2 >= gap * gap for k, o in coins.items() if k != cid):
+            coins[cid] = [round(px, 1), round(py, 1)]
+            return
+    coins[cid] = [c, c]
+
+
+def _cr_load(r) -> dict:
+    g = dict(r)
+    try:
+        st = json.loads(g.get("state") or "{}")
+    except Exception:
+        st = {}
+    g["coins"] = {int(k): [float(v[0]), float(v[1])] for k, v in (st.get("coins") or {}).items()}
+    g["out"] = [int(i) for i in (st.get("out") or [])]
+    g["qown"] = st.get("qown")
+    g["qpend"] = st.get("qpend")
+    g["seq"] = int(st.get("seq") or 0)
+    g["miss"] = {int(k): int(v) for k, v in (st.get("miss") or {}).items()}
+    g["shots"] = int(st.get("shots") or 0)
+    g["last"] = st.get("last") or {}
+    g["ready_at"] = float(st.get("ready_at") or 0)
+    return g
+
+
+def _cr_pack(g: dict) -> str:
+    return json.dumps({"coins": {str(k): v for k, v in g["coins"].items()}, "out": g["out"], "qown": g.get("qown"),
+                       "qpend": g.get("qpend"), "seq": g.get("seq", 0), "miss": {str(k): v for k, v in g["miss"].items()},
+                       "shots": g.get("shots", 0), "last": g.get("last") or {}, "ready_at": g.get("ready_at", 0)})
+
+
+async def _cr_fetch(gid):
+    if gid is None:
+        return None
+    r = await pool.fetchrow("SELECT * FROM room_carrom_games WHERE game_id=$1", gid)
+    return _cr_load(r) if r else None
+
+
+async def _cr_store(g: dict):
+    await pool.execute(
+        "UPDATE room_carrom_games SET opponent=$2, phase=$3, turn=$4, deadline=$5, winner=$6, reason=$7, state=$8, finished_at=$9 WHERE game_id=$1",
+        g["game_id"], g.get("opponent"), g["phase"], g.get("turn"), g.get("deadline"), g.get("winner"), g.get("reason"),
+        _cr_pack(g), g.get("finished_at"))
+
+
+async def _cr_finish(g: dict, winner, reason: str, say: bool = True):
+    """پایان بازی. winner=None یعنی مساوی/لغو و شرط‌ها برمی‌گرده؛ وگرنه برنده کل جایزه رو می‌گیره."""
+    if g["phase"] == "done":
+        return
+    g.update(phase="done", winner=winner, reason=reason, turn=None, deadline=None, finished_at=time.time())
+    bet = int(g["bet"])
+    if winner is None:
+        await _give(g["creator"], bet)
+        if g.get("opponent"):
+            await _give(g["opponent"], bet)
+    else:
+        await _give(winner, bet * 2)
+    await _cr_store(g)
+    if say:
+        nm = await _rp_names([g["creator"], g.get("opponent")])
+        a, b = nm.get(g["creator"], "بازیکن"), nm.get(g.get("opponent"), "بازیکن")
+        sw = sum(1 for i in g["out"] if i in _cr_ids("w"))
+        sb = sum(1 for i in g["out"] if i in _cr_ids("b"))
+        if winner is not None:
+            win = a if winner == g["creator"] else b
+            await _rp_say(f"🏆 {win} برنده‌ی «خط و نشان» شد!\n🎯 {a} ({sw} مهره) در برابر {b} ({sb} مهره)\n📌 {reason}\n💰 جایزه: {bet * 2:,} تومن به حسابش رفت 🎉")
+        elif g.get("opponent"):
+            await _rp_say(f"🤝 بازی «خط و نشان» بین {a} و {b} مساوی شد؛ شرط {bet:,} تومنی به هر دو برگشت.")
+
+
+async def _cr_tick(g: dict):
+    now = time.time()
+    if g["phase"] == "lobby":
+        if now - float(g["created_at"]) > CR_LOBBY_SECS:
+            await _cr_finish(g, None, "کسی وارد نشد؛ شرط به سازنده برگشت.", say=False)
+        return
+    if g["phase"] != "play":
+        return
+    changed = False
+    while g["phase"] == "play" and g.get("deadline") and now > g["deadline"]:
+        loser = g["turn"]
+        other = g["opponent"] if loser == g["creator"] else g["creator"]
+        g["miss"][loser] = g["miss"].get(loser, 0) + 1
+        if g["miss"][loser] >= CR_MISS_LIMIT:
+            if g["miss"].get(other, 0) >= CR_MISS_LIMIT - 1:
+                await _cr_finish(g, None, "هیچ‌کدوم بازی نکردن؛ شرط‌ها برگشت.")
+            else:
+                await _cr_finish(g, other, f"حریف {CR_MISS_LIMIT} بار پشت‌سرهم نوبتش رو از دست داد.")
+            return
+        if g.get("qpend") == loser:
+            _cr_place(g["coins"], 1)
+            g["qpend"] = None
+        g["last"] = {"by": loser, "timeout": True}
+        g["turn"] = other
+        g["deadline"] = float(g["deadline"]) + CR_TURN_SECS
+        g["ready_at"] = 0
+        changed = True
+    if changed:
+        await _cr_store(g)
+
+
+async def _cr_sweep() -> list:
+    """همه‌ی بازی‌های باز رو می‌گیره و مهلت‌های تموم‌شده رو تکلیف می‌کنه (باید زیر _CR_LOCK صدا زده بشه)."""
+    out = []
+    for r in await pool.fetch("SELECT * FROM room_carrom_games WHERE phase<>'done' ORDER BY game_id"):
+        g = _cr_load(r)
+        await _cr_tick(g)
+        if g["phase"] != "done":
+            out.append(g)
+    return out
+
+
+def _cr_view(g: dict, uid: int, names: dict, now: float, shot=None) -> dict:
+    mine = uid in (g["creator"], g.get("opponent"))
+    left = None
+    if g["phase"] == "lobby":
+        left = max(0, int(CR_LOBBY_SECS - (now - float(g["created_at"]))))
+    elif g.get("deadline"):
+        left = max(0.0, round(float(g["deadline"]) - now, 2))
+    d = {"id": g["game_id"], "creator": g["creator"], "creator_name": names.get(g["creator"], "بازیکن"),
+         "opponent": g.get("opponent"), "opponent_name": names.get(g.get("opponent"), "") if g.get("opponent") else "",
+         "bet": int(g["bet"]), "pot": int(g["bet"]) * 2, "phase": g["phase"], "turn": g.get("turn"), "left": left,
+         "me": mine, "winner": g.get("winner"), "reason": g.get("reason") or "", "seq": g["seq"], "secs": CR_TURN_SECS,
+         "ready_in": max(0.0, round(g["ready_at"] - now, 2)) if g.get("ready_at") else 0,
+         "coins": [[k, v[0], v[1]] for k, v in sorted(g["coins"].items())], "out": g["out"],
+         "qown": g.get("qown"), "qpend": g.get("qpend"), "last": g.get("last") or {},
+         "miss": g["miss"].get(uid, 0) if mine else 0}
+    if shot:
+        d["shot"] = shot
+    return d
+
+
+async def _cr_games_for(uid: int, seen: dict, only_ids=None) -> list:
+    async with _CR_LOCK:
+        games = await _cr_sweep()
+        recent = await pool.fetch(
+            "SELECT * FROM room_carrom_games WHERE phase='done' AND finished_at>$1 ORDER BY game_id DESC LIMIT 4",
+            time.time() - CR_DONE_SHOW)
+        games += [_cr_load(r) for r in recent]
+    names = await _rp_names([x for g in games for x in (g["creator"], g.get("opponent"))])
+    now = time.time()
+    shots = {}
+    want = [g["game_id"] for g in games if g["game_id"] in seen and g["seq"] > seen[g["game_id"]]]
+    if want:
+        for r in await pool.fetch("SELECT game_id, seq, data FROM room_carrom_shots WHERE game_id = ANY($1::bigint[])", want):
+            try:
+                sh = json.loads(r["data"])
+                sh["seq"] = int(r["seq"])
+                shots[int(r["game_id"])] = sh
+            except Exception:
+                pass
+    views = []
+    for g in games:
+        sh = shots.get(g["game_id"])
+        if sh and sh["seq"] != g["seq"]:
+            sh = None
+        views.append(_cr_view(g, uid, names, now, sh))
+    views.sort(key=lambda v: (not v["me"], -v["id"]))
+    return views
+
+
+def _cr_parse_seen(s) -> dict:
+    out = {}
+    for part in str(s or "").split(","):
+        if ":" in part:
+            a, b = part.split(":", 1)
+            try:
+                out[int(a)] = int(b)
+            except ValueError:
+                pass
+    return out
+
+
+async def _social_carrom_state(qs, user):
+    uid = int(user["id"])
+    views = await _cr_games_for(uid, _cr_parse_seen(qs.get("seen")))
+    return _j({"games": views, "balance": await _mini_balance(uid), "min_bet": CASINO_MIN_BET, "max_bet": CASINO_MAX_BET})
+
+
+def _cr_busy_sql() -> str:
+    return "SELECT 1 FROM room_carrom_games WHERE phase<>'done' AND (creator=$1 OR opponent=$1)"
+
+
+async def _social_carrom_create(b, user):
+    uid, _bal = await _mini_ctx(user)
+    try:
+        bet = int(float(str(b.get("bet")).replace(",", "").strip()))
+    except (TypeError, ValueError):
+        raise _ApiError("مبلغ شرط نامعتبره")
+    if bet < CASINO_MIN_BET:
+        raise _ApiError(f"حداقل شرط {CASINO_MIN_BET:,} تومنه.")
+    if bet > CASINO_MAX_BET:
+        raise _ApiError(f"حداکثر شرط {CASINO_MAX_BET:,} تومنه.")
+    async with _CR_LOCK:
+        await _cr_sweep()
+        if await pool.fetchval(_cr_busy_sql(), uid):
+            raise _ApiError("تو همین الان یه بازی خط و نشان فعال داری.")
+        if int(await pool.fetchval("SELECT count(*) FROM room_carrom_games WHERE phase='lobby'") or 0) >= CR_MAX_LOBBIES:
+            raise _ApiError("چند تا بازی منتظر حریفن؛ یکی‌شون رو وارد شو یا کمی صبر کن.")
+        if await _take(uid, bet) is None:
+            raise _ApiError("موجودی کافی نیست.")
+        try:
+            st = json.dumps({"coins": {str(k): v for k, v in _cr_initial().items()}, "out": [], "seq": 0})
+            gid = await pool.fetchval(
+                "INSERT INTO room_carrom_games(creator,bet,phase,state,created_at) VALUES($1,$2,'lobby',$3,$4) RETURNING game_id",
+                uid, bet, st, time.time())
+        except Exception:
+            await _give(uid, bet)
+            raise
+    nm = await _rp_names([uid])
+    await _rp_say(f"🎯 {nm.get(uid, 'یه بازیکن')} یه بازی «خط و نشان» (کارام) ساخت!\n💰 شرط هر نفر: {bet:,} تومن\n🏆 جایزه‌ی برنده: {bet * 2:,} تومن\n⏱ هر نوبت {CR_TURN_SECS} ثانیه — کی خط و نشان می‌کشه؟ 😎 روی «پیوستن» بزن 👇 {{carrom:{gid}}}")
+    return _j({"ok": True, "game_id": gid, "balance": await _mini_balance(uid)})
+
+
+async def _social_carrom_join(b, user):
+    uid, _bal = await _mini_ctx(user)
+    gid = _int(b.get("game_id"))
+    async with _CR_LOCK:
+        await _cr_sweep()
+        g = await _cr_fetch(gid)
+        if not g or g["phase"] != "lobby":
+            raise _ApiError("این بازی دیگه فعال نیست.")
+        if g["creator"] == uid:
+            raise _ApiError("نمی‌تونی وارد بازی خودت بشی؛ منتظر حریف باش.")
+        if await pool.fetchval(_cr_busy_sql(), uid):
+            raise _ApiError("تو همین الان یه بازی خط و نشان فعال داری.")
+        if await _take(uid, int(g["bet"])) is None:
+            raise _ApiError(f"برای ورود باید {int(g['bet']):,} تومن موجودی داشته باشی.")
+        now = time.time()
+        g.update(opponent=uid, phase="play", turn=random.choice([g["creator"], uid]),
+                 deadline=now + 3 + CR_TURN_SECS, ready_at=now + 3)
+        g["coins"] = _cr_initial()
+        g["out"], g["qown"], g["qpend"], g["seq"], g["miss"], g["shots"], g["last"] = [], None, None, 0, {}, 0, {}
+        try:
+            await _cr_store(g)
+        except Exception:
+            await _give(uid, int(g["bet"]))
+            raise
+    nm = await _rp_names([uid, g["creator"]])
+    await _rp_say(f"⚔️ {nm.get(uid, 'یه بازیکن')} به بازی «خط و نشان» {nm.get(g['creator'], 'سازنده')} پیوست!\n💰 جایزه: {int(g['bet']) * 2:,} تومن — بازی شروع شد، تماشا کنید 👀")
+    return _j({"ok": True, "balance": await _mini_balance(uid)})
+
+
+async def _social_carrom_cancel(b, user):
+    uid = int(user["id"])
+    gid = _int(b.get("game_id"))
+    async with _CR_LOCK:
+        await _cr_sweep()
+        g = await _cr_fetch(gid)
+        if not g or g["phase"] != "lobby":
+            raise _ApiError("این بازی دیگه تو مرحله‌ی انتظار نیست.")
+        if g["creator"] != uid:
+            raise _ApiError("فقط سازنده می‌تونه بازی رو لغو کنه.", 403)
+        await _cr_finish(g, None, "سازنده بازی رو لغو کرد؛ شرط برگشت.", say=False)
+    return _j({"ok": True, "balance": await _mini_balance(uid)})
+
+
+def _cr_resolve(g: dict, uid: int, res: dict):
+    """قانون‌های بازی بعد از یه ضربه: امتیاز، ملکه، خطا، نوبت بعدی و برنده. (winner, reason, finished) برمی‌گردونه."""
+    other = g["opponent"] if uid == g["creator"] else g["creator"]
+    mine_side = "w" if uid == g["creator"] else "b"
+    oth_side = "b" if mine_side == "w" else "w"
+    coins = res["final"]
+    g["coins"] = {k: list(v) for k, v in coins.items()}
+    pk = res["pocketed"]
+    own = [i for i in pk if i in _cr_ids(mine_side)]
+    opp = [i for i in pk if i in _cr_ids(oth_side)]
+    qin = 1 in pk
+    for i in pk:
+        if i != 1:
+            g["out"].append(i)
+    info = {"by": uid, "own": len(own), "opp": len(opp), "queen": None, "foul": False}
+    extra = False
+    if res["striker_in"]:
+        info["foul"] = True
+        if qin:
+            _cr_place(g["coins"], 1)
+            info["queen"] = "back"
+        if g.get("qpend") == uid:
+            _cr_place(g["coins"], 1)
+            g["qpend"] = None
+            info["queen"] = "back"
+        back = [i for i in g["out"] if i in _cr_ids(mine_side) and i not in own]
+        if back:
+            g["out"].remove(back[-1])
+            _cr_place(g["coins"], back[-1])
+            info["returned"] = 1
+    else:
+        if g.get("qpend") == uid:
+            if own:
+                g["qown"], g["qpend"] = uid, None
+                info["queen"] = "won"
+            else:
+                _cr_place(g["coins"], 1)
+                g["qpend"] = None
+                info["queen"] = "back"
+        if qin:
+            if own:
+                g["qown"] = uid
+                info["queen"] = "won"
+            else:
+                g["qpend"] = uid
+                info["queen"] = "pending"
+        extra = bool(own) or (info["queen"] == "pending")
+    winner, reason = None, ""
+    for side, owner in ((mine_side, uid), (oth_side, other)):
+        got = [i for i in g["out"] if i in _cr_ids(side)]
+        if len(got) == 9:
+            if g.get("qown") is None:
+                pref = [i for i in pk if i in _cr_ids(side)] or got
+                g["out"].remove(pref[-1])
+                _cr_place(g["coins"], pref[-1])
+                info["last_back"] = True
+            elif winner is None:
+                winner = owner
+                reason = "همه‌ی مهره‌هاش رو توی جیب انداخت!"
+    g["shots"] = g.get("shots", 0) + 1
+    finished = winner is not None
+    if not finished and g["shots"] >= CR_MAX_SHOTS:
+        sw = sum(1 for i in g["out"] if i in _cr_ids("w"))
+        sb = sum(1 for i in g["out"] if i in _cr_ids("b"))
+        finished = True
+        if sw != sb:
+            winner = g["creator"] if sw > sb else g["opponent"]
+            reason = "بازی به سقف ضربه‌ها رسید؛ برنده کسیه که مهره‌ی بیشتری انداخته."
+        else:
+            reason = "بازی به سقف ضربه‌ها رسید و مساوی شد."
+    g["last"] = info
+    if not finished:
+        g["miss"][uid] = 0
+        g["turn"] = uid if extra else other
+    return winner, reason, finished
+
+
+async def _social_carrom_shoot(b, user):
+    uid, _bal = await _mini_ctx(user)
+    gid = _int(b.get("game_id"))
+    try:
+        sx = float(b.get("x"))
+        ang = float(b.get("angle"))
+        power = float(b.get("power"))
+    except (TypeError, ValueError):
+        raise _ApiError("اطلاعات ضربه نامعتبره")
+    if not all(math.isfinite(v) for v in (sx, ang, power)):
+        raise _ApiError("اطلاعات ضربه نامعتبره")
+    power = min(1.0, max(0.0, power))
+    sx = min(CR_BASE_MAX, max(CR_BASE_MIN, sx))
+    async with _CR_LOCK:
+        await _cr_sweep()
+        g = await _cr_fetch(gid)
+        if not g:
+            raise _ApiError("بازی پیدا نشد.", 404)
+        if g["phase"] == "done":
+            raise _ApiError(g.get("reason") or "این بازی تموم شده.")
+        if g["phase"] != "play":
+            raise _ApiError("هنوز حریف وارد نشده.")
+        if uid not in (g["creator"], g["opponent"]):
+            raise _ApiError("این بازی برای دو بازیکنشه.", 403)
+        if g.get("turn") != uid:
+            raise _ApiError("نوبت حریفه.")
+        now = time.time()
+        if now < g["ready_at"]:
+            raise _ApiError("صبر کن تا ضربه‌ی قبلی تموم بشه.")
+        sy = CR_BASE_Y[0] if uid == g["creator"] else CR_BASE_Y[1]
+        for o in g["coins"].values():
+            if (o[0] - sx) ** 2 + (o[1] - sy) ** 2 < (CR_R + CR_SR - 1) ** 2:
+                raise _ApiError("استرایکر روی یه مهره‌ست؛ جاش رو عوض کن.")
+        seq_before = g["seq"]
+        res = await asyncio.to_thread(_cr_sim, g["coins"], sx, sy, ang, power)
+        winner, reason, finished = _cr_resolve(g, uid, res)
+        dur = len(res["frames"]) / 30.0
+        now = time.time()
+        g["seq"] = seq_before + 1
+        g["ready_at"] = now + dur + 0.5
+        if g["phase"] == "play" and not finished:
+            g["deadline"] = now + dur + 0.5 + CR_TURN_SECS
+        await pool.execute(
+            "INSERT INTO room_carrom_shots(game_id,seq,data) VALUES($1,$2,$3) ON CONFLICT (game_id) DO UPDATE SET seq=$2, data=$3",
+            g["game_id"], g["seq"], json.dumps({"by": uid, "ids": res["ids"], "frames": res["frames"], "ev": res["ev"], "striker_in": res["striker_in"]}))
+        if finished:
+            await _cr_finish(g, winner, reason)
+        else:
+            await _cr_store(g)
+    views = await _cr_games_for(uid, {gid: seq_before})
+    mine = next((v for v in views if v["id"] == gid), None)
+    return _j({"ok": True, "game": mine, "done": bool(finished), "balance": await _mini_balance(uid)})
+
+
 async def _myself_cars(uid):
     out = []
     for i, car in (await _owned_cars(uid)).items():
@@ -4276,8 +5214,8 @@ _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cas
               "/api/game/mines/cashout": _p_game_mines_cashout}
 
 
-_SOCIAL_GET={"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/room/poison":_social_poison_state,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
-_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read}
+_SOCIAL_GET={"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/room/poison":_social_poison_state,"/api/social/room/carrom":_social_carrom_state,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
+_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/carrom/create":_social_carrom_create,"/api/social/room/carrom/join":_social_carrom_join,"/api/social/room/carrom/cancel":_social_carrom_cancel,"/api/social/room/carrom/shoot":_social_carrom_shoot,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
