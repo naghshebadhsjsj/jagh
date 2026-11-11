@@ -341,24 +341,24 @@ CHANNELS = ["@jagh_game", "@selfsaz_iran"]  # عضویت اجباری در هر 
 # و یکی از متن‌هاش رندوم میاد. {amount} = مبلغ
 REPLY_TIERS = [
     (20, [
-        "اوه ضعیف بود {MEH} فقط {amount} تومن بابتش گرفتی {HD}",
-        "این که آبکی بود! {amount} تومن بیشتر نمی‌ارزید {HD}",
+        "این یکی خیلی معمولی بود 😅 فقط {amount} تومن گیرت اومد {MEH}",
+        "شروع بدی نبود، ولی هنوز جا برای پیشرفت داری! {amount} تومن گرفتی {HD}",
     ]),
     (45, [
-        "بد نبود! {amount} تومن بابتش گرفتی {HD}",
-        "اوکی بود، {amount} تومن به حسابت اضافه شد {HD}",
+        "بد نبود! {amount} تومن به حسابت اضافه شد {HD}",
+        "یه حرکت قابل‌قبول؛ جایزه‌ات {amount} تومنه {HD}",
     ]),
     (70, [
-        "اوه قوی بود! انقدر پول بابتش گرفتی: {amount} تومن {HD}",
-        "اوه چه قوی! {amount} تومن بابتش گرفتی {HD}",
+        "آفرین! این یکی حسابی به هدف زد؛ {amount} تومن بردی {HD}",
+        "خوبه! با این حرکت {amount} تومن به جیب زدی {HD}",
     ]),
     (90, [
-        "اوهوووو خیلی قوی بود!! {amount} تومن بابتش گرفتی {FIRE}{HD}",
-        "وحشی بود! {amount} تومن گرفتی {FIRE}{HD}",
+        "ترکوندی! {amount} تومن جایزه گرفتی {FIRE}{HD}",
+        "چه اجرای قدرتمندی! {amount} تومن مال تو شد {FIRE}{HD}",
     ]),
     (100, [
-        "اوه خدایا افسانه‌ای بود!!! {amount} تومن، جکپات {TROPHY}{HD}",
-        "رکورد زدی!!! {amount} تومن بابتش گرفتی {TROPHY}{HD}",
+        "افسانه‌ای بود! رکوردت با {amount} تومن ثبت شد {TROPHY}{HD}",
+        "جک‌پات! بهترین نتیجه رو زدی و {amount} تومن بردی {TROPHY}{HD}",
     ]),
 ]
 
@@ -2096,7 +2096,8 @@ function SocialScreen(){
         const a=V.aim;if(!a)return null;
         const dx=a.p.x-a.p0.x,dy=a.p.y-a.p0.y,pull=Math.hypot(dx,dy);if(pull<1)return null;
         const k=rot?1:-1;
-        return{wx:k*dx/pull,wy:k*dy/pull,pull,power:Math.min(1,pull/CMAXPULL)};
+        // در کاروم مهره به عقب کشیده می‌شود و در جهت مخالف حرکت می‌کند.
+        return{wx:-k*dx/pull,wy:-dy/pull,pull,power:Math.min(1,pull/CMAXPULL)};
       };
       const drawAim=(c,s)=>{
         const av=aimVec();if(!av||av.pull<22||V.overlap)return;
@@ -2171,8 +2172,15 @@ function SocialScreen(){
       const onRs=()=>{};window.addEventListener('resize',onRs);
       // ───── ورودی ─────
       const vp=e=>{const r=cvs.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*CW,y:(e.clientY-r.top)/r.height*CW}};
-      cvs.onpointerdown=e=>{if(!canShoot())return;try{cvs.setPointerCapture(e.pointerId)}catch(x){}const p=vp(e);V.aim={p0:p,p};e.preventDefault()};
-      cvs.onpointermove=e=>{if(V.aim)V.aim.p=vp(e)};
+      cvs.onpointerdown=e=>{
+        if(!canShoot())return;
+        const p=vp(e),s=strikerW(),screenS=rot?{x:CW-s.x,y:CW-s.y}:s;
+        // کشیدن از روی خود مهره؛ نه از یک نقطه‌ی دلخواه روی میز.
+        if(Math.hypot(p.x-screenS.x,p.y-screenS.y)>CSR*2.8)return;
+        try{cvs.setPointerCapture(e.pointerId)}catch(x){}
+        V.aim={p0:screenS,p:screenS};e.preventDefault();
+      };
+      cvs.onpointermove=e=>{if(V.aim){V.aim.p=vp(e);e.preventDefault()}};
       cvs.onpointercancel=()=>{V.aim=null};
       cvs.onpointerup=async e=>{
         if(!V.aim)return;const av=aimVec();V.aim=null;
@@ -2249,6 +2257,9 @@ function SocialScreen(){
     inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
     body.replaceChildren(cbox,gamebox,msgs,replyBar,composer,epanel);
     await loadRoom(true);loadPoison();loadCarrom();let tick=0;
+    const requestedGame=window.__openRoomGame;window.__openRoomGame=null;
+    if(requestedGame==='poison')setTimeout(()=>poisonCreateSheet(),120);
+    else if(requestedGame==='carrom')setTimeout(()=>carromCreateSheet(),120);
     roomTimer=setInterval(()=>{tick++;loadPoison();loadCarrom();if(tick%2===0)loadRoom(false)},1800);
     const rpClock=setInterval(()=>{
       if(!gamebox.isConnected){clearInterval(rpClock);return}
@@ -2387,7 +2398,10 @@ const chatCss=document.createElement('style');chatCss.textContent=`
 .cov-board{padding:7px;border-radius:26px;background:linear-gradient(145deg,#3f8f5e,#1d5a3a);box-shadow:0 8px 24px #0008,inset 0 0 0 2px #ffffff22;flex:none}
 .cov-cv{display:block;border-radius:18px;touch-action:none;background:#d9a46a;cursor:crosshair}
 .cov-sl{width:min(92%,460px);padding:11px 20px;border-radius:30px;background:linear-gradient(#cdebd5,#97cba7);border:4px solid #1d5a3a;box-shadow:0 5px 14px #0006;flex:none}
-.cov-sl input{width:100%;accent-color:#7a1f2e;height:26px}.cov-sl input:disabled{opacity:.45}
+.cov-sl input{appearance:none;-webkit-appearance:none;width:100%;height:28px;margin:0;background:linear-gradient(180deg,#7b4930 0 5px,#e6d5b5 5px 23px,#7b4930 23px 28px);border-radius:18px;outline:none;touch-action:pan-y}
+.cov-sl input::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:42px;height:42px;border:3px solid #f4d77b;border-radius:50%;background:radial-gradient(circle at 35% 30%,#9b5260,#4b1022 72%);box-shadow:0 3px 8px #0008,inset 0 0 0 2px #ffffff55;cursor:grab}
+.cov-sl input::-moz-range-thumb{width:36px;height:36px;border:3px solid #f4d77b;border-radius:50%;background:radial-gradient(circle at 35% 30%,#9b5260,#4b1022 72%);box-shadow:0 3px 8px #0008;cursor:grab}
+.cov-sl input:disabled{opacity:.45}
 .cov-res{position:absolute;inset-inline:18px;top:28%;max-width:420px;margin:auto;background:linear-gradient(160deg,#2b0f3d,#14091f);color:#f4e9ff;border:2px solid #b12bd5;border-radius:22px;padding:18px;text-align:center;box-shadow:0 10px 40px #000a;animation:rpin .3s;z-index:3}
 .cov-res.champ{border-color:#facc15;box-shadow:0 0 0 3px #facc1566,0 10px 40px #000a}.cov-rt{font-size:22px;font-weight:900;margin-bottom:6px}
 .sidentity.botid .sub{display:inline-flex;align-items:center;gap:5px;font-weight:700}.sidentity .ce.bn{width:18px;height:18px;vertical-align:middle}
@@ -2443,22 +2457,21 @@ function GamesScreen(){
  function home(){
   clearInterval(cdT);
   const G=[
-   [z=>svgIc('rocket',z),'موشک','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن؛ ۷ ثانیه شمارش معکوس و بعدش موشک خودکار پرواز می‌کنه. ضریب خروج رو انتخاب کن یا قبل از انفجار برداشت بزن.','crash','blue'],
+   [z=>svgIc('rocket',z),'انفجار','مبلغ شرطت رو انتخاب کن؛ ضریب لحظه‌به‌لحظه بالا می‌ره و باید قبل از انفجار برداشت بزنی.','crash','blue'],
    [z=>svgIc('roach',z),'سوسک‌کش','سوسک‌ها رو قبل از فرار با چکش بزن!','roach','green'],
-   [z=>ceI('5256147609243889028',z),'مین','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن؛ ۲۵ خانه و ۳ مین. خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.','mines','red']];
-  let lbl=null;
+   [z=>ceI('5256147609243889028',z),'مین','مبلغ شرط (حداقل ۵۰ هزار تومان) رو بزن؛ ۲۵ خانه و ۳ مین. خانه‌های امن رو باز کن و هر وقت خواستی برداشت بزن.','mines','red'],
+   [z=>'☠️','سم یا خوراکی','با یک حریف واقعی بازی کن؛ سم را پنهان کن یا خانه‌های حریف را باهوشانه انتخاب کن.','poison','red'],
+   [z=>'🎯','خط و نشان','کاروم دونفره با میز و مهره‌های فیزیکی؛ بازی فقط بعد از ورود حریف شروع می‌شود.','carrom','green']];
   box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),...G.map(([ic,t,d,key,cls])=>{
    const v=h('div',{class:'gvisual'},ic(key==='roach'?80:90));
    if(key==='crash')v.style.animationDelay='-'+((Date.now()/1000)%7).toFixed(2)+'s';
    const kids=[v,h('div',{class:'gtitle'},t)];
-   if(key==='crash'){lbl=h('div',{class:'rk-cdl'});kids.push(lbl)}
    kids.push(h('div',{class:'gdesc'},d),h('button',{class:'pb '+cls,onclick:()=>play(key)},ic(24),h('span',{},'شروع بازی')));
    return h('div',{class:'gcard','data-game':key},kids)}));
-  const tickCd=()=>{if(!lbl||!lbl.isConnected){clearInterval(cdT);return}const p=(Date.now()/1000)%7;const left=Math.ceil((5.46-p+7)%7)||7;lbl.textContent='پرواز بعدی موشک: '+num(left)+' ثانیه'};
-  tickCd();cdT=setInterval(tickCd,250);
  }
  function play(k){clearInterval(cdT);
-  if(k==='crash')crash(); if(k==='roach')roach(); if(k==='mines')mines();
+  if(k==='crash')crash(); else if(k==='roach')roach(); else if(k==='mines')mines();
+  else if(k==='poison'||k==='carrom'){window.__openRoomGame=k;openTab('room')}
  }
  function frame(title,content){box.replaceChildren(h('div',{class:'ghead'},title),h('button',{class:'ib',style:'color:white',onclick:home},'← بازگشت'),content)}
  function roach(){
@@ -2644,14 +2657,90 @@ function GamesScreen(){
   refresh();return box;
  }
  async function crash(){
-  const cv=h('canvas',{class:'rk-cv'}),scene=rocketScene(cv),status=h('div',{class:'rk-mult cd'},'آماده پرواز…'),hist=h('div',{class:'rk-hist'});
-  let timer=null,raf=null,stopped=false,cycle=0,last=0;
-  box.replaceChildren(h('div',{class:'rk-wrap'},topBar(h('span',{class:'tt'},svgIc('rocket',22),'موشک'),h('b',{},'پرواز خودکار')),hist,h('div',{class:'rk-stage'},cv,status),h('div',{class:'rk-panel'},h('div',{class:'rk-lbl'},'🚀 موشک بدون شرط‌بندی، به‌صورت خودکار هر ۷ ثانیه پرواز می‌کند.'),h('div',{class:'rk-hint'},'برای شروع یا ادامه‌ی پرواز نیازی به انتخاب مبلغ یا زدن دکمه نیست.'))));
-  try{const d=await api('/api/game/crash/state');drawHist(d.hist||[])}catch(e){}
-  function drawHist(l){hist.replaceChildren(h('span',{class:'rk-hl'},'پروازها'),...((l&&l.length)?l.map((m,i)=>h('div',{class:'rk-chip '+(m>=3?'hi':'lo')},fx(m))):[h('span',{class:'rk-hl'},'پروازهای خودکار')]))}
-  function run(){if(stopped)return;cycle=Date.now();scene.reset();scene.go();status.className='rk-mult run';status.textContent='موشک در حال پرواز…';
-   const tick=()=>{if(stopped)return;const el=(Date.now()-cycle)/1000;if(el<4.7){scene.setEl(el);status.textContent='پرواز خودکار • '+num((7-el).toFixed(1))+' ثانیه';raf=requestAnimationFrame(tick)}else{scene.boom(Math.log(Math.max(1,Math.exp(.12*el)))/.12);status.className='rk-mult lose';status.textContent='پایان پرواز • پرواز بعدی تا ۷ ثانیه';timer=setTimeout(run,2300)}};raf=requestAnimationFrame(tick)}
-  rkCleanup=()=>{stopped=true;clearTimeout(timer);cancelAnimationFrame(raf);scene.stop()};run();
+  let st,active=null,busy=false,stopped=false,timer=null,poll=null,raf=null;
+  const cv=h('canvas',{class:'rk-cv'}),scene=rocketScene(cv),status=h('div',{class:'rk-tgt'},'آماده‌ی پرواز…'),hist=h('div',{class:'rk-hist'});
+  const balance=h('b',{},'…'),mult=h('div',{class:'rk-mult cd'},'x1.00'),panel=h('div',{class:'rk-panel'});
+  const cash=h('button',{class:'rk-main green',onclick:cashout,disabled:true},'برداشت جایزه');
+  box.replaceChildren(h('div',{class:'rk-wrap'},topBar('💥 انفجار',balance),hist,h('div',{class:'rk-stage'},cv,mult,status),panel));
+  function drawHist(list){
+    hist.replaceChildren(h('span',{class:'rk-hl'},'سوابق'),...((list&&list.length)?list.map(v=>h('div',{class:'rk-chip '+(v>=3?'hi':'lo')},fx(v))):[h('span',{class:'rk-hl'},'هنوز پروازی ثبت نشده')]));
+  }
+  function clean(){
+    stopped=true;clearInterval(timer);clearInterval(poll);cancelAnimationFrame(raf);scene.stop();
+  }
+  rkCleanup=clean;
+  function betPhase(){
+    active=null;cash.disabled=true;mult.textContent='x1.00';status.textContent='برای شروع، مبلغ شرطت را انتخاب کن.';
+    panel.replaceChildren(h('div',{class:'rk-lbl'},'💥 آماده‌ای قبل از انفجار برداشت بزنی؟'),
+      h('div',{class:'rk-hint'},'ضریب لحظه‌به‌لحظه بالا می‌رود؛ قبل از انفجار دکمه‌ی برداشت را بزن. اگر دیر بجنبی، شرط از دست می‌رود.'),
+      betPicker(st,async bet=>{
+        if(busy)return;busy=true;
+        try{
+          const r=await api('/api/game/crash/start',{bet});
+          balance.textContent=num(r.balance);active=r;scene.reset();scene.setRate(r.rate||.12);
+          status.textContent='شمارش معکوس شروع شد…';cash.disabled=true;run();
+        }catch(e){toast(e.message,1)}
+        finally{busy=false}
+      },'🚀 شروع انفجار'));
+  }
+  function run(){
+    clearInterval(timer);clearInterval(poll);
+    const tick=()=>{
+      if(stopped||!active)return;
+      const now=Date.now()/1000,delay=Math.max(0,active.t0-now);
+      if(delay>0){status.textContent='⏳ شروع پرواز تا '+num(delay.toFixed(1))+' ثانیه';mult.textContent='آماده…';return}
+      const el=Math.max(0,now-active.t0),m=Math.exp((active.rate||.12)*el);
+      scene.setRate(active.rate||.12);scene.setEl(el);scene.go();
+      mult.textContent=fx(m);status.textContent='🚀 موشک در حال اوج‌گیری است!';
+      cash.disabled=busy;
+    };
+    timer=setInterval(tick,60);tick();
+    poll=setInterval(async()=>{
+      if(stopped||busy||!active)return;
+      try{
+        const r=await api('/api/game/crash/state');
+        if(r.hist)drawHist(r.hist);
+        if(r.done){finish(r);return}
+        if(r.active){balance.textContent=num(r.balance);active={...active,t0:r.t0,rate:r.rate,bet:r.bet};}
+      }catch(e){/* خطای گذرای شبکه؛ تلاش بعدی انجام می‌شود */}
+    },450);
+    panel.replaceChildren(h('div',{class:'rk-lbl'},'شرط: '+num(active.bet)+' تومان'),
+      cash,h('div',{class:'rk-hint'},'هر لحظه می‌توانی برداشت کنی؛ منتظر نمان تا ضریب بیش از حد بالا برود.'));
+  }
+  async function cashout(){
+    if(!active||busy)return;busy=true;cash.disabled=true;
+    try{const r=await api('/api/game/crash/cashout',{});finish(r)}
+    catch(e){toast(e.message,1);cash.disabled=false}
+    finally{busy=false}
+  }
+  function finish(r){
+    if(!active)return;
+    clearInterval(timer);clearInterval(poll);active=null;balance.textContent=num(r.balance);
+    drawHist(r.hist||[]);
+    if(r.result==='win'){
+      scene.win(Math.log(Math.max(1,r.mult||1))/(r.rate||.12));
+      mult.textContent=fx(r.mult);mult.className='rk-mult win';
+      status.textContent='🏆 برداشت موفق؛ جایزه به حسابت واریز شد!';
+      panel.replaceChildren(h('div',{class:'rk-lbl'},'💰 جایزه: '+num(r.payout)+' تومان'),
+        h('div',{class:'rk-hint'},'سود خالص: '+num(r.profit)+' تومان'));
+    }else{
+      scene.boom(Math.log(Math.max(1,r.crash||1))/(active?.rate||.12));
+      mult.textContent=fx(r.crash);mult.className='rk-mult lose';
+      status.textContent='💥 انفجار! این دور شرطت از دست رفت.';
+      panel.replaceChildren(h('div',{class:'rk-lbl'},'ضریب انفجار: '+fx(r.crash)),
+        h('div',{class:'rk-hint'},'برای دور بعدی دوباره شرط انتخاب کن.'));
+    }
+    active=null;
+    const again=h('button',{class:'rk-main',onclick:()=>{mult.className='rk-mult cd';scene.reset();betPhase()}},'🔄 بازی دوباره');
+    panel.append(again);
+  }
+  try{
+    st=await api('/api/game/crash/state');balance.textContent=num(st.balance);drawHist(st.hist||[]);
+    if(st.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
+    if(st.active){active=st;scene.setRate(st.rate||.12);run()}
+    else if(st.done){drawHist(st.hist||[]);status.textContent=st.result==='win'?'🏆 بازی قبلی با برد تمام شد.':'💥 بازی قبلی به انفجار رسید.';betPhase()}
+    else betPhase();
+  }catch(e){toast(e.message,1);clean();home()}
  }
 
  async function mines(){
@@ -4094,8 +4183,7 @@ async def _social_poison_create(b, user):
         except Exception:
             await _give(uid, bet)
             raise
-    nm = await _rp_names([uid])
-    await _rp_say(f"☠️ {nm.get(uid, 'یه بازیکن')} یه بازی «سم یا خوراکی» ساخت!\n💰 شرط هر نفر: {bet:,} تومن\n🏆 جایزه‌ی برنده: {bet * 2:,} تومن\nکی جرئت داره؟ 😈 روی «پیوستن» بزن 👇 {{game:{gid}}}")
+    # کارت بازی در فهرست بازی‌ها نمایش داده می‌شود؛ پیام اضافه‌ی ربات وارد چت نمی‌کنیم.
     return _j({"ok": True, "game_id": gid, "balance": await _mini_balance(uid)})
 
 
@@ -4586,8 +4674,7 @@ async def _social_carrom_create(b, user):
         except Exception:
             await _give(uid, bet)
             raise
-    nm = await _rp_names([uid])
-    await _rp_say(f"🎯 {nm.get(uid, 'یه بازیکن')} یه بازی «خط و نشان» (کارام) ساخت!\n💰 شرط هر نفر: {bet:,} تومن\n🏆 جایزه‌ی برنده: {bet * 2:,} تومن\n⏱ هر نوبت {CR_TURN_SECS} ثانیه — کی خط و نشان می‌کشه؟ 😎 روی «پیوستن» بزن 👇 {{carrom:{gid}}}")
+    # کارت انتظار داخل بازی‌ها به‌روزرسانی می‌شود؛ پیام جداگانه‌ی ربات نمی‌فرستیم.
     return _j({"ok": True, "game_id": gid, "balance": await _mini_balance(uid)})
 
 
