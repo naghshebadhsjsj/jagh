@@ -536,6 +536,7 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS support_staff (user_id BIGINT PRIMARY KEY, perms TEXT NOT NULL DEFAULT '')")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_games (uid BIGINT PRIMARY KEY, kind TEXT NOT NULL, bet BIGINT NOT NULL, state TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_subscription_receipts (receipt_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE TABLE IF NOT EXISTS mini_subscriptions (user_id BIGINT PRIMARY KEY, expires_at DOUBLE PRECISION NOT NULL, activated_by BIGINT, updated_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_crash_hist (id BIGSERIAL PRIMARY KEY, point DOUBLE PRECISION NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_crash_rounds (round_id BIGINT PRIMARY KEY, starts_at DOUBLE PRECISION NOT NULL, crash_point DOUBLE PRECISION NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS transfer_daily (user_id BIGINT NOT NULL, day TEXT NOT NULL, total BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day))")
@@ -771,7 +772,7 @@ textarea.inp{min-height:130px;resize:vertical}
 .sg-sk{margin:12px;border-radius:22px;background:var(--sec);overflow:hidden;height:300px;position:relative}
 .sg-gate{text-align:center;padding:44px 22px}.sg-gi{font-size:56px}.sg-gate h3{margin:8px 0 4px}.sg-gate p{color:var(--hint);font-size:13.5px;margin:0 0 6px}
 .sg-flex{display:flex;flex-direction:column;overflow:hidden}
-.sroom{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--sec)}.sidentity{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:0;margin:0 0 7px;color:inherit;text-align:right;cursor:pointer}.sidentity .av{flex:none;border-radius:50%;overflow:hidden}.smsg{position:relative;max-width:85%;margin:8px 0;padding:10px 13px 7px;border-radius:21px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y;overflow-wrap:anywhere}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13);border-end-end-radius:8px}.smsg:not(.mine){border-end-start-radius:8px}.smsg .sub{font-size:12px;margin-bottom:4px}.smeta{display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:5px;min-height:16px;color:var(--hint);font-size:10.5px;line-height:1}.smeta .ticks{font-size:14px;letter-spacing:-4px;padding-inline-end:3px;color:var(--hint)}.smeta .ticks.seen{color:#28a9e0}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0;border-radius:24px;min-height:42px}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
+.sroom{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--sec)}.sidentity{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:0;margin:0 0 7px;color:inherit;text-align:right;cursor:pointer}.sidentity .av{flex:none;border-radius:50%;overflow:hidden}.smsg.premium-msg{background:linear-gradient(135deg,rgba(255,205,92,.22),rgba(255,241,190,.13));border:1px solid rgba(245,190,70,.55);border-radius:22px;box-shadow:0 0 16px rgba(245,190,70,.14)}.smsg.premium-msg .tx{border-radius:18px}.premium-name{color:#f3bd4d!important;text-shadow:0 0 9px rgba(255,196,74,.42);font-weight:800}.premium-mark{display:inline-block;margin-inline-start:5px;padding:2px 6px;border-radius:9px;background:linear-gradient(120deg,#9b6b18,#ffe7a0,#b47a1b);color:#281a00;font-size:9px;font-weight:900;text-shadow:none}.premium-ring{border-radius:50%;padding:4px;background:conic-gradient(#ffdf86,#9b6819,#fff1ba,#c48c2b,#ffdf86);box-shadow:0 0 14px rgba(245,190,70,.55)}.sg-premium-state{margin-top:12px;padding:12px;border-radius:14px;background:linear-gradient(120deg,#9b6b18,#f8dfa0,#a8751e);color:#241800;font-weight:900;text-align:center}.smsg{position:relative;max-width:85%;margin:8px 0;padding:10px 13px 7px;border-radius:21px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y;overflow-wrap:anywhere}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13);border-end-end-radius:8px}.smsg:not(.mine){border-end-start-radius:8px}.smsg .sub{font-size:12px;margin-bottom:4px}.smeta{display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:5px;min-height:16px;color:var(--hint);font-size:10.5px;line-height:1}.smeta .ticks{font-size:14px;letter-spacing:-4px;padding-inline-end:3px;color:var(--hint)}.smeta .ticks.seen{color:#28a9e0}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0;border-radius:24px;min-height:42px}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
 .av{border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;overflow:hidden;user-select:none}
 .av img{width:100%;height:100%;object-fit:cover;display:block}
 /* گپ‌ها / کاربران */
@@ -1651,17 +1652,16 @@ function SocialScreen(){
     if(!pr){box.append(h('div',{class:'empty'},'این کاربر هنوز حساب مینی‌اپ نساخته'));return box}
     const st=d.stats||{};
     const stat=(n,l)=>h('div',{class:'sg-stat'},h('b',{},num(n)),h('span',{},l));
-    box.append(h('div',{class:'sg-hero'},h('div',{class:'sg-cover'}),h('div',{class:'sg-pav'},sgAvatar(pr,88)),
-      h('div',{class:'sg-pn'},pr.display_name),h('div',{class:'sub ltr'},'@'+pr.username),
+    box.append(h('div',{class:'sg-hero'},h('div',{class:'sg-cover'}),h('div',{class:'sg-pav'+(d.premium?' premium-ring':'')},sgAvatar(pr,88)),
+      h('div',{class:'sg-pn'+(d.premium?' premium-name':'')},pr.display_name,d.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null),h('div',{class:'sub ltr'},'@'+pr.username),
       pr.bio?h('div',{class:'sg-bio',dir:'auto'},pr.bio):null,
-      h('div',{class:'sg-stats'},stat(d.profile_likes||0,'پسند حساب'),stat(st.posts||0,'پست'),stat(st.likes||0,'پسند پست'))));
+      h('div',{class:'sg-stats'},stat(st.following||0,'دنبال‌شده'),stat(st.followers||0,'دنبال‌کننده'),stat(d.profile_likes||0,'پسند حساب'))));
     if(!isMe){
       const follow=h('button',{class:'btn sg-go',onclick:async()=>{follow.disabled=true;try{const r=await api('/api/social/follow',{user_id:Number(pr.user_id)});follow.textContent=r.active?'دنبال می‌کنی ✓':'دنبال کردن';}catch(e){toast(e.message,1)}finally{follow.disabled=false}}},d.following?'دنبال می‌کنی ✓':'دنبال کردن');
       const like=h('button',{class:'btn s gh',style:'margin-top:8px;width:100%;background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff;border:0',onclick:async()=>{like.disabled=true;try{const r=await api('/api/social/profile/like',{user_id:Number(pr.user_id)});like.textContent=(r.active?'♥ پسندیدی':'✦ پسندیدن')+' · '+num(r.count); }catch(e){toast(e.message,1)}finally{like.disabled=false}}},(d.liked?'♥ پسندیدی':'✦ پسندیدن')+' · '+num(d.profile_likes||0));
       box.append(h('div',{class:'sg-btns'},follow,like));
     }else{
-      box.append(h('div',{class:'sg-btns'},h('button',{class:'btn s gh',onclick:profileSheet},'ویرایش حساب')));
-      box.append(d.posts.length?h('div',{class:'sg-grid'},...d.posts.map(tile)):h('div',{class:'empty'},'هنوز پستی نداری'));
+      box.append(h('div',{class:'sg-premium-state'},me.subscription_active?'💎 اشتراک ویژه فعاله':'اشتراک ویژه غیرفعاله'));
     }
     return box;
   }
@@ -2234,9 +2234,9 @@ function SocialScreen(){
     function setReply(m,name){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(plain(m.text),60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}
     function renderMessage(m){
       const name=m.display_name||m.username||m.uname||String(m.user_id);
-      const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')});
+      const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')+(m.premium?' premium-msg':'')});
       const isBot=!!m.is_bot;
-      const identity=h('button',{class:'sidentity'+(isBot?' botid':''),type:'button',onclick:()=>{if(!isBot)openUser(Number(m.user_id))}},avatar('user',m.user_id,name,34),h('span',{class:'sub'},name,isBot&&m.name_ce?ceImg(m.name_ce,'bn'):null,isBot?h('span',{class:'bbadge'},'ربات'):null));
+      const identity=h('button',{class:'sidentity'+(isBot?' botid':''),type:'button',onclick:()=>{if(!isBot)openUser(Number(m.user_id))}},avatar('user',m.user_id,name,34),h('span',{class:'sub'+(m.premium?' premium-name':'')},name,m.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null,isBot&&m.name_ce?ceImg(m.name_ce,'bn'):null,isBot?h('span',{class:'bbadge'},'ربات'):null));
       node.append(identity);
       if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text?plain(m.reply_text):'پاسخ به پیام')));
       const gm=/\{game:(\d+)\}/.exec(m.text||''),cm=/\{carrom:(\d+)\}/.exec(m.text||'');
@@ -2260,16 +2260,20 @@ function SocialScreen(){
     async function loadRoom(force){
       if(roomBusy)return;roomBusy=true;
       try{
-        const arr=await api('/api/social/room?after=0');
+        const arr=await api('/api/social/room?after='+(force?0:roomAfter));
         const sig=JSON.stringify(arr.map(m=>[m.message_id,m.reactions,m.read_count]));
         const latest=arr.length?Math.max(...arr.map(m=>Number(m.message_id)||0)):0;
         if(latest>roomReadAck){roomReadAck=latest;api('/api/social/room/read',{last_read_message_id:latest}).catch(()=>{roomReadAck=0})}
-        if(force||sig!==lastSig){
-          const first=!lastSig,near=first||msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<140;
-          lastSig=sig;
-          msgs.replaceChildren(...(arr.length?arr.map(renderMessage):[h('div',{class:'empty'},'هنوز پیامی نیست؛ اولین نفر باش 👋')]));
+        if(force){
+          const near=msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<140;
+          lastSig=sig;msgs.replaceChildren(...(arr.length?arr.map(renderMessage):[h('div',{class:'empty'},'هنوز پیامی نیست؛ اولین نفر باش 👋')]));
           syncJoinBtns();syncCBtns();if(near||force)msgs.scrollTop=msgs.scrollHeight;
+        }else if(arr.length){
+          const near=msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<140;
+          const empty=msgs.querySelector('.empty');if(empty)empty.remove();
+          arr.forEach(m=>msgs.append(renderMessage(m)));syncJoinBtns();syncCBtns();if(near)msgs.scrollTop=msgs.scrollHeight;
         }
+        if(arr.length)roomAfter=Math.max(roomAfter,...arr.map(m=>Number(m.message_id)||0));
       }catch(e){if(!lastSig)toast(e.message||'دریافت پیام‌ها ناموفق بود',1)}
       finally{roomBusy=false}
     }
@@ -2673,7 +2677,7 @@ function GamesScreen(){
   refresh();return box;
  }
  async function crash(){
-  let st,active=null,busy=false,stopped=false,timer=null,poll=null,raf=null;
+  let st,active=null,busy=false,stopped=false,timer=null,poll=null,watchPoll=null,raf=null,watchRound=null;
   const cv=h('canvas',{class:'rk-cv'}),scene=rocketScene(cv),status=h('div',{class:'rk-tgt'},'آماده‌ی پرواز…'),hist=h('div',{class:'rk-hist'});
   const balance=h('b',{},'…'),mult=h('div',{class:'rk-mult cd'},'x1.00'),panel=h('div',{class:'rk-panel'});
   const cash=h('button',{class:'rk-main green',onclick:cashout,disabled:true},'برداشت جایزه');
@@ -2682,20 +2686,44 @@ function GamesScreen(){
     hist.replaceChildren(h('span',{class:'rk-hl'},'سوابق'),...((list&&list.length)?list.map(v=>h('div',{class:'rk-chip '+(v>=3?'hi':'lo')},fx(v))):[h('span',{class:'rk-hl'},'هنوز پروازی ثبت نشده')]));
   }
   function clean(){
-    stopped=true;clearInterval(timer);clearInterval(poll);cancelAnimationFrame(raf);scene.stop();
+    stopped=true;clearInterval(timer);clearInterval(poll);clearInterval(watchPoll);cancelAnimationFrame(raf);scene.stop();
   }
   rkCleanup=clean;
+  function watchRounds(){
+    clearInterval(watchPoll);
+    const pollWatch=async()=>{
+      if(stopped||active||busy)return;
+      try{
+        const r=await api('/api/game/crash/state');
+        if(r.hist)drawHist(r.hist);
+        if(r.active){active=r;scene.reset();scene.setRate(r.rate||.12);run();return}
+        if(r.watch_round!==watchRound){watchRound=r.watch_round;scene.reset();mult.className='rk-mult cd'}
+        const now=Date.now()/1000,delay=Math.max(0,(r.t0||now)-now);
+        if(r.watch_phase==='waiting'){
+          mult.textContent='x1.00';status.textContent='🚀 پرواز خودکار بعدی تا '+num(delay.toFixed(1))+' ثانیه دیگر';
+          scene.reset();
+        }else if(r.watch_phase==='flying'){
+          const el=Math.max(0,now-r.t0),m=Math.max(1,Number(r.mult)||1);
+          scene.setRate(r.rate||.12);scene.setEl(el);scene.go();mult.textContent=fx(m);status.textContent='🚀 موشک در حال پرواز است؛ شرط بستن اختیاری است.';
+        }else if(r.watch_phase==='crashed'){
+          scene.boom(Math.log(Math.max(1,Number(r.mult)||1))/(r.rate||.12));mult.textContent=fx(r.mult);mult.className='rk-mult lose';status.textContent='💥 موشک به شهاب‌سنگ برخورد کرد؛ دور بعدی خودکار آغاز می‌شود.';
+        }
+      }catch(e){}
+    };
+    pollWatch();watchPoll=setInterval(pollWatch,220);
+  }
   function betPhase(){
-    active=null;cash.disabled=true;mult.textContent='x1.00';status.textContent='شرط و ضریب هدف را انتخاب کن؛ دور بعدی خودکار در زمان‌بندی ۱۰ ثانیه‌ای شروع می‌شود.';
-    const target=h('input',{class:'rk-inp',type:'number',min:'1.1',max:'100',step:'0.1',value:'2.00',inputmode:'decimal'});
-    panel.replaceChildren(h('div',{class:'rk-lbl'},'💥 ضریب برداشت خودکار'),target,
-      h('div',{class:'rk-hint'},'وقتی ضریب به عدد انتخابی برسد، برداشت خودکار انجام می‌شود؛ اگر موشک زودتر منفجر شود، شرط از دست می‌رود.'),
+    active=null;cash.disabled=true;mult.textContent='x1.00';status.textContent='موشک هر ۱۰ ثانیه خودکار پرواز می‌کند؛ برای شرکت شرط ببند یا فقط پرواز را تماشا کن.';
+    watchRounds();
+    const target=h('input',{class:'rk-inp',type:'number',min:'1.1',max:'100',step:'0.1',value:'',placeholder:'اختیاری؛ خالی = برداشت دستی',inputmode:'decimal'});
+    panel.replaceChildren(h('div',{class:'rk-lbl'},'💥 ضریب برداشت خودکار (اختیاری)'),target,
+      h('div',{class:'rk-hint'},'ضریب را وارد کنی برداشت خودکار می‌شود؛ اگر خالی بگذاری می‌توانی دستی برداشت کنی. اگر موشک زودتر منفجر شود، شرط از دست می‌رود.'),
       betPicker(st,async bet=>{
         if(busy)return;busy=true;
         try{
-          const tgt=Number(target.value);if(!Number.isFinite(tgt)||tgt<1.1||tgt>100){toast('ضریب هدف باید بین ۱٫۱ تا ۱۰۰ باشد.',1);return}
+          const rawTarget=String(target.value||'').trim();const tgt=rawTarget?Number(rawTarget):null;if(rawTarget&&(!Number.isFinite(tgt)||tgt<1.1||tgt>100)){toast('ضریب هدف باید بین ۱٫۱ تا ۱۰۰ باشد یا خالی بماند.',1);return}
           const r=await api('/api/game/crash/start',{bet,target:tgt});
-          balance.textContent=num(r.balance);active=r;scene.reset();scene.setRate(r.rate||.12);
+          clearInterval(watchPoll);balance.textContent=num(r.balance);active=r;scene.reset();scene.setRate(r.rate||.12);
           status.textContent='شمارش معکوس شروع شد…';cash.disabled=true;run();
         }catch(e){toast(e.message,1)}
         finally{busy=false}
@@ -2751,13 +2779,14 @@ function GamesScreen(){
     active=null;
     const again=h('button',{class:'rk-main',onclick:()=>{mult.className='rk-mult cd';scene.reset();betPhase()}},'🔄 بازی دوباره');
     panel.append(again);
+    watchRounds();
   }
   try{
     st=await api('/api/game/crash/state');balance.textContent=num(st.balance);drawHist(st.hist||[]);
     if(st.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
     if(st.active){active=st;scene.setRate(st.rate||.12);run()}
     else if(st.done){drawHist(st.hist||[]);status.textContent=st.result==='win'?'🏆 بازی قبلی با برد تمام شد.':'💥 بازی قبلی به انفجار رسید.';betPhase()}
-    else betPhase();
+    else {betPhase();}
   }catch(e){toast(e.message,1);clean();home()}
  }
 
@@ -3724,10 +3753,13 @@ async def _g_leaderboard(qs, user):
 async def _social_me(qs, user):
     uid = int(user["id"])
     p = await pool.fetchrow("SELECT username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
+    sub_exp = await pool.fetchval("SELECT expires_at FROM mini_subscriptions WHERE user_id=$1", uid)
+    sub_active = bool(sub_exp and float(sub_exp) > time.time())
     return _j({"id": uid, "name": user.get("first_name") or "کاربر",
                "is_support": _social_staff(user) and has_perm(uid, "miniapp"),
                "perms": sorted(perms_of(uid)) if _social_staff(user) and has_perm(uid, "miniapp") else [],
-               "premium_emoji": _social_emoji_staff(user), "profile": dict(p) if p else None,
+               "premium_emoji": _social_emoji_staff(user) or sub_active, "subscription_active": sub_active,
+               "subscription_expires_at": sub_exp, "profile": dict(p) if p else None,
                "quota": await _social_quota(uid, user)})
 
 
@@ -3773,16 +3805,19 @@ async def _social_profile(qs, user):
     p = await pool.fetchrow("SELECT user_id,username,display_name,bio,avatar_media_id,created_at FROM social_profiles WHERE user_id=$1", uid)
     if not p:
         return _j({"profile": None, "posts": [], "stats": {"posts": 0, "likes": 0, "comments": 0}})
-    posts = await _social_posts_rows(int(user["id"]), uid, False, 60)
+    # پروفایل مینی‌اپ فقط آمار دنبال‌کردن و پسند را نشان می‌دهد؛ واکشی پست‌ها حذف شد تا سبک‌تر باز شود.
+    posts = []
     st = await pool.fetchrow(
-        "SELECT (SELECT count(*) FROM social_posts WHERE user_id=$1) AS posts, "
-        "(SELECT count(*) FROM social_reactions r JOIN social_posts x ON x.post_id=r.post_id WHERE x.user_id=$1) AS likes, "
-        "(SELECT count(*) FROM social_comments c JOIN social_posts x ON x.post_id=c.post_id WHERE x.user_id=$1) AS comments", uid)
+        "SELECT (SELECT count(*) FROM social_follows WHERE follower_id=$1) AS following, "
+        "(SELECT count(*) FROM social_follows WHERE following_id=$1) AS followers, "
+        "(SELECT count(*) FROM social_profile_likes WHERE target_id=$1) AS profile_likes", uid)
     viewer = int(user["id"])
     following = bool(await pool.fetchval("SELECT 1 FROM social_follows WHERE follower_id=$1 AND following_id=$2", viewer, uid)) if viewer != uid else False
     liked = bool(await pool.fetchval("SELECT 1 FROM social_profile_likes WHERE user_id=$1 AND target_id=$2", viewer, uid)) if viewer != uid else False
     likes_count = int(await pool.fetchval("SELECT count(*) FROM social_profile_likes WHERE target_id=$1", uid) or 0)
-    return _j({"profile": dict(p), "posts": posts if viewer == uid else [], "stats": dict(st), "following": following, "liked": liked, "profile_likes": likes_count})
+    sub_exp = await pool.fetchval("SELECT expires_at FROM mini_subscriptions WHERE user_id=$1", uid)
+    premium = bool(sub_exp and float(sub_exp) > time.time())
+    return _j({"profile": dict(p), "posts": posts if viewer == uid else [], "stats": dict(st), "following": following, "liked": liked, "profile_likes": likes_count, "premium": premium})
 
 
 async def _social_media_get(qs, user):
@@ -3936,12 +3971,13 @@ async def _social_room(qs, user):
     after = _int(qs.get("after"), 0, 0)
     rows = await pool.fetch(
         "SELECT m.message_id,m.user_id,m.text,m.reply_to,m.premium_emoji_id,m.created_at,sp.username,sp.display_name,u.name AS uname, "
+        "EXISTS(SELECT 1 FROM mini_subscriptions ms WHERE ms.user_id=m.user_id AND ms.expires_at>$3) AS premium, "
         "(SELECT json_agg(json_build_object('emoji',r.emoji,'n',r.n,'mine',r.mine)) FROM (SELECT emoji,count(*)::int n,bool_or(user_id=$2) mine FROM social_room_reactions WHERE message_id=m.message_id GROUP BY emoji) r) reactions, "
         "(SELECT text FROM social_room_messages x WHERE x.message_id=m.reply_to) reply_text, "
         "(SELECT COALESCE(sp2.display_name,sp2.username,u2.name,x.user_id::text) FROM social_room_messages x LEFT JOIN social_profiles sp2 ON sp2.user_id=x.user_id LEFT JOIN users u2 ON u2.user_id=x.user_id WHERE x.message_id=m.reply_to) reply_name, "
         "(SELECT count(*)::int FROM social_room_reads rr WHERE rr.user_id<>m.user_id AND rr.last_read_message_id>=m.message_id) read_count "
         "FROM social_room_messages m LEFT JOIN social_profiles sp ON sp.user_id=m.user_id LEFT JOIN users u ON u.user_id=m.user_id "
-        "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]))
+        "WHERE ($1=0 OR m.message_id>$1) ORDER BY m.message_id DESC LIMIT 100", after, int(user["id"]), time.time())
     out = []
     bot = await _rp_bot()
     for r in reversed(rows):
@@ -3983,6 +4019,10 @@ async def _social_room_send(b,user):
     if len(_CE_TOKEN_RE.findall(txt)) > 60: raise _ApiError("تو یه پیام حداکثر ۶۰ ایموجی پرمیوم می‌تونی بذاری")
     if not txt and not pe: raise _ApiError("پیام خالیه")
     if pe and not pe.isdigit(): raise _ApiError("شناسه ایموجی پرمیوم معتبر نیست")
+    if pe or _CE_TOKEN_RE.search(txt):
+        exp = await pool.fetchval("SELECT expires_at FROM mini_subscriptions WHERE user_id=$1", uid)
+        if not (exp and float(exp) > time.time()) and not _social_emoji_staff(user):
+            raise _ApiError("ارسال ایموجی پرمیوم فقط با اشتراک ویژه فعاله.", 403)
     if reply and not await pool.fetchval("SELECT 1 FROM social_room_messages WHERE message_id=$1",reply): reply=None
     mid=await pool.fetchval("INSERT INTO social_room_messages(user_id,text,reply_to,premium_emoji_id,created_at) VALUES($1,$2,$3,$4,$5) RETURNING message_id",uid,txt,reply,pe,time.time())
     return _j({"ok":True,"message_id":mid})
@@ -5144,7 +5184,7 @@ def _mini_crash_point() -> float:
     if random.random() < MINI_CRASH_EARLY:
         return round(random.uniform(1.0, 1.19), 2)
     u = max(random.random(), 1e-9)
-    return max(1.0, min(MINI_CRASH_MAX, math.floor(100 * MINI_CRASH_EDGE / u) / 100))
+    return max(1.0, min(3.25, MINI_CRASH_MAX, math.floor(100 * MINI_CRASH_EDGE / u) / 100))
 
 
 def _mini_mult_at(t: float) -> float:
@@ -5278,12 +5318,42 @@ async def _p_game_crash_start(b, user):
                "balance": await _mini_balance(uid)})
 
 
+async def _mini_crash_watch_state(bal: int) -> dict:
+    """نمای عمومی دورهای موشک؛ پرواز مستقل از شرط کاربران و بدون افشای نقطه انفجار."""
+    now = time.time()
+    slot = int(now // MINI_CRASH_DELAY)
+    # اگر دور همین بازه در حال پرواز باشد، آن را نشان بده؛ وگرنه دور بعدی را آماده کن.
+    current = await pool.fetchrow("SELECT round_id,starts_at,crash_point FROM mini_crash_rounds WHERE round_id=$1", slot - 1)
+    if current and now >= float(current["starts_at"]):
+        t0 = float(current["starts_at"])
+        elapsed = max(0.0, now - t0)
+        cp = float(current["crash_point"])
+        if elapsed < _mini_time_for(cp):
+            return {**_mini_base(bal), "active": False, "done": False, "watch_phase": "flying",
+                    "watch_round": int(current["round_id"]), "t0": t0, "now": now,
+                    "mult": _mini_mult_at(elapsed), "rate": MINI_CRASH_RATE}
+        return {**_mini_base(bal), "active": False, "done": False, "watch_phase": "crashed",
+                "watch_round": int(current["round_id"]), "t0": t0, "now": now,
+                "mult": cp, "rate": MINI_CRASH_RATE}
+    rid = slot
+    starts_at = (rid + 1) * MINI_CRASH_DELAY
+    rr = await pool.fetchrow(
+        "INSERT INTO mini_crash_rounds(round_id,starts_at,crash_point,created_at) VALUES($1,$2,$3,$4) "
+        "ON CONFLICT(round_id) DO UPDATE SET round_id=EXCLUDED.round_id RETURNING starts_at",
+        rid, starts_at, _mini_crash_point(), now)
+    return {**_mini_base(bal), "active": False, "done": False, "watch_phase": "waiting",
+            "watch_round": rid, "t0": float(rr["starts_at"]), "now": now,
+            "mult": 1.0, "rate": MINI_CRASH_RATE}
+
+
 async def _g_game_crash_state(qs, user):
     uid, bal = await _mini_ctx(user)
     async with _mini_lock(uid):
         row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
         if not row or row["kind"] != "crash":
-            return _j({**_mini_base(bal), "active": False, "done": False, "other": row["kind"] if row else None})
+            base = await _mini_crash_watch_state(bal)
+            base["other"] = row["kind"] if row else None
+            return _j(base)
         st, bet = json.loads(row["state"]), int(row["bet"])
         res, m = _mini_crash_eval(st, False)
         if res == "run":
@@ -5412,7 +5482,8 @@ async def _social_subscription_receipt(b, user):
         try:
             bio = BytesIO(data); bio.name = "subscription-receipt." + m.group(1)
             await BOT_REF.send_photo(chat_id=aid, photo=bio,
-                caption=(f"🧾 <b>رسید اشتراک مینی‌اپ #{rid}</b>\n\n👤 کاربر: <code>{uid}</code>\n💳 مبلغ اعلام‌شده: <b>۷۹٬۰۰۰ تومان</b>\n📅 اعتبار: <b>۳۰ روز</b>\n\nبرای فعال‌سازی، پرداخت را بررسی کنید."), parse_mode="HTML")
+                caption=(f"🧾 <b>رسید اشتراک مینی‌اپ #{rid}</b>\n\n👤 کاربر: <code>{uid}</code>\n💳 مبلغ اعلام‌شده: <b>۷۹٬۰۰۰ تومان</b>\n📅 اعتبار: <b>۳۰ روز</b>\n\nبرای فعال‌سازی، پرداخت را بررسی کنید."), parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ تأیید و فعال‌سازی ۳۰ روزه", callback_data=f"sub:ok:{rid}"), InlineKeyboardButton("❌ رد رسید", callback_data=f"sub:no:{rid}")]]))
             sent += 1
         except Exception:
             log.warning("subscription receipt delivery failed for admin %s", aid, exc_info=True)
@@ -5420,6 +5491,45 @@ async def _social_subscription_receipt(b, user):
         await pool.execute("UPDATE mini_subscription_receipts SET status='delivery_failed' WHERE receipt_id=$1", rid)
         raise _ApiError("ارسال رسید به پشتیبانی ناموفق بود؛ دوباره تلاش کن.", 503)
     return _j({"ok": True, "receipt_id": rid, "message": "رسید برای پشتیبانی ارسال شد؛ پس از بررسی، اشتراک فعال می‌شود."})
+
+
+async def mini_subscription_review_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not (q.from_user.id in ADMIN_IDS or has_perm(q.from_user.id, "pay")):
+        await q.answer("دسترسی بررسی رسید را نداری.", show_alert=True)
+        return
+    try:
+        _, action, rid_s = q.data.split(":", 2)
+        rid = int(rid_s)
+    except Exception:
+        await q.answer("شناسه رسید نامعتبر است.", show_alert=True); return
+    row = await pool.fetchrow("SELECT user_id,status FROM mini_subscription_receipts WHERE receipt_id=$1", rid)
+    if not row or row["status"] != "pending":
+        await q.answer("این رسید قبلاً بررسی شده یا وجود ندارد.", show_alert=True); return
+    uid = int(row["user_id"])
+    now = time.time()
+    if action == "ok":
+        async with pool.acquire() as c:
+            async with c.transaction():
+                current = await c.fetchval("SELECT expires_at FROM mini_subscriptions WHERE user_id=$1 FOR UPDATE", uid)
+                expiry = max(float(current or 0), now) + 30 * 86400
+                await c.execute("INSERT INTO mini_subscriptions(user_id,expires_at,activated_by,updated_at) VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET expires_at=EXCLUDED.expires_at,activated_by=EXCLUDED.activated_by,updated_at=EXCLUDED.updated_at", uid, expiry, q.from_user.id, now)
+                await c.execute("UPDATE mini_subscription_receipts SET status='approved' WHERE receipt_id=$1 AND status='pending'", rid)
+        msg = "اشتراک ویژه مینی‌اپ شما به مدت ۳۰ روز فعال شد. تمام امکانات اشتراک اکنون برای حسابتان فعال است."
+        try: await context.bot.send_message(uid, "💎 " + msg)
+        except Exception: log.warning("subscription activation notice failed for %s", uid, exc_info=True)
+        await q.answer("اشتراک برای ۳۰ روز فعال شد.", show_alert=True)
+        try: await q.edit_message_caption((q.message.caption or "") + "\n\n✅ تأیید شد؛ اشتراک ۳۰ روزه فعال شد.", reply_markup=None, parse_mode="HTML")
+        except Exception: pass
+    elif action == "no":
+        await pool.execute("UPDATE mini_subscription_receipts SET status='rejected' WHERE receipt_id=$1 AND status='pending'", rid)
+        try: await context.bot.send_message(uid, "رسید اشتراک مینی‌اپ شما تأیید نشد. لطفاً با پشتیبانی تماس بگیرید.")
+        except Exception: log.warning("subscription rejection notice failed for %s", uid, exc_info=True)
+        await q.answer("رسید رد شد.", show_alert=True)
+        try: await q.edit_message_caption((q.message.caption or "") + "\n\n❌ رسید رد شد.", reply_markup=None, parse_mode="HTML")
+        except Exception: pass
+    else:
+        await q.answer("عملیات نامعتبر است.", show_alert=True)
 
 _SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/carrom/create":_social_carrom_create,"/api/social/room/carrom/join":_social_carrom_join,"/api/social/room/carrom/cancel":_social_carrom_cancel,"/api/social/room/carrom/shoot":_social_carrom_shoot,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read,"/api/social/subscription/receipt":_social_subscription_receipt,"/api/social/follow":_social_follow,"/api/social/profile/like":_social_profile_like}
 
@@ -5554,6 +5664,25 @@ async def start_webapp():
     return srv
 
 
+
+async def mini_crash_round_loop():
+    """ایجاد دورهای سراسری موشک در تمام زمان اجرا، حتی وقتی کسی صفحه بازی را باز نکرده."""
+    while True:
+        try:
+            now = time.time()
+            rid = int(now // MINI_CRASH_DELAY)
+            starts_at = (rid + 1) * MINI_CRASH_DELAY
+            await pool.execute(
+                "INSERT INTO mini_crash_rounds(round_id,starts_at,crash_point,created_at) VALUES($1,$2,$3,$4) "
+                "ON CONFLICT(round_id) DO NOTHING", rid, starts_at, _mini_crash_point(), now)
+            # فقط تاریخچه محدود نگه داشته شود؛ دورهای دارای شرط در mini_games اطلاعات لازم را دارند.
+            await pool.execute("DELETE FROM mini_crash_rounds WHERE round_id < $1", rid - 120)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("mini crash round scheduler failed", exc_info=True)
+        await asyncio.sleep(0.35)
+
 async def startup(app: Application):
     """موقع روشن شدن: دیتابیس رو آماده می‌کنه و به پشتیبان‌ها تو تلگرام خبر میده (بدون نیاز به لاگ Railway)."""
     global BOT_REF
@@ -5571,6 +5700,7 @@ async def startup(app: Application):
             log.warning("reset commands menu failed", exc_info=True)
         app.bot_data["ref_task"] = asyncio.create_task(referral_check_loop(app))
         app.bot_data["gw_task"] = asyncio.create_task(giveaway_loop(app))
+        app.bot_data["mini_crash_round_task"] = asyncio.create_task(mini_crash_round_loop())
         try:
             app.bot_data["web"] = await start_webapp()
         except Exception:
@@ -14908,6 +15038,7 @@ def main():
     app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
     app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\d+)$"))
     app.add_handler(CallbackQueryHandler(purchase_review_cb, pattern=r"^bp:(ok|no):\d+$"))
+    app.add_handler(CallbackQueryHandler(mini_subscription_review_cb, pattern=r"^sub:(ok|no):\d+$"))
     app.add_handler(CommandHandler("admin", admin_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("support", support_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("addsupport", add_support_cmd, filters=filters.ChatType.PRIVATE))
