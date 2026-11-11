@@ -7517,20 +7517,22 @@ JAGSAL_CONNECT_TEXT = (
 )
 
 async def _jagsal_photo(bot, chat_id, caption, reply_markup=None):
-    """ارسال کارت جقصل؛ اگر ارسال عکس در گروه ممکن نبود، پیام متنی جایگزین می‌فرستد."""
+    """ارسال کارت جقصل بدون وابستگی به HTML یا ادمین بودن ربات.
+
+    در گروه، ربات برای ارسال پیام/عکس ادمین لازم ندارد؛ کافی است عضو گروه باشد
+    و مدیران گروه ارسال پیام را برایش محدود نکرده باشند.
+    """
+    plain = html.unescape(re.sub(r"<[^>]*>", "", caption or ""))
+    # اول عکس را با کپشن ساده می‌فرستیم تا خطای parse_mode/custom-emoji باعث
+    # شکست کارت و دکمه‌ها نشود.
     try:
-        raw = base64.b64decode(JAGSAL_IMAGE_B64)
+        raw = base64.b64decode(JAGSAL_IMAGE_B64, validate=True)
         bio = BytesIO(raw); bio.name = "jagsal.jpg"
-        return await bot.send_photo(chat_id, bio, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+        return await bot.send_photo(chat_id=chat_id, photo=bio, caption=plain[:1024], reply_markup=reply_markup)
     except Exception:
-        log.warning("jagsal photo send failed in %s; falling back to text", chat_id, exc_info=True)
-        try:
-            return await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=reply_markup)
-        except Exception:
-            # حتی اگر HTML یا ایموجی ویژه مشکل داشت، اصل پیام و دکمه از دست نرود.
-            plain = re.sub(r"<[^>]*>", "", caption)
-            plain = html.unescape(plain)
-            return await bot.send_message(chat_id, plain, reply_markup=reply_markup)
+        log.warning("jagsal photo send failed in %s; falling back to plain text", chat_id, exc_info=True)
+    # ارسال متنی مستقل از HTML؛ دکمه‌ها در حالت جایگزین هم حفظ می‌شوند.
+    return await bot.send_message(chat_id=chat_id, text=plain, reply_markup=reply_markup)
 
 async def _jagsal_group_active(chat_id: int) -> bool:
     return bool(await pool.fetchval(
@@ -7546,13 +7548,16 @@ async def _jagsal_is_admin(bot, chat_id: int, uid: int) -> bool:
     except Exception:
         return False
 
-async def _jagsal_invite(bot, chat_id: int, sid: int):
+async def _jagsal_invite(bot, chat_id: int, sid: int) -> bool:
     kb = InlineKeyboardMarkup([[btn("در رو باز می‌کنیم", "success", icon="5452029295109086676", callback_data=f"jgs:open:{sid}")]])
     try:
         m = await _jagsal_photo(bot, chat_id, JAGSAL_INVITE_TEXT, kb)
         await pool.execute("INSERT INTO jagsal_invites(session_id,chat_id,message_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", sid, chat_id, m.message_id)
-    except Exception:
-        log.warning("jagsal invite failed in %s", chat_id, exc_info=True)
+        return True
+    except Exception as exc:
+        # علت دقیق در لاگ می‌ماند؛ شکست یک گروه، دعوت گروه‌های دیگر را متوقف نمی‌کند.
+        log.warning("jagsal invite failed in %s: %s", chat_id, exc, exc_info=True)
+        return False
 
 async def jagsal_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     msg, user = update.effective_message, update.effective_user
@@ -7588,8 +7593,19 @@ async def jagsal_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await msg.reply_text('<b>دارم شما رو به اولین گپی که در رو باز کنه متصل می‌کنم <tg-emoji emoji-id="5379684045636511609">🔗</tg-emoji></b>', parse_mode="HTML")
     # دعوت فقط برای گروه‌های دیگر ارسال شود؛ گروه درخواست‌دهنده نباید دکمهٔ پذیرش خودش را ببیند.
     chats = list(dict.fromkeys(int(cid) for cid in KNOWN_CHATS if int(cid) != int(msg.chat_id)))
+    sent = 0
     for cid in chats:
-        await _jagsal_invite(context.bot, cid, int(sid))
+        if await _jagsal_invite(context.bot, cid, int(sid)):
+            sent += 1
+    if sent == 0:
+        await pool.execute("UPDATE jagsal_sessions SET status='cancelled' WHERE session_id=$1 AND status='waiting'", int(sid))
+        await msg.reply_text(
+            "فعلاً هیچ گروه دیگری دعوت را دریافت نکرد. ربات لازم نیست ادمین باشد؛ "
+            "اما باید عضو گروه مقصد باشد و ارسال پیام برایش محدود نشده باشد. "
+            "بعد از اضافه‌کردن ربات به گروه‌های مقصد، دوباره «جقصل» را بفرست."
+        )
+    else:
+        await msg.reply_text(f"دعوت جقصل برای {sent} گروه ارسال شد؛ منتظر اولین گروهی هستیم که در را باز کند.")
     return True
 
 async def _jagsal_relay_message(bot, session, msg, user):
@@ -7736,9 +7752,9 @@ async def jagsal_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if posted_chats == 2:
                 await q.answer("اتصال برقرار شد؛ پیام شروع گفتگو در هر دو گروه ارسال شد.", show_alert=True)
             elif posted_chats == 1:
-                await q.answer("اتصال برقرار شد، اما ارسال پیام در یکی از گروه‌ها ناموفق بود؛ دسترسی ربات را بررسی کنید.", show_alert=True)
+                await q.answer("اتصال ثبت شد، اما تلگرام ارسال کارت را در یکی از گروه‌ها نپذیرفت. ادمین بودن لازم نیست؛ ربات باید عضو گروه و مجاز به ارسال پیام باشد.", show_alert=True)
             else:
-                await q.answer("اتصال ثبت شد اما ارسال پیام در هر دو گروه ناموفق بود؛ ربات باید اجازه ارسال پیام داشته باشد.", show_alert=True)
+                await q.answer("تلگرام ارسال کارت اتصال را در هر دو گروه رد کرد. ربات ادمین لازم ندارد؛ فقط باید عضو گروه باشد و محدودیت ارسال پیام نداشته باشد.", show_alert=True)
             return
         if parts[1] == "disconnect":
             sid=int(parts[2]); ses=await pool.fetchrow("SELECT * FROM jagsal_sessions WHERE session_id=$1",sid)
