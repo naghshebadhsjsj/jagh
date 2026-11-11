@@ -5732,6 +5732,9 @@ async def jagsal_expiry_loop():
             rows = await pool.fetch("SELECT * FROM jagsal_sessions WHERE status='connected' AND expires_at IS NOT NULL AND expires_at <= $1 LIMIT 50", now)
             for row in rows:
                 await _jagsal_end(BOT_REF, row, 0, "time_expired")
+            stale = await pool.fetch("SELECT session_id, source_chat FROM jagsal_sessions WHERE status='waiting' AND created_at <= $1 LIMIT 50", now - 600)
+            for row in stale:
+                await _jagsal_cancel_waiting(BOT_REF, row)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -7516,23 +7519,119 @@ JAGSAL_CONNECT_TEXT = (
     'برای شروع، روی همین پیام ریپلای کنید.</b>'
 )
 
-async def _jagsal_photo(bot, chat_id, caption, reply_markup=None):
-    """ارسال کارت جقصل بدون وابستگی به HTML یا ادمین بودن ربات.
+JAGSAL_CONNECTING_TEXT = (
+    '<b>دارم شما رو به اولین گپی که در رو باز کنه متصل می‌کنم <tg-emoji emoji-id="5379684045636511609">🔗</tg-emoji></b>'
+)
+_JAGSAL_IMAGE_BYTES = None   # بایت‌های عکس بعد از اولین رمزگشایی نگه داشته می‌شه
+_JAGSAL_FILE_ID = None       # بعد از اولین آپلود موفق، file_id نگه داشته می‌شه تا عکس هر بار آپلود نشه
+_JAGSAL_HINT_TS: dict = {}   # آخرین زمان نمایش راهنمای «ریپلای کنید» برای هر گپ
 
-    در گروه، ربات برای ارسال پیام/عکس ادمین لازم ندارد؛ کافی است عضو گروه باشد
-    و مدیران گروه ارسال پیام را برایش محدود نکرده باشند.
-    """
-    plain = html.unescape(re.sub(r"<[^>]*>", "", caption or ""))
-    # اول عکس را با کپشن ساده می‌فرستیم تا خطای parse_mode/custom-emoji باعث
-    # شکست کارت و دکمه‌ها نشود.
+def _jagsal_plain_kb(markup):
+    """همون دکمه‌ها بدون استایل/آیکن؛ برای وقتی که تلگرام دکمه‌ی رنگی رو قبول نکنه."""
+    if not markup:
+        return markup
     try:
-        raw = base64.b64decode(JAGSAL_IMAGE_B64, validate=True)
-        bio = BytesIO(raw); bio.name = "jagsal.jpg"
-        return await bot.send_photo(chat_id=chat_id, photo=bio, caption=plain[:1024], reply_markup=reply_markup)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(b.text, callback_data=b.callback_data) for b in row]
+            for row in markup.inline_keyboard])
     except Exception:
-        log.warning("jagsal photo send failed in %s; falling back to plain text", chat_id, exc_info=True)
-    # ارسال متنی مستقل از HTML؛ دکمه‌ها در حالت جایگزین هم حفظ می‌شوند.
-    return await bot.send_message(chat_id=chat_id, text=plain, reply_markup=reply_markup)
+        return markup
+
+def _jagsal_fatal(exc) -> bool:
+    """خطاهایی که با ساده‌کردن کپشن/دکمه درست نمی‌شن (ربات از گروه رفته/کیک شده و ...)."""
+    s = str(exc).lower()
+    return type(exc).__name__ in ("Forbidden", "ChatMigrated") or any(
+        k in s for k in ("chat not found", "bot was kicked", "bot is not a member", "bot was blocked"))
+
+async def _jagsal_photo(bot, chat_id, caption, reply_markup=None, reply_to=None):
+    """کارت جقصل: عکس + کپشن HTML با ایموجی پرمیوم و دکمه‌های رنگی.
+
+    اگه تلگرام چیزی رو رد کنه، فقط همون بخش ساده می‌شه: اول دکمه‌ها، بعد ایموجی پرمیوم،
+    بعد کل HTML. اگه عکس اصلاً نرفت، همین کارت به‌صورت متن فرستاده می‌شه. اگه هیچ‌کدوم
+    نشد، خطا بالا می‌ره تا کسی که صداش زده بدونه کارت نرسیده.
+    """
+    global _JAGSAL_IMAGE_BYTES, _JAGSAL_FILE_ID
+    caption = caption or ""
+    no_premium = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", caption)
+    plain = html.unescape(re.sub(r"<[^>]*>", "", caption))
+    plain_kb = _jagsal_plain_kb(reply_markup)
+    rp = ReplyParameters(message_id=int(reply_to), allow_sending_without_reply=True) if reply_to else None
+    tiers = [
+        (caption, "HTML", reply_markup),
+        (caption, "HTML", plain_kb),
+        (no_premium, "HTML", plain_kb),
+        (plain, None, plain_kb),
+    ]
+    last_exc = None
+    for text, pm, kb in tiers:
+        used_id = bool(_JAGSAL_FILE_ID)
+        try:
+            if used_id:
+                photo = _JAGSAL_FILE_ID
+            else:
+                if _JAGSAL_IMAGE_BYTES is None:
+                    _JAGSAL_IMAGE_BYTES = base64.b64decode(JAGSAL_IMAGE_B64)
+                photo = BytesIO(_JAGSAL_IMAGE_BYTES); photo.name = "jagsal.jpg"
+            m = await bot.send_photo(chat_id=chat_id, photo=photo, caption=text[:1024],
+                                     parse_mode=pm, reply_markup=kb, reply_parameters=rp)
+            if not used_id:
+                try: _JAGSAL_FILE_ID = m.photo[-1].file_id
+                except Exception: pass
+            return m
+        except Exception as exc:
+            last_exc = exc
+            if used_id: _JAGSAL_FILE_ID = None
+            log.warning("jagsal photo failed in %s (parse_mode=%s): %s", chat_id, pm, exc)
+            if _jagsal_fatal(exc): raise
+    for text, pm, kb in tiers[1:]:
+        try:
+            return await bot.send_message(chat_id=chat_id, text=text, parse_mode=pm, reply_markup=kb, reply_parameters=rp)
+        except Exception as exc:
+            last_exc = exc
+            log.warning("jagsal text card failed in %s (parse_mode=%s): %s", chat_id, pm, exc)
+            if _jagsal_fatal(exc): raise
+    raise last_exc
+
+async def _jagsal_post_cards(bot, ses, sid: int):
+    """کارت اتصال رو توی هر دو گروه می‌فرسته و لیست (chat_id, message_id) کارت‌های رسیده رو برمی‌گردونه."""
+    posted = []
+    for cid in (int(ses["source_chat"]), int(ses["target_chat"])):
+        kb = InlineKeyboardMarkup([[
+            btn("قطع ارتباط", "danger", icon="5202172377277935933", callback_data=f"jgs:disconnect:{sid}"),
+            btn("گزارش", icon="5447644880824181073", callback_data=f"jgs:sessionreport:{sid}")]])
+        try:
+            m = await _jagsal_photo(bot, cid, JAGSAL_CONNECT_TEXT, kb)
+        except Exception:
+            log.exception("jagsal connect card failed in chat %s for session %s", cid, sid)
+            continue
+        await pool.execute(
+            "INSERT INTO jagsal_posts(session_id,chat_id,message_id) VALUES($1,$2,$3) "
+            "ON CONFLICT(session_id,chat_id) DO UPDATE SET message_id=EXCLUDED.message_id",
+            sid, cid, m.message_id)
+        posted.append((cid, m.message_id))
+        try:
+            me = await bot.get_chat_member(cid, bot.id)
+            if str(me.status) == "administrator":
+                await bot.pin_chat_message(cid, m.message_id, disable_notification=True)
+        except Exception:
+            log.info("jagsal connect post could not be pinned in %s", cid, exc_info=True)
+    return posted
+
+async def _jagsal_cancel_waiting(bot, row):
+    """دعوتی که کسی در رو بازش نکرده بسته می‌شه، دعوت‌ها پاک می‌شن و گپ درخواست‌دهنده آزاد می‌شه."""
+    sid = int(row["session_id"])
+    done = await pool.fetchval(
+        "UPDATE jagsal_sessions SET status='cancelled',ended_at=$2,end_reason='no_taker' "
+        "WHERE session_id=$1 AND status='waiting' RETURNING 1", sid, time.time())
+    if not done:
+        return
+    for x in await pool.fetch("SELECT chat_id,message_id FROM jagsal_invites WHERE session_id=$1", sid):
+        try: await bot.delete_message(int(x["chat_id"]), int(x["message_id"]))
+        except Exception: pass
+    try:
+        await bot.send_message(int(row["source_chat"]), "<b>هیچ گپی در رو باز نکرد؛ درخواست جقصل بسته شد. می‌تونی دوباره بگی «جقصل».</b>", parse_mode="HTML")
+    except Exception:
+        pass
 
 async def _jagsal_group_active(chat_id: int) -> bool:
     return bool(await pool.fetchval(
@@ -7590,7 +7689,13 @@ async def jagsal_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             sid = await c.fetchval(
                 "INSERT INTO jagsal_sessions(source_chat,source_user,status,created_at) VALUES($1,$2,'waiting',$3) RETURNING session_id",
                 msg.chat_id, user.id, time.time())
-    await msg.reply_text('<b>دارم شما رو به اولین گپی که در رو باز کنه متصل می‌کنم <tg-emoji emoji-id="5379684045636511609">🔗</tg-emoji></b>', parse_mode="HTML")
+    try:
+        wait_msg = await _jagsal_photo(context.bot, msg.chat_id, JAGSAL_CONNECTING_TEXT, reply_to=msg.message_id)
+        # این پیام بعد از وصل‌شدن همراه دعوت‌ها پاک می‌شه
+        await pool.execute("INSERT INTO jagsal_invites(session_id,chat_id,message_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+                           int(sid), int(msg.chat_id), wait_msg.message_id)
+    except Exception:
+        log.exception("jagsal connecting card failed in %s", msg.chat_id)
     # دعوت فقط برای گروه‌های دیگر ارسال شود؛ گروه درخواست‌دهنده نباید دکمهٔ پذیرش خودش را ببیند.
     chats = list(dict.fromkeys(int(cid) for cid in KNOWN_CHATS if int(cid) != int(msg.chat_id)))
     sent = 0
@@ -7613,6 +7718,11 @@ async def _jagsal_relay_message(bot, session, msg, user):
     if not session["started_at"]:
         anchor = await pool.fetchval("SELECT message_id FROM jagsal_posts WHERE session_id=$1 AND chat_id=$2", int(session["session_id"]), int(msg.chat_id))
         if not msg.reply_to_message or not anchor or int(msg.reply_to_message.message_id) != int(anchor):
+            _now = time.time()
+            if _now - _JAGSAL_HINT_TS.get(msg.chat_id, 0) >= 90:
+                _JAGSAL_HINT_TS[msg.chat_id] = _now
+                try: await msg.reply_text("<b>برای شروع گفت‌وگو، روی پیام اتصال (همون عکس) ریپلای کنید.</b>", parse_mode="HTML")
+                except Exception: pass
             return False
         await pool.execute("UPDATE jagsal_sessions SET started_at=$2 WHERE session_id=$1 AND started_at IS NULL", int(session["session_id"]), time.time())
         session = await pool.fetchrow("SELECT * FROM jagsal_sessions WHERE session_id=$1", int(session["session_id"]))
@@ -7656,6 +7766,9 @@ async def _jagsal_relay_message(bot, session, msg, user):
 async def jagsal_nontext(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg, user = update.effective_message, update.effective_user
     if not msg or not user or user.is_bot or msg.chat.type not in ("group", "supergroup"): return
+    # پیام‌های سرویس (پین‌شدن کارت، ورود عضو و ...) رسانه نیستن و نباید ریله بشن
+    if not any((msg.photo, msg.video, msg.document, msg.audio, msg.voice, msg.video_note, msg.sticker,
+                msg.animation, msg.location, msg.contact, msg.poll)): return
     session = await pool.fetchrow("SELECT * FROM jagsal_sessions WHERE status='connected' AND (source_chat=$1 OR target_chat=$1) ORDER BY session_id DESC LIMIT 1", msg.chat_id)
     if session: await _jagsal_relay_message(context.bot, session, msg, user)
 
@@ -7697,7 +7810,7 @@ async def _jagsal_report_send(bot, relay, reporter):
             f"\nیوزرنیم: @{html.escape(reporter.username or 'ندارد')}\nآیدی: <code>{reporter.id}</code>"
             f"\nگزارش‌شده: {html.escape(relay['source_name'])} (@{html.escape(reported_username or 'ندارد')})\nآیدی: <code>{relay['source_user']}</code>"
             f"\nگپ: {html.escape(relay['source_group'])}\nمتن: <blockquote>{html.escape((relay['body'] or '[رسانه]')[:1800])}</blockquote>")
-    kb = InlineKeyboardMarkup([[btn("محرومیت ۱ ساعت", "danger", callback_data=f"jgs:ban:{rid}:1"), btn("محرومیت ۲ ساعت", "danger", callback_data=f"jgs:ban:{rid}:2")], [btn("مدت دلخواه", "primary", callback_data=f"jgs:custom:{rid}"), btn("رد گزارش", "secondary", callback_data=f"jgs:reject:{rid}")]])
+    kb = InlineKeyboardMarkup([[btn("محرومیت ۱ ساعت", "danger", callback_data=f"jgs:ban:{rid}:1"), btn("محرومیت ۲ ساعت", "danger", callback_data=f"jgs:ban:{rid}:2")], [btn("مدت دلخواه", "primary", callback_data=f"jgs:custom:{rid}"), btn("رد گزارش", callback_data=f"jgs:reject:{rid}")]])
     sent = 0
     for aid in (set(OWNER_IDS) | set(STAFF)):
         try: await bot.send_message(aid, text, parse_mode="HTML", reply_markup=kb); sent += 1
@@ -7724,37 +7837,49 @@ async def jagsal_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     now_connect = time.time()
                     await c.execute("UPDATE jagsal_sessions SET target_chat=$2,target_user=$3,status='connected',connected_at=$4,expires_at=$5 WHERE session_id=$1",sid,chat_id,uid,now_connect,now_connect+720)
                     ses=await c.fetchrow("SELECT * FROM jagsal_sessions WHERE session_id=$1",sid)
-            # دعوت‌ها دیگر قابل استفاده نیستند.
-            inv=await pool.fetch("SELECT chat_id,message_id FROM jagsal_invites WHERE session_id=$1",sid)
-            for x in inv:
-                try: await context.bot.delete_message(int(x["chat_id"]),int(x["message_id"]))
-                except Exception:
-                    try: await context.bot.edit_message_reply_markup(int(x["chat_id"]),int(x["message_id"]),reply_markup=None)
+            # اتصال ثبت شد؛ همین‌جا به دکمه جواب می‌دیم تا کلیک بی‌نتیجه به نظر نرسه
+            try: await q.answer("در حال اتصال…")
+            except Exception: pass
+            posted = []
+            try:
+                posted = await _jagsal_post_cards(context.bot, ses, sid)
+            except Exception:
+                log.exception("jagsal post cards failed for session %s", sid)
+            posted_ids = {int(cid) for cid, _ in posted}
+            if len(posted_ids) < 2:
+                # کارت اتصال توی هر دو گروه نرسید؛ کارت ناقص برداشته می‌شه تا گپ‌ها گیر نکنن
+                for cid, mid in posted:
+                    try: await context.bot.delete_message(cid, mid)
                     except Exception: pass
-            posted_chats = 0
-            for cid in (int(ses["source_chat"]), int(ses["target_chat"])):
-                try:
-                    kb = InlineKeyboardMarkup([[btn("قطع ارتباط", "danger", icon="5202172377277935933", callback_data=f"jgs:disconnect:{sid}"), btn("گزارش", "secondary", icon="5447644880824181073", callback_data=f"jgs:sessionreport:{sid}")]])
-                    m = await _jagsal_photo(context.bot, cid, JAGSAL_CONNECT_TEXT, kb)
+                await pool.execute("DELETE FROM jagsal_posts WHERE session_id=$1", sid)
+                if int(ses["source_chat"]) in posted_ids:
+                    # فقط گروهی که در رو باز کرد مشکل داشت: دعوت زنده می‌مونه تا گپ دیگه‌ای در رو باز کنه
                     await pool.execute(
-                        "INSERT INTO jagsal_posts(session_id,chat_id,message_id) VALUES($1,$2,$3) "
-                        "ON CONFLICT(session_id,chat_id) DO UPDATE SET message_id=EXCLUDED.message_id",
-                        sid, cid, m.message_id)
-                    posted_chats += 1
-                    try:
-                        me = await context.bot.get_chat_member(cid, context.bot.id)
-                        if str(me.status) == "administrator":
-                            await context.bot.pin_chat_message(cid, m.message_id, disable_notification=True)
-                    except Exception:
-                        log.info("jagsal connect post could not be pinned in %s", cid, exc_info=True)
+                        "UPDATE jagsal_sessions SET status='waiting',target_chat=NULL,target_user=NULL,"
+                        "connected_at=NULL,expires_at=NULL,started_at=NULL WHERE session_id=$1 AND status='connected'", sid)
+                    note = "<b>اتصال کامل نشد؛ ربات نتونست توی این گپ پیام بفرسته. بررسی کنید ربات عضو گروه باشه و ارسال پیام و عکس براش بسته نباشه.</b>"
+                    notify = [chat_id]
+                else:
+                    # گروه درخواست‌دهنده در دسترس نیست
+                    await pool.execute(
+                        "UPDATE jagsal_sessions SET status='cancelled',ended_at=$2,end_reason='card_failed' "
+                        "WHERE session_id=$1 AND status='connected'", sid, time.time())
+                    for x in await pool.fetch("SELECT chat_id,message_id FROM jagsal_invites WHERE session_id=$1", sid):
+                        try: await context.bot.delete_message(int(x["chat_id"]), int(x["message_id"]))
+                        except Exception: pass
+                    note = "<b>اتصال برقرار نشد؛ ربات نتونست توی یکی از گروه‌ها پیام بفرسته. دوباره «جقصل» رو امتحان کنید.</b>"
+                    notify = [chat_id, int(ses["source_chat"])]
+                for cid in dict.fromkeys(notify):
+                    try: await context.bot.send_message(cid, note, parse_mode="HTML")
+                    except Exception: pass
+                return
+            # حالا که اتصال کامل شد، دعوت‌ها (و پیام «در حال اتصال») دیگه قابل استفاده نیستن
+            inv = await pool.fetch("SELECT chat_id,message_id FROM jagsal_invites WHERE session_id=$1", sid)
+            for x in inv:
+                try: await context.bot.delete_message(int(x["chat_id"]), int(x["message_id"]))
                 except Exception:
-                    log.exception("jagsal connect post failed in chat %s for session %s", cid, sid)
-            if posted_chats == 2:
-                await q.answer("اتصال برقرار شد؛ پیام شروع گفتگو در هر دو گروه ارسال شد.", show_alert=True)
-            elif posted_chats == 1:
-                await q.answer("اتصال ثبت شد، اما تلگرام ارسال کارت را در یکی از گروه‌ها نپذیرفت. ادمین بودن لازم نیست؛ ربات باید عضو گروه و مجاز به ارسال پیام باشد.", show_alert=True)
-            else:
-                await q.answer("تلگرام ارسال کارت اتصال را در هر دو گروه رد کرد. ربات ادمین لازم ندارد؛ فقط باید عضو گروه باشد و محدودیت ارسال پیام نداشته باشد.", show_alert=True)
+                    try: await context.bot.edit_message_reply_markup(int(x["chat_id"]), int(x["message_id"]), reply_markup=None)
+                    except Exception: pass
             return
         if parts[1] == "disconnect":
             sid=int(parts[2]); ses=await pool.fetchrow("SELECT * FROM jagsal_sessions WHERE session_id=$1",sid)
@@ -7806,7 +7931,9 @@ async def jagsal_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             hours=int(parts[3]); await _jagsal_ban_report(context.bot,report,uid,hours)
             await q.answer(f"کاربر {hours} ساعت محروم شد."); await q.edit_message_reply_markup(reply_markup=None); return
     except Exception:
-        log.exception("jagsal callback failed"); await q.answer("خطا در انجام عملیات.",show_alert=True)
+        log.exception("jagsal callback failed")
+        try: await q.answer("خطا در انجام عملیات.",show_alert=True)
+        except Exception: pass
 
 async def _jagsal_ban_report(bot, report, reviewer: int, hours: float):
     hours=max(0.1,min(float(hours),720)); until=time.time()+hours*3600; uid=int(report["reported_id"])
