@@ -7517,9 +7517,20 @@ JAGSAL_CONNECT_TEXT = (
 )
 
 async def _jagsal_photo(bot, chat_id, caption, reply_markup=None):
-    raw = base64.b64decode(JAGSAL_IMAGE_B64)
-    bio = BytesIO(raw); bio.name = "jagsal.jpg"
-    return await bot.send_photo(chat_id, bio, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+    """ارسال کارت جقصل؛ اگر ارسال عکس در گروه ممکن نبود، پیام متنی جایگزین می‌فرستد."""
+    try:
+        raw = base64.b64decode(JAGSAL_IMAGE_B64)
+        bio = BytesIO(raw); bio.name = "jagsal.jpg"
+        return await bot.send_photo(chat_id, bio, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+    except Exception:
+        log.warning("jagsal photo send failed in %s; falling back to text", chat_id, exc_info=True)
+        try:
+            return await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=reply_markup)
+        except Exception:
+            # حتی اگر HTML یا ایموجی ویژه مشکل داشت، اصل پیام و دکمه از دست نرود.
+            plain = re.sub(r"<[^>]*>", "", caption)
+            plain = html.unescape(plain)
+            return await bot.send_message(chat_id, plain, reply_markup=reply_markup)
 
 async def _jagsal_group_active(chat_id: int) -> bool:
     return bool(await pool.fetchval(
@@ -7575,8 +7586,8 @@ async def jagsal_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 "INSERT INTO jagsal_sessions(source_chat,source_user,status,created_at) VALUES($1,$2,'waiting',$3) RETURNING session_id",
                 msg.chat_id, user.id, time.time())
     await msg.reply_text('<b>دارم شما رو به اولین گپی که در رو باز کنه متصل می‌کنم <tg-emoji emoji-id="5379684045636511609">🔗</tg-emoji></b>', parse_mode="HTML")
-    chats = list(KNOWN_CHATS)
-    if msg.chat_id not in chats: chats.append(msg.chat_id)
+    # دعوت فقط برای گروه‌های دیگر ارسال شود؛ گروه درخواست‌دهنده نباید دکمهٔ پذیرش خودش را ببیند.
+    chats = list(dict.fromkeys(int(cid) for cid in KNOWN_CHATS if int(cid) != int(msg.chat_id)))
     for cid in chats:
         await _jagsal_invite(context.bot, cid, int(sid))
     return True
@@ -7704,16 +7715,31 @@ async def jagsal_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     try: await context.bot.edit_message_reply_markup(int(x["chat_id"]),int(x["message_id"]),reply_markup=None)
                     except Exception: pass
-            for cid in (int(ses["source_chat"]),int(ses["target_chat"])):
+            posted_chats = 0
+            for cid in (int(ses["source_chat"]), int(ses["target_chat"])):
                 try:
-                    m=await _jagsal_photo(context.bot,cid,JAGSAL_CONNECT_TEXT,InlineKeyboardMarkup([[btn("قطع ارتباط", "danger", icon="5202172377277935933", callback_data=f"jgs:disconnect:{sid}"), btn("گزارش", "secondary", icon="5447644880824181073", callback_data=f"jgs:sessionreport:{sid}")]]))
-                    await pool.execute("INSERT INTO jagsal_posts(session_id,chat_id,message_id) VALUES($1,$2,$3) ON CONFLICT(session_id,chat_id) DO UPDATE SET message_id=EXCLUDED.message_id",sid,cid,m.message_id)
+                    kb = InlineKeyboardMarkup([[btn("قطع ارتباط", "danger", icon="5202172377277935933", callback_data=f"jgs:disconnect:{sid}"), btn("گزارش", "secondary", icon="5447644880824181073", callback_data=f"jgs:sessionreport:{sid}")]])
+                    m = await _jagsal_photo(context.bot, cid, JAGSAL_CONNECT_TEXT, kb)
+                    await pool.execute(
+                        "INSERT INTO jagsal_posts(session_id,chat_id,message_id) VALUES($1,$2,$3) "
+                        "ON CONFLICT(session_id,chat_id) DO UPDATE SET message_id=EXCLUDED.message_id",
+                        sid, cid, m.message_id)
+                    posted_chats += 1
                     try:
-                        me=await context.bot.get_chat_member(cid,context.bot.id)
-                        if str(me.status)=="administrator": await context.bot.pin_chat_message(cid,m.message_id,disable_notification=True)
-                    except Exception: pass
-                except Exception: log.warning("jagsal connect post failed",exc_info=True)
-            await q.answer("اتصال برقرار شد!",show_alert=True); return
+                        me = await context.bot.get_chat_member(cid, context.bot.id)
+                        if str(me.status) == "administrator":
+                            await context.bot.pin_chat_message(cid, m.message_id, disable_notification=True)
+                    except Exception:
+                        log.info("jagsal connect post could not be pinned in %s", cid, exc_info=True)
+                except Exception:
+                    log.exception("jagsal connect post failed in chat %s for session %s", cid, sid)
+            if posted_chats == 2:
+                await q.answer("اتصال برقرار شد؛ پیام شروع گفتگو در هر دو گروه ارسال شد.", show_alert=True)
+            elif posted_chats == 1:
+                await q.answer("اتصال برقرار شد، اما ارسال پیام در یکی از گروه‌ها ناموفق بود؛ دسترسی ربات را بررسی کنید.", show_alert=True)
+            else:
+                await q.answer("اتصال ثبت شد اما ارسال پیام در هر دو گروه ناموفق بود؛ ربات باید اجازه ارسال پیام داشته باشد.", show_alert=True)
+            return
         if parts[1] == "disconnect":
             sid=int(parts[2]); ses=await pool.fetchrow("SELECT * FROM jagsal_sessions WHERE session_id=$1",sid)
             if not ses or ses["status"]!="connected": await q.answer("این ارتباط فعال نیست.",show_alert=True); return
