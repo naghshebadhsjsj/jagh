@@ -987,9 +987,21 @@ async function api(path,body){
   const o={headers:HDR()};
   if(body!==undefined){o.method='POST';o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
   const r=await fetch(path,o);let j=null;try{j=await r.json()}catch(e){}
+  if(r.status===403&&j&&j.blocked){showBlock(j);throw new Error(j.error)}
   if(r.status===403)throw new Error((j&&j.error)||'نشست معتبر نیست؛ مینی‌اپ را از دکمه داخل ربات باز کن.');
   if(!r.ok)throw new Error((j&&j.error)||('خطای سرور ('+r.status+')'));
   return j;
+}
+function showBlock(j){
+  if(document.getElementById('blockov'))return;
+  const ov=h('div',{id:'blockov',style:'position:fixed;inset:0;z-index:400;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center'},
+    h('div',{style:'font-size:54px'},j.blocked==='ban'?'🚫':'📢'),
+    h('div',{style:'font-size:16px;font-weight:700;line-height:1.9;max-width:340px'},j.error));
+  if(j.blocked==='join'){
+    (j.channels||[]).forEach(ch=>ov.append(h('button',{class:'btn',style:'width:100%;max-width:320px',onclick:()=>openLink('https://t.me/'+String(ch).replace(/^@/,''))},'📢 عضویت در '+ch)));
+    ov.append(h('button',{class:'btn',style:'width:100%;max-width:320px;background:#2ea043;color:#fff',onclick:()=>location.reload()},'✅ عضو شدم'));
+  }
+  document.body.append(ov);
 }
 /* عکس‌ها (آواتار و مدیا) با هدر احراز هویت میان؛ صف ۶تایی، آخرین درخواست اول (چیزی که الان دیده میشه) */
 const BL=new Map(),BQ=[];let BA=0;
@@ -2659,7 +2671,7 @@ function GamesScreen(){
   box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),grid);
  }
  function play(k){clearInterval(cdT);
-  if(k==='crash')crash(); else if(k==='mines')mines();
+  if(k==='crash'){if(!window.IS_STAFF){toast('این بخش غیرفعال شده',1);return}crash()} else if(k==='mines')mines();
   else if(k==='poison'||k==='carrom'){
     const sc=SocialScreen({games:k});
     sc.style.cssText='position:relative;inset:auto;display:block;background:transparent;min-height:60vh';
@@ -3236,6 +3248,7 @@ async function bootTabs(){
  const rm=k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove();
  let m=null;
  try{m=await api('/api/social/me')}catch(e){}
+ window.IS_STAFF=!!(m&&m.is_support);
  if(!m||!m.is_support){
   /* کاربر عادی فقط: چت‌روم، فروشگاه، بازی‌ها و خودم */
   ['chats','users','panel'].forEach(rm);
@@ -5897,6 +5910,9 @@ _POST = {
 }
 
 
+_JOIN_OK: dict = {}   # آیدی کاربر → تا کی عضویتش تایید شده (کش ۲ دقیقه‌ای؛ نتیجه‌ی منفی کش نمیشه)
+
+
 async def _web_route(method: str, path: str, qs: dict, headers: dict, body: bytes):
     """(status, content-type, body bytes, extra headers)"""
     if path in ("/", "/index.html"):
@@ -5908,8 +5924,23 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     user = _verify_init_data(headers.get("x-init-data", ""))
     if user is None:
         return _j({"error": "نشست تلگرام معتبر نیست؛ مینی‌اپ را از داخل تلگرام باز کن"}, 403)
+    # محروم‌ها و کسایی که عضو کانال‌های اجباری نیستن نباید از مینی‌اپ استفاده کنن (مالک‌ها و پشتیبان‌ها معاف)
+    _gid = int(user["id"])
+    if _gid not in ADMIN_IDS and _gid not in OWNER_IDS:
+        _bu = BANNED.get(_gid, 0)
+        if _bu > time.time():
+            return _j({"error": f"🚫 تو از ربات سکوت زده شدی ({_ban_until_txt(_bu)}) و اینجا دنبال چی می‌گردی؟ 😏 تا وقتی محرومی به مینی‌اپ دسترسی نداری.",
+                       "blocked": "ban"}, 403)
+        if BOT_REF is not None and _JOIN_OK.get(_gid, 0) < time.time():
+            _miss = await missing_channels(BOT_REF, _gid)
+            if _miss:
+                return _j({"error": "برای استفاده از مینی‌اپ باید اول توی کانال‌های اجباری عضو بشی.",
+                           "blocked": "join", "channels": _miss}, 403)
+            _JOIN_OK[_gid] = time.time() + 120
     social = path.startswith("/api/social/")
-    game = path.startswith("/api/game/")   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
+    game = path.startswith("/api/game/")
+    if path.startswith("/api/game/crash/") and int(user["id"]) not in ADMIN_IDS and int(user["id"]) not in OWNER_IDS:
+        return _j({"error": "این بخش غیرفعال شده"}, 403)   # بازی انفجار/موشک فقط برای مالک و پشتیبان   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
     # عکس پروفایل کاربرها (نه گروه‌ها) برای همه‌ی کاربرهای مینی‌اپ بازه؛ بدونش آواتارِ بقیه هیچ‌وقت نمی‌اومد
@@ -8847,9 +8878,24 @@ def _pm_group_only_text(text: str) -> bool:
     return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
 
 
+async def purchase_cancel_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """نوشتن «لغو/انصراف» وسط خرید (گیفت یا پول بازی) خرید رو لغو می‌کنه."""
+    msg = update.effective_message
+    t = ((msg.text or "") if msg else "").replace("\u200c", "").replace(" ", "").strip()
+    if t not in ("لغو", "انصراف", "لغوخرید", "انصرافازخرید"):
+        return False
+    if context.user_data.pop("gift_order", None) is not None:
+        await msg.reply_text(B("❌ خرید گیفت لغو شد."), parse_mode="HTML"); return True
+    if context.user_data.pop("buy_wait", None) is not None:
+        await msg.reply_text(B("❌ خرید پول بازی لغو شد."), parse_mode="HTML"); return True
+    return False
+
+
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تو پی‌وی ربات هم «خودم» کار می‌کنه."""
     msg = update.effective_message
+    if await purchase_cancel_text(update, context):
+        return
     if await jagsal_private_custom(update, context):
         return
     if await support_add_input(update, context):
@@ -16077,8 +16123,8 @@ async def buy_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_html(q, text, kb)
     elif act == "cancel":
         context.user_data.pop("buy_wait", None)
-        text, kb = buy_menu_view()
-        await edit_html(q, text, kb)
+        await edit_html(q, B("❌ خرید پول بازی لغو شد."),
+                        InlineKeyboardMarkup([[btn("برگشت به خرید", "primary", icon=EID_BACK, callback_data="bu:menu")]]))
     elif act == "pk":
         try:
             i = int(parts[2])
@@ -16309,11 +16355,11 @@ async def gift_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         data["gift_text"] = ""
         data["stage"] = "recipient"
-        await edit_html(q, "👤 حالا <b>یوزرنیم گیرنده</b> رو بفرست (با @ یا بدون @).")
+        await edit_html(q, "👤 حالا <b>یوزرنیم گیرنده</b> رو بفرست (با @ یا بدون @).", InlineKeyboardMarkup([[btn("❌ انصراف از خرید", "danger", callback_data="gft:cancel")]]))
     elif action == "cancel":
         await q.answer()
         context.user_data.pop("gift_order", None)
-        await edit_html(q, "سفارش لغو شد. هر زمان خواستی دوباره از منو اقدام کن.",
+        await edit_html(q, "❌ خرید گیفت لغو شد. هر زمان خواستی دوباره از منو اقدام کن.",
                         InlineKeyboardMarkup([[btn("رفتن به خرید گیفت", "success", callback_data="gft:home")]]))
 
 
@@ -16344,7 +16390,7 @@ async def gift_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return True
         data["gift_text"] = value
         data["stage"] = "recipient"
-        await msg.reply_text("👤 حالا یوزرنیم گیرنده رو بفرست (با @ یا بدون @).")
+        await msg.reply_text("👤 حالا یوزرنیم گیرنده رو بفرست (با @ یا بدون @).", reply_markup=InlineKeyboardMarkup([[btn("❌ انصراف از خرید", "danger", callback_data="gft:cancel")]]))
         return True
     if stage == "recipient":
         username = msg.text.strip().replace("https://t.me/", "").lstrip("@")
@@ -16356,7 +16402,7 @@ async def gift_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await msg.reply_text(f"💳 مبلغ سفارش: {data['price']:,} تومان\n"
                              f"شماره کارت: <code>{GIFT_CARD}</code>\n\n"
                              "بعد از پرداخت، <b>عکس رسید بانکی</b> رو همینجا ارسال کن.",
-                             parse_mode="HTML")
+                             parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[btn("❌ انصراف از خرید", "danger", callback_data="gft:cancel")]]))
         return True
     return False
 
