@@ -628,6 +628,11 @@ async def init_db(app: Application):
             chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, PRIMARY KEY(session_id, chat_id)
         )""")
         await c.execute("CREATE TABLE IF NOT EXISTS jagsal_dest_msgs (chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, session_id BIGINT NOT NULL, PRIMARY KEY(chat_id,message_id))")
+        await c.execute("ALTER TABLE jagsal_dest_msgs ADD COLUMN IF NOT EXISTS origin_chat BIGINT, ADD COLUMN IF NOT EXISTS origin_message BIGINT")
+        await c.execute("ALTER TABLE room_poison_games ADD COLUMN IF NOT EXISTS silent BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE room_carrom_games ADD COLUMN IF NOT EXISTS silent BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("CREATE TABLE IF NOT EXISTS room_game_chat (id BIGSERIAL PRIMARY KEY, kind TEXT NOT NULL, game_id BIGINT NOT NULL, user_id BIGINT NOT NULL, text TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE INDEX IF NOT EXISTS room_game_chat_idx ON room_game_chat(kind, game_id, id)")
         await c.execute("""CREATE TABLE IF NOT EXISTS jagsal_relays (
             relay_id BIGSERIAL PRIMARY KEY, session_id BIGINT NOT NULL REFERENCES jagsal_sessions(session_id) ON DELETE CASCADE,
             source_chat BIGINT NOT NULL, source_message BIGINT NOT NULL, source_user BIGINT NOT NULL,
@@ -814,7 +819,7 @@ textarea.inp{min-height:130px;resize:vertical}
 .sg-sk{margin:12px;border-radius:22px;background:var(--sec);overflow:hidden;height:300px;position:relative}
 .sg-gate{text-align:center;padding:44px 22px}.sg-gi{font-size:56px}.sg-gate h3{margin:8px 0 4px}.sg-gate p{color:var(--hint);font-size:13.5px;margin:0 0 6px}
 .sg-flex{display:flex;flex-direction:column;overflow:hidden}
-.sroom{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--sec)}.sidentity{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:0;margin:0 0 7px;color:inherit;text-align:right;cursor:pointer}.sidentity .av{flex:none;border-radius:50%;overflow:hidden}.smsg.premium-msg{background:linear-gradient(135deg,rgba(255,205,92,.22),rgba(255,241,190,.13));border:1px solid rgba(245,190,70,.55);border-radius:22px;box-shadow:0 0 16px rgba(245,190,70,.14)}.smsg.premium-msg .tx{border-radius:18px}.premium-name{color:#f3bd4d!important;text-shadow:0 0 9px rgba(255,196,74,.42);font-weight:800}.premium-mark{display:inline-block;margin-inline-start:5px;padding:2px 6px;border-radius:9px;background:linear-gradient(120deg,#9b6b18,#ffe7a0,#b47a1b);color:#281a00;font-size:9px;font-weight:900;text-shadow:none}.premium-ring{border-radius:50%;padding:4px;background:conic-gradient(#ffdf86,#9b6819,#fff1ba,#c48c2b,#ffdf86);box-shadow:0 0 14px rgba(245,190,70,.55)}.sg-premium-state{margin-top:12px;padding:12px;border-radius:14px;background:linear-gradient(120deg,#9b6b18,#f8dfa0,#a8751e);color:#241800;font-weight:900;text-align:center}.smsg{position:relative;max-width:85%;margin:8px 0;padding:10px 13px 7px;border-radius:21px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y;overflow-wrap:anywhere}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13);border-end-end-radius:8px}.smsg:not(.mine){border-end-start-radius:8px}.smsg .sub{font-size:12px;margin-bottom:4px}.smeta{display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:5px;min-height:16px;color:var(--hint);font-size:10.5px;line-height:1}.smeta .ticks{font-size:14px;letter-spacing:-4px;padding-inline-end:3px;color:var(--hint)}.smeta .ticks.seen{color:#28a9e0}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0;border-radius:24px;min-height:42px}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
+.sroom{flex:1;min-height:0;overflow:auto;padding:10px;background:var(--sec)}.sidentity{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:0;margin:0 0 7px;color:inherit;text-align:right;cursor:pointer}.sidentity .av{flex:none;border-radius:50%;overflow:hidden}.smsg.premium-msg{background:linear-gradient(135deg,rgba(255,205,92,.22),rgba(255,241,190,.13));border:1px solid rgba(245,190,70,.55);border-radius:22px;box-shadow:0 0 16px rgba(245,190,70,.14)}.smsg.premium-msg .tx{border-radius:18px}.premium-name{color:#f3bd4d!important;text-shadow:0 0 9px rgba(255,196,74,.42);font-weight:800}.premium-mark{display:inline-block;margin-inline-start:5px;padding:2px 6px;border-radius:9px;background:linear-gradient(120deg,#9b6b18,#ffe7a0,#b47a1b);color:#281a00;font-size:9px;font-weight:900;text-shadow:none}.premium-ring{border-radius:50%;padding:4px;display:inline-flex;flex:none;background:linear-gradient(135deg,#00f0ff,#7b2ff7 50%,#ff2bd6);animation:neonPulse 2.4s ease-in-out infinite}.sg-premium-state{margin-top:12px;padding:12px;border-radius:14px;background:linear-gradient(120deg,#9b6b18,#f8dfa0,#a8751e);color:#241800;font-weight:900;text-align:center}.smsg{position:relative;max-width:85%;margin:8px 0;padding:10px 13px 7px;border-radius:21px;background:var(--bg);box-shadow:0 1px 2px #0001;touch-action:pan-y;overflow-wrap:anywhere}.smsg.mine{margin-inline-start:auto;background:rgba(177,43,213,.13);border-end-end-radius:8px}.smsg:not(.mine){border-end-start-radius:8px}.smsg .sub{font-size:12px;margin-bottom:4px}.smeta{display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:5px;min-height:16px;color:var(--hint);font-size:10.5px;line-height:1}.smeta .ticks{font-size:14px;letter-spacing:-4px;padding-inline-end:3px;color:var(--hint)}.smeta .ticks.seen{color:#28a9e0}.sreply{border-inline-start:3px solid #b12bd5;padding:3px 7px;margin-bottom:5px;font-size:12px;color:var(--hint)}.sreacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.sreacts button{border:1px solid var(--line);background:var(--sec);border-radius:14px;padding:2px 7px;font-size:12px}.scomposer{display:flex;gap:7px;padding:9px;background:var(--sec);align-items:center}.scomposer .inp{margin:0;min-width:0;border-radius:24px;min-height:42px}.sfile{display:none}.snotice{margin:12px;padding:12px;border-radius:14px;background:var(--sec);font-size:13px;color:var(--hint)}
 .av{border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;overflow:hidden;user-select:none}
 .av img{width:100%;height:100%;object-fit:cover;display:block}
 /* گپ‌ها / کاربران */
@@ -1455,8 +1460,21 @@ function sgAvatar(p,size){
   return d;
 }
 const sgSkel=()=>h('div',{class:'sg-sk'},h('div',{class:'sg-shim'}));
-function SocialScreen(){
-  let me=null,section='room',profile=null,roomTimer=null,roomAfter=0,reply=null,roomBusy=false,roomReadAck=0,stripBox=null;
+function SocialScreen(opts){
+  const GM=(opts&&opts.games)||null;   // 'poison' | 'carrom' → نمای بازی‌ها (بدون چت)
+  let me=null,section='room',profile=null,roomTimer=null,roomAfter=0,reply=null,roomBusy=false,roomReadAck=0,stripBox=null,onSub=null,meBusy=false,meTimer=null;
+  async function refreshMe(){
+    if(meBusy||document.hidden||!me)return;meBusy=true;
+    try{
+      const n=await api('/api/social/me'),was=!!me.subscription_active,now=!!n.subscription_active;
+      me=n;profile=n.profile||profile;
+      if(was!==now){
+        toast(now?'💎 اشتراک ویژه فعال شد؛ همه امکانات باز شد!':'اشتراک ویژه تموم شد',now?0:1);
+        if(section==='profile')renderSection();else if(onSub)onSub();
+      }
+    }catch(e){}
+    meBusy=false;
+  }
   const root=h('div',{class:'scr sg'}),body=h('div',{class:'scroll'});
   const head=h('div',{class:'sg-top'},
     h('div',{class:'sg-logo'},h('div',{class:'sg-cam'},'📸'),h('div',{},h('div',{class:'sg-brand'},'جقستگرام'),h('div',{class:'sg-tag'},'بساز، ببین، لایک کن و کامنت بذار'))),
@@ -1695,9 +1713,9 @@ function SocialScreen(){
     const st=d.stats||{};
     const stat=(n,l)=>h('div',{class:'sg-stat'},h('b',{},num(n)),h('span',{},l));
     box.append(h('div',{class:'sg-hero'},h('div',{class:'sg-cover'}),h('div',{class:'sg-pav'+(d.premium?' premium-ring':'')},sgAvatar(pr,88)),
-      h('div',{class:'sg-pn'+(d.premium?' premium-name':'')},pr.display_name,d.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null),h('div',{class:'sub ltr'},'@'+pr.username),
-      pr.bio?h('div',{class:'sg-bio',dir:'auto'},pr.bio):null,
-      h('div',{class:'sg-stats'},stat(st.following||0,'دنبال‌شده'),stat(st.followers||0,'دنبال‌کننده'),stat(d.profile_likes||0,'پسند حساب'))));
+      h('div',{class:'sg-pn'+(d.premium?' premium-name':'')},pr.display_name,d.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null),isMe?h('div',{class:'sub ltr'},'@'+pr.username):null,
+      (isMe&&pr.bio)?h('div',{class:'sg-bio',dir:'auto'},pr.bio):null,
+      h('div',{class:'sg-stats'},stat(st.following||0,'دنبال‌شده'),stat(st.followers||0,'دنبال‌کننده'),stat(d.profile_likes||0,'لایک‌کننده'))));
     if(!isMe){
       const follow=h('button',{class:'btn sg-go',onclick:async()=>{follow.disabled=true;try{const r=await api('/api/social/follow',{user_id:Number(pr.user_id)});follow.textContent=r.active?'دنبال می‌کنی ✓':'دنبال کردن';}catch(e){toast(e.message,1)}finally{follow.disabled=false}}},d.following?'دنبال می‌کنی ✓':'دنبال کردن');
       const like=h('button',{class:'btn s gh',style:'margin-top:8px;width:100%;background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff;border:0',onclick:async()=>{like.disabled=true;try{const r=await api('/api/social/profile/like',{user_id:Number(pr.user_id)});like.textContent=(r.active?'♥ پسندیدی':'✦ پسندیدن')+' · '+num(r.count); }catch(e){toast(e.message,1)}finally{like.disabled=false}}},(d.liked?'♥ پسندیدی':'✦ پسندیدن')+' · '+num(d.profile_likes||0));
@@ -1723,7 +1741,7 @@ function SocialScreen(){
   }
   function openUser(uid){if(uid===me.id&&profile){section='profile';drawNav();renderSection();return}push(UserScreen(uid))}
   async function renderRoom(){
-    clearInterval(roomTimer);roomTimer=null;roomAfter=0;body.classList.add('sg-flex');
+    clearInterval(roomTimer);roomTimer=null;roomAfter=0;if(!GM)body.classList.add('sg-flex');
     body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری چت‌روم…'));
     const msgs=h('div',{class:'sroom'}),composer=h('div',{class:'scomposer'}),send=h('button',{class:'btn s',style:'background:#b12bd5',onclick:()=>sendMsg()},'ارسال');
     const inp=h('div',{class:'cinp',contenteditable:'true',role:'textbox','data-ph':'پیامت رو بنویس…',dir:'auto'});
@@ -1828,7 +1846,7 @@ function SocialScreen(){
         const go=h('button',{class:'btn',style:'width:100%;margin-top:10px;background:#b12bd5',onclick:async()=>{
           const bet=Math.floor(Number(amt.value));if(!(bet>0)){toast('مبلغ شرط رو وارد کن',1);return}
           go.disabled=true;
-          const r=await poisonCall('/api/social/room/poison/create',{bet},'بازی ساخته شد؛ منتظر حریف…');
+          const r=await poisonCall('/api/social/room/poison/create',{bet,silent:!!GM},'بازی ساخته شد؛ منتظر حریف…');
           go.disabled=false;if(r)close();
         }},'ساخت بازی و انتظار برای حریف');
         const chips=h('div',{class:'chips'},[10000,50000,100000,500000,1000000].map(v=>h('button',{class:'chip',onclick:()=>{amt.value=v}},num(v))));
@@ -1862,6 +1880,40 @@ function SocialScreen(){
           if(!b){b=h('button',{class:'btn s gh','data-cancel-game':'1',style:'width:100%;margin-top:7px',onclick:async()=>{if(await ask('این میز لغو بشه و مبلغ شرط به حسابت برگرده؟'))poisonCall('/api/social/room/poison/cancel',{game_id:id},'میز لغو شد و شرط برگشت')}},'لغو میز');node.append(b)}
         }else if(b)b.remove();
       });
+    }
+    const gcCache={};
+    function gameChat(kind,g,dark){
+      const key=kind+':'+g.id;let c=gcCache[key];
+      if(!c){
+        const list=h('div',{class:'gc-list'}),inp=h('input',{class:'gc-inp',type:'text',maxlength:'200',autocomplete:'off',placeholder:'پیام برای حریف…'});
+        const sendB=h('button',{class:'gc-send',type:'button'},'ارسال'),note=h('div',{class:'gc-note'});
+        const node=h('div',{class:'gc'+(dark?' dark':'')},list,note,h('div',{class:'gc-row'},inp,sendB));
+        c={node,list,inp,sendB,note,after:0,busy:false,timer:null,miss:0,can:false};
+        const add=m=>{list.append(h('div',{class:'gc-m'+(m.user_id===me.id?' mine':'')+(m.prem?' prem':'')},h('b',{},m.name+': '),document.createTextNode(m.text)));while(list.children.length>40)list.firstChild.remove();list.scrollTop=list.scrollHeight};
+        const sync=()=>{
+          c.can=!!(g.me&&me.game_chat);
+          c.inp.disabled=!c.can;c.sendB.disabled=!c.can;
+          c.note.textContent=!g.me?'👀 تماشاگرها فقط چت بازیکن‌ها رو می‌بینن':(me.game_chat?'':'💎 چت هنگام بازی فقط با اشتراک ویژه فعاله');
+          c.note.style.display=c.note.textContent?'':'none';
+        };
+        c.sync=sync;
+        const poll=async()=>{
+          if(c.busy)return;
+          if(!node.isConnected){if(++c.miss>3){clearInterval(c.timer);delete gcCache[key]}return}
+          c.miss=0;c.busy=true;
+          try{const r=await api('/api/social/room/gamechat?kind='+kind+'&game_id='+g.id+'&after='+c.after);(r.messages||[]).forEach(m=>{add(m);c.after=Math.max(c.after,m.id)})}catch(e){}
+          c.busy=false;sync();
+        };
+        const send=async()=>{
+          const t=inp.value.trim();if(!t||sendB.disabled)return;sendB.disabled=true;
+          try{await api('/api/social/room/gamechat/send',{kind,game_id:g.id,text:t});inp.value='';c.busy=false;await poll()}catch(e){toast(e.message,1)}
+          sendB.disabled=!c.can;
+        };
+        sendB.onclick=send;inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send()}});
+        c.timer=setInterval(poll,1500);setTimeout(poll,60);gcCache[key]=c;
+      }
+      c.sync();
+      return c.node;
     }
     function poisonCard(g){
       const mine=g.me,iAmCreator=g.creator===me.id,done=g.phase==='done';
@@ -1908,7 +1960,7 @@ function SocialScreen(){
         };
         grid.append(b);
       }
-      card.append(grid);return card;
+      card.append(grid);if(g.phase!=='lobby'&&g.phase!=='done')card.append(gameChat('poison',g));return card;
     }
     function drawPoison(){
       const gs=(pg&&pg.games)||[];
@@ -1953,7 +2005,7 @@ function SocialScreen(){
         const go=h('button',{class:'btn',style:'width:100%;margin-top:10px;background:#15803d',onclick:async()=>{
           const bet=Math.floor(Number(amt.value));if(!(bet>0)){toast('مبلغ شرط رو وارد کن',1);return}
           go.disabled=true;
-          const r=await carromCall('/api/social/room/carrom/create',{bet},'بازی ساخته شد؛ منتظر حریف…');
+          const r=await carromCall('/api/social/room/carrom/create',{bet,silent:!!GM},'بازی ساخته شد؛ منتظر حریف…');
           go.disabled=false;if(r)close();
         }},'ساخت بازی و انتظار برای حریف');
         const chips=h('div',{class:'chips'},[10000,50000,100000,500000,1000000].map(v=>h('button',{class:'chip',onclick:()=>{amt.value=v}},num(v))));
@@ -2058,6 +2110,7 @@ function SocialScreen(){
         h('div',{class:'cov-bar'},barI),tEl,statusEl,lastEl,
         h('div',{class:'cov-board'},cvs),
         spectate?h('div',{class:'cov-s'},'👀 داری تماشا می‌کنی'):sl,
+        gameChat('carrom',g0,true),
         resBox);
       document.body.append(ov);cOv=ov;
       const midPot=ov.querySelector('.cov-pn');
@@ -2146,8 +2199,8 @@ function SocialScreen(){
         let g1;
         if(id===0){g1=c.createRadialGradient(b.x-8,b.y-8,2,b.x,b.y,r);g1.addColorStop(0,V.overlap?'#ff7a7a':'#b6425a');g1.addColorStop(1,V.overlap?'#a11':'#5c1022')}
         else if(id===1){g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);g1.addColorStop(0,'#fb7185');g1.addColorStop(1,'#be123c')}
-        else if(id<=10){g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);g1.addColorStop(0,'#fffdf5');g1.addColorStop(1,'#e3cf9f')}
-        else{g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);g1.addColorStop(0,'#6b6b6b');g1.addColorStop(1,'#151515')}
+        else if(id<=10){g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);if(V.g.creator_prem){g1.addColorStop(0,'#d9fbff');g1.addColorStop(.55,'#27d3ee');g1.addColorStop(1,'#0a6f8f')}else{g1.addColorStop(0,'#fffdf5');g1.addColorStop(1,'#e3cf9f')}}
+        else{g1=c.createRadialGradient(b.x-6,b.y-6,2,b.x,b.y,r);if(V.g.opponent_prem){g1.addColorStop(0,'#ffd6f3');g1.addColorStop(.55,'#f43fb5');g1.addColorStop(1,'#7a0b57')}else{g1.addColorStop(0,'#6b6b6b');g1.addColorStop(1,'#151515')}}
         c.fillStyle=g1;c.beginPath();c.arc(b.x,b.y,r,0,7);c.fill();
         c.shadowColor='transparent';
         c.strokeStyle=id===0?'#e8b84a':(id===1?'#7f0d2b':(id<=10?'#a8895a':'#000'));c.lineWidth=2.5*b.s;
@@ -2268,7 +2321,7 @@ function SocialScreen(){
     }
     const premium=h('button',{class:'ib',title:'ایموجی پرمیوم و بازی',onmousedown:e=>e.preventDefault(),onclick:()=>{
       sheet('💎 منو',close=>h('div',{},
-        sact('⭐ ایموجی پرمیوم',()=>{close();togglePanel()}),
+        sact('⭐ ایموجی پرمیوم',()=>{close();if(!me.premium_emoji){toast('ارسال ایموجی پرمیوم فقط با اشتراک ویژه فعاله',1);return}togglePanel()}),
         sact('☠️ بازی سم یا خوراکی',()=>{close();poisonCreateSheet()}),
         sact('🎯 بازی خط و نشان',()=>{close();const mg=cg.find(x=>x.me&&x.phase==='play');if(mg){cDismiss[mg.id]=false;openCarrom(mg.id)}else carromCreateSheet()})));
     }},'💎');
@@ -2276,9 +2329,9 @@ function SocialScreen(){
     function setReply(m,name){reply=m;replyBar.classList.remove('hid');replyBar.textContent='پاسخ به '+name+': '+oneLine(plain(m.text),60)+'  ✕';replyBar.onclick=()=>{reply=null;replyBar.classList.add('hid')}}
     function renderMessage(m){
       const name=m.display_name||m.username||m.uname||String(m.user_id);
-      const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')+(m.premium?' premium-msg':'')});
+      const node=h('div',{class:'smsg'+(m.user_id===me.id?' mine':'')+(m.premium?' premium-msg pill':'')});
       const isBot=!!m.is_bot;
-      const identity=h('button',{class:'sidentity'+(isBot?' botid':''),type:'button',onclick:()=>{if(!isBot)openUser(Number(m.user_id))}},avatar('user',m.user_id,name,34),h('span',{class:'sub'+(m.premium?' premium-name':'')},name,m.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null,isBot&&m.name_ce?ceImg(m.name_ce,'bn'):null,isBot?h('span',{class:'bbadge'},'ربات'):null));
+      const identity=h('button',{class:'sidentity'+(isBot?' botid':''),type:'button',onclick:()=>{if(!isBot)openUser(Number(m.user_id))}},(m.premium?h('span',{class:'premium-ring sm'},avatar('user',m.user_id,name,34)):avatar('user',m.user_id,name,34)),h('span',{class:'sub'+(m.premium?' premium-name':'')},name,m.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null,isBot&&m.name_ce?ceImg(m.name_ce,'bn'):null,isBot?h('span',{class:'bbadge'},'ربات'):null));
       node.append(identity);
       if(m.reply_to)node.append(h('div',{class:'sreply'},(m.reply_name?m.reply_name+' • ':'')+(m.reply_text?plain(m.reply_text):'پاسخ به پیام')));
       const gm=/\{game:(\d+)\}/.exec(m.text||''),cm=/\{carrom:(\d+)\}/.exec(m.text||'');
@@ -2300,7 +2353,7 @@ function SocialScreen(){
       return node;
     }
     async function loadRoom(force){
-      if(roomBusy)return;roomBusy=true;
+      if(GM||roomBusy)return;roomBusy=true;
       try{
         const arr=await api('/api/social/room?after='+(force?0:roomAfter));
         const sig=JSON.stringify(arr.map(m=>[m.message_id,m.reactions,m.read_count]));
@@ -2329,12 +2382,18 @@ function SocialScreen(){
       send.disabled=false;
     }
     inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
-    body.replaceChildren(cbox,gamebox,msgs,replyBar,composer,epanel);
-    await loadRoom(true);loadPoison();loadCarrom();let tick=0;
+    if(GM){
+      const kindBox=GM==='poison'?gamebox:cbox;cbox.style.maxHeight='none';
+      const gmBar=h('div',{class:'gm-bar'},h('div',{class:'gm-t'},GM==='poison'?'میزهای سم یا خوراکی':'میزهای خط و نشان'),
+        h('button',{class:'btn s gm-new',onclick:()=>GM==='poison'?poisonCreateSheet():carromCreateSheet()},'＋ ساخت میز'));
+      const gmNote=h('div',{class:'gm-note'},'الان میزی نیست؛ یکی بساز و همین‌جا منتظر حریف بمون. هر کسی از بخش بازی‌ها وارد بشه، بازی شروع می‌شه.');
+      body.replaceChildren(gmBar,kindBox,gmNote);
+    }else body.replaceChildren(cbox,gamebox,msgs,replyBar,composer,epanel);
+    await loadRoom(true);loadPoison();loadCarrom();let tick=0;onSub=()=>{if(!GM)loadRoom(true)};
     const requestedGame=window.__openRoomGame;window.__openRoomGame=null;
-    if(requestedGame==='poison')setTimeout(()=>poisonCreateSheet(),120);
+    if(GM){}else if(requestedGame==='poison')setTimeout(()=>poisonCreateSheet(),120);
     else if(requestedGame==='carrom')setTimeout(()=>carromCreateSheet(),120);
-    roomTimer=setInterval(()=>{tick++;loadPoison();loadCarrom();if(tick%2===0)loadRoom(false)},1800);
+    roomTimer=setInterval(()=>{if(GM&&root.offsetParent===null)return;tick++;loadPoison();loadCarrom();if(tick%2===0)loadRoom(false);if(tick%8===0)refreshMe()},1800);
     const rpClock=setInterval(()=>{
       if(!gamebox.isConnected){clearInterval(rpClock);return}
       gamebox.querySelectorAll('[data-dl]').forEach(e=>{const sec=Math.max(0,Math.ceil((Number(e.dataset.dl)-Date.now())/1000));e.textContent='⏱ '+num(sec)+'″'});
@@ -2343,8 +2402,8 @@ function SocialScreen(){
     root._destroy=()=>{clearInterval(roomTimer);roomTimer=null;clearInterval(rpClock);closeCarrom()};
   }
   async function renderSection(){
-    clearInterval(roomTimer);roomTimer=null;body.classList.remove('sg-flex');
-    body.classList.toggle('sg-flex',section==='room');
+    clearInterval(roomTimer);roomTimer=null;onSub=null;body.classList.remove('sg-flex');
+    body.classList.toggle('sg-flex',section==='room'&&!GM);
     fab.classList.add('hid');
     if(!me){body.replaceChildren(h('div',{class:'empty'},'در حال بارگذاری…'));return}
     try{
@@ -2355,7 +2414,10 @@ function SocialScreen(){
     }catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}
   }
   async function init(){try{me=await api('/api/social/me');profile=me.profile;drawNav();await renderSection()}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
-  root._show=()=>{if(!me)init()};root._destroy=()=>{clearInterval(roomTimer)};init();return root;
+  root._show=()=>{if(!me)init();else refreshMe()};root._destroy=()=>{clearInterval(roomTimer);clearInterval(meTimer)};
+  meTimer=setInterval(()=>{if(!root.isConnected){clearInterval(meTimer);return}refreshMe()},30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&root.isConnected)refreshMe()});
+  init();return root;
 }
 
 
@@ -2372,6 +2434,7 @@ const gameCss=document.createElement('style');gameCss.textContent=`
 .game-board{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:12px 0}
 .minecell{aspect-ratio:1;border:1px solid #ffffff20;border-radius:12px;background:#263a59;color:white;font-size:22px}
 .minecell.open{background:#17263e}
+.gm-bar{display:flex;align-items:center;gap:10px;margin:2px 0 12px}.gm-t{flex:1;font-weight:800;color:#fff}.gm-new{background:#b12bd5;color:#fff;border:0}.gm-note{text-align:center;padding:26px 10px;color:#aab9d0;font-size:13px}.rpg:not(.hid)~.gm-note{display:none}
 .games-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 10px 16px}.games-grid>.gcard{min-width:0;margin:0;padding:10px}.games-grid .gvisual{height:112px;margin-bottom:8px}.games-grid .gtitle{font-size:16px}.games-grid .gdesc{font-size:11.5px;min-height:52px}.games-grid .pb{padding:10px 6px}.rocket-mark{filter:drop-shadow(0 0 18px #25e8df)}
 .selfhero{display:flex;align-items:center;gap:14px}.selfhero img{width:94px;height:94px;object-fit:cover;border-radius:22px;border:2px solid #5d8dff}
 .rk-wrap{max-width:520px;margin:0 auto}.rk-wrap button{font-family:inherit}
@@ -2525,6 +2588,28 @@ button.swatch.on{border-color:#fff;box-shadow:0 0 0 3px #7c3aed}
 .car-part .cpn{display:flex;align-items:center;gap:6px}.car-part .cpmax{display:inline-flex}
 .gtitle.sm{font-size:15px;margin-top:14px}
 `;document.head.append(coolCss);
+const perkCss=document.createElement('style');perkCss.textContent=`
+@keyframes neonPulse{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes nameGlow{0%,100%{text-shadow:0 0 6px rgba(255,196,74,.35)}50%{text-shadow:0 0 14px rgba(255,214,120,.95),0 0 24px rgba(255,170,40,.55)}}
+.premium-ring,.sg-pav.premium-ring{background:linear-gradient(135deg,#00f0ff,#7b2ff7 50%,#ff2bd6);animation:none;box-shadow:none;position:relative}
+.premium-ring::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;box-shadow:0 0 8px #00f0ff,0 0 18px rgba(255,43,214,.6);opacity:.75;animation:neonPulse 2.4s ease-in-out infinite}
+.premium-ring.sm{padding:2px}.premium-ring.sm::after{animation:none;opacity:.9;box-shadow:0 0 6px #00f0ff,0 0 11px rgba(255,43,214,.5)}
+.premium-ring.sq{border-radius:28px}
+.premium-name{animation:none}.sg-pn.premium-name{animation:nameGlow 2.2s ease-in-out infinite}
+.smsg.premium-msg,.smsg.mine.premium-msg{background:linear-gradient(135deg,rgba(255,205,92,.30),rgba(255,241,190,.16)),var(--bg);border:1px solid rgba(245,190,70,.6);box-shadow:0 0 14px rgba(245,190,70,.16)}
+.smsg.pill,.smsg.mine.pill,.smsg:not(.mine).pill{border-radius:32px!important;padding-inline:20px}.smsg.pill .tx{border-radius:24px}
+.sub-on{margin:10px 0 2px;padding:11px;border-radius:14px;background:linear-gradient(120deg,#9b6b18,#f8dfa0,#a8751e);color:#241800;font-weight:900;text-align:center;line-height:1.8}
+.sub-off{margin:8px 0 2px;color:#ffffffaa;font-size:12.5px;text-align:center}
+.gc{margin-top:8px;border-radius:14px;background:var(--bg);padding:6px}.gc.dark{background:#0d1426;color:#fff;margin:6px 8px}
+.gc-list{max-height:92px;overflow-y:auto;font-size:12.5px;line-height:1.7;overflow-wrap:anywhere}
+.gc-m b{opacity:.85}.gc-m.mine b{color:#b12bd5}.gc-m.prem b{color:#f3bd4d}
+.gc-note{font-size:11px;color:var(--hint);padding:2px 4px}
+.gc-row{display:flex;gap:6px;margin-top:4px}
+.gc-inp{flex:1;min-width:0;border:1px solid var(--line);border-radius:18px;padding:7px 11px;background:var(--sec);color:inherit;font-size:13px}
+.gc.dark .gc-inp{background:#1a2440;border-color:rgba(255,255,255,.14);color:#fff}
+.gc-send{border:0;border-radius:18px;padding:0 14px;background:#b12bd5;color:#fff;font-weight:800}
+.gc-send:disabled,.gc-inp:disabled{opacity:.5}
+`;document.head.append(perkCss);
 function GamesScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
  let cdT=null;
@@ -2544,7 +2629,12 @@ function GamesScreen(){
  }
  function play(k){clearInterval(cdT);
   if(k==='crash')crash(); else if(k==='mines')mines();
-  else if(k==='poison'||k==='carrom'){window.__openRoomGame=k;openTab('room')}
+  else if(k==='poison'||k==='carrom'){
+    const sc=SocialScreen({games:k});
+    sc.style.cssText='position:relative;inset:auto;display:block;background:transparent;min-height:60vh';
+    rkCleanup=()=>{try{sc._destroy&&sc._destroy()}catch(e){}};
+    box.replaceChildren(h('div',{class:'ghead'},k==='poison'?'☠️ سم یا خوراکی':'🎯 خط و نشان'),h('button',{class:'ib',style:'color:white',onclick:leave},'← بازگشت'),sc);
+   }
  }
  function frame(title,content){box.replaceChildren(h('div',{class:'ghead'},title),h('button',{class:'ib',style:'color:white',onclick:home},'← بازگشت'),content)}
 
@@ -2748,7 +2838,7 @@ function GamesScreen(){
           const el=Math.max(0,now-r.t0),m=Math.max(1,Number(r.mult)||1);
           scene.setRate(r.rate||.12);scene.setEl(el);scene.go();mult.textContent=fx(m);status.textContent='🚀 موشک در حال پرواز است؛ شرط بستن اختیاری است.';
         }else if(r.watch_phase==='crashed'){
-          scene.boom(Math.log(Math.max(1,Number(r.mult)||1))/(r.rate||.12));mult.textContent=fx(r.mult);mult.className='rk-mult lose';status.textContent='💥 موشک به شهاب‌سنگ برخورد کرد؛ دور بعدی خودکار آغاز می‌شود.';
+          scene.boom(Math.log(Math.max(1,Number(r.mult)||1))/(r.rate||.12));mult.textContent=fx(r.mult);mult.className='rk-mult lose';{const nd=Math.max(0,(r.next_t0||now)-now);status.textContent='💥 موشک منفجر شد؛ پرواز بعدی تا '+num(nd.toFixed(1))+' ثانیه دیگر';}
         }
       }catch(e){}
     };
@@ -2905,9 +2995,10 @@ function MyselfScreen(){
  function home(){
   const av=h('div',{class:'self-avatar self-fallback'},ceI(E.trophy,52));
   if(data.photo)blob(data.photo,data.photo).then(u=>{if(u)av.replaceWith(h('img',{class:'self-avatar',alt:'',src:u}))});
+  const avBox=data.premium?h('div',{class:'premium-ring sq'},av):av;
   const st=[[E.money,'جیب',num(data.pocket)+' تومان'],[E.bank,'بانک',num(data.bank)+' تومان'],[E.wallet,'دارایی کل',num(data.total_assets)+' تومان'],[E.energy,'انرژی',data.energy+'٪'],[E.hand,'تعداد جق',num(data.jaghs)],[E.vs,'شناسه',String(data.id)]];
   box.replaceChildren(title('خودم'),h('div',{class:'gcard self-card'},
-   h('div',{class:'selfhero'},av,h('div',{},h('div',{class:'gtitle'},data.character),h('div',{class:'gdesc'},data.name+' • سطح '+data.level+(data.job?' • '+data.job:'')))),
+   h('div',{class:'selfhero'},avBox,h('div',{},h('div',{class:'gtitle'},data.character,data.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null),h('div',{class:'gdesc'},data.name+' • سطح '+data.level+(data.job?' • '+data.job:'')))),
    h('div',{class:'gstats'},st.map(([ic,k,v])=>h('div',{class:'gstat'},h('div',{class:'gk'},ceI(ic,18),h('span',{class:'gdesc'},k)),h('b',{},v))))),
    h('div',{class:'self-grid'},pb('بانک',bank,'',E.bank),pb('ماشین من',()=>cars(),'gold',E.cars),pb('قدرت‌ها',powers,'green',E.powers),pb('تنظیمات',settings,'dark',svgIc('gear',22)),
     h('div',{class:'gdesc wide'},ceI(E.jm,18),'موجودی دستگاه جق: '+num(data.jagh_machine)+' / ۱٬۲۰۰٬۰۰۰ تومان'),
@@ -2976,6 +3067,15 @@ function StoreScreen(){
    'پس‌زمینه طلایی برای هر پیام در چت‌روم'
   ];
   const fi=h('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'sfile'});
+  const subBox=h('div',{});
+  api('/api/social/me').then(m=>{
+   const exp=Number(m.subscription_expires_at||0),left=exp*1000-Date.now();
+   if(m.subscription_active&&left>0){
+    const days=Math.max(1,Math.ceil(left/86400000));
+    subBox.className='sub-on';subBox.textContent='💎 اشتراک تو فعاله • '+num(days)+' روز مونده (تا '+new Date(exp*1000).toLocaleDateString('fa-IR')+')';
+    subBox.append(h('div',{style:'font-size:11.5px;font-weight:700'},'برای تمدید، رسید جدید بفرست؛ ۳۰ روز به انتهای اعتبار فعلی اضافه می‌شه.'));
+   }else{subBox.className='sub-off';subBox.textContent='اشتراک فعال نداری'}
+  }).catch(()=>{});
   const pick=h('button',{class:'btn gh',onclick:()=>fi.click()},'انتخاب تصویر رسید');
   const status=h('div',{class:'gdesc'},'پس از پرداخت، تصویر رسید را انتخاب و برای پشتیبانی ارسال کن. فعال‌سازی پس از بررسی پشتیبانی انجام می‌شود.');
   fi.onchange=()=>{pick.textContent=fi.files[0]?.name||'انتخاب تصویر رسید'};
@@ -2987,7 +3087,7 @@ function StoreScreen(){
     const out=await api('/api/social/subscription/receipt',{image_data:data});status.textContent=out.message||'رسید ارسال شد.';toast('رسید برای پشتیبانی ارسال شد.');
    }catch(e){status.textContent=e.message;toast(e.message,1)}finally{send.disabled=false}
   }},'ارسال رسید برای پشتیبانی');
-  box.replaceChildren(title('فروشگاه'),h('div',{class:'gcard sub-card'},h('div',{class:'gvisual'},svgIc('crown',64)),h('div',{class:'gtitle'},'اشتراک ویژه مینی‌اپ'),h('div',{class:'gdesc'},'دسترسی ۳۰ روزه به امکانات ویژه مینی‌اپ'),h('div',{class:'gtitle',style:'font-size:25px;color:#f6c453;margin-top:10px'},'۷۹٬۰۰۰ تومان'),h('div',{class:'gdesc'},'اعتبار: ۳۰ روز'),h('div',{class:'gdivider'}),h('div',{class:'gtitle',style:'font-size:15px'},'امکانات اشتراک'),...perks.map((x,i)=>h('div',{class:'gdesc',style:'padding:5px 0;border-bottom:1px solid #ffffff12'},'✦ '+x)),h('div',{class:'gdivider'}),h('div',{class:'gtitle',style:'font-size:15px'},'پرداخت کارت‌به‌کارت'),h('div',{class:'gdesc'},'شماره کارت'),h('div',{class:'gtitle',style:'font-size:19px;direction:ltr;text-align:center;letter-spacing:1px'},'6219861851160068'),h('button',{class:'pb gh',onclick:()=>{if(navigator.clipboard?.writeText)navigator.clipboard.writeText('6219861851160068').then(()=>toast('شماره کارت کپی شد'));else toast('شماره کارت: 6219861851160068')}},'کپی شماره کارت'),pick,fi,send,status));
+  box.replaceChildren(title('فروشگاه'),h('div',{class:'gcard sub-card'},h('div',{class:'gvisual'},svgIc('crown',64)),h('div',{class:'gtitle'},'اشتراک ویژه مینی‌اپ'),subBox,h('div',{class:'gdesc'},'دسترسی ۳۰ روزه به امکانات ویژه مینی‌اپ'),h('div',{class:'gtitle',style:'font-size:25px;color:#f6c453;margin-top:10px'},'۷۹٬۰۰۰ تومان'),h('div',{class:'gdesc'},'اعتبار: ۳۰ روز'),h('div',{class:'gdivider'}),h('div',{class:'gtitle',style:'font-size:15px'},'امکانات اشتراک'),...perks.map((x,i)=>h('div',{class:'gdesc',style:'padding:5px 0;border-bottom:1px solid #ffffff12'},'✦ '+x)),h('div',{class:'gdivider'}),h('div',{class:'gtitle',style:'font-size:15px'},'پرداخت کارت‌به‌کارت'),h('div',{class:'gdesc'},'شماره کارت'),h('div',{class:'gtitle',style:'font-size:19px;direction:ltr;text-align:center;letter-spacing:1px'},'6219861851160068'),h('button',{class:'pb gh',onclick:()=>{if(navigator.clipboard?.writeText)navigator.clipboard.writeText('6219861851160068').then(()=>toast('شماره کارت کپی شد'));else toast('شماره کارت: 6219861851160068')}},'کپی شماره کارت'),pick,fi,send,status));
  }
  render();root.append(box);return root;
 }
@@ -3800,7 +3900,7 @@ async def _social_me(qs, user):
     return _j({"id": uid, "name": user.get("first_name") or "کاربر",
                "is_support": _social_staff(user) and has_perm(uid, "miniapp"),
                "perms": sorted(perms_of(uid)) if _social_staff(user) and has_perm(uid, "miniapp") else [],
-               "premium_emoji": _social_emoji_staff(user) or sub_active, "subscription_active": sub_active,
+               "premium_emoji": _social_emoji_staff(user) or sub_active, "game_chat": _social_emoji_staff(user) or sub_active, "subscription_active": sub_active,
                "subscription_expires_at": sub_exp, "profile": dict(p) if p else None,
                "quota": await _social_quota(uid, user)})
 
@@ -4232,7 +4332,7 @@ async def _rp_finish(g: dict, winner, reason: str, say: bool = True):
     else:
         await _give(winner, bet * 2)
     await _rp_store(g)
-    if say:
+    if say and not g.get("silent"):
         nm = await _rp_names([g["creator"], g.get("opponent")])
         a, b = nm.get(g["creator"], "بازیکن"), nm.get(g.get("opponent"), "بازیکن")
         if winner is not None:
@@ -4308,8 +4408,69 @@ async def _social_poison_state(qs, user):
     names = await _rp_names([x for g in games for x in (g["creator"], g.get("opponent"))])
     now = time.time()
     views = [_rp_view(g, uid, names, now) for g in games]
+    subs = await _mini_sub_set([x for g in games for x in (g["creator"], g.get("opponent"))])
+    for v in views:
+        v["creator_prem"] = v["creator"] in subs
+        v["opponent_prem"] = bool(v["opponent"]) and v["opponent"] in subs
     views.sort(key=lambda v: (not v["me"], -v["id"]))
     return _j({"games": views, "balance": await _mini_balance(uid), "min_bet": CASINO_MIN_BET, "max_bet": CASINO_MAX_BET})
+
+
+async def _mini_sub_set(uids) -> set:
+    """آیدی کاربرانی که اشتراک ویژه‌ی فعال دارن."""
+    uids = [int(u) for u in set(uids) if u]
+    if not uids:
+        return set()
+    rows = await pool.fetch("SELECT user_id FROM mini_subscriptions WHERE user_id = ANY($1::bigint[]) AND expires_at > $2", uids, time.time())
+    return {int(r["user_id"]) for r in rows}
+
+
+_GC_TABLES = {"poison": "room_poison_games", "carrom": "room_carrom_games"}
+GC_MAX_LEN = 200
+
+
+async def _social_gamechat_get(qs, user):
+    """پیام‌های چت یک میز؛ همه می‌تونن بخونن، فقط بازیکن‌های دارای اشتراک می‌تونن بفرستن."""
+    kind = str(qs.get("kind") or "")
+    gid = _int(qs.get("game_id"))
+    if kind not in _GC_TABLES or gid is None:
+        raise _ApiError("بازی نامعتبره.")
+    after = _int(qs.get("after"), 0) or 0
+    rows = await pool.fetch("SELECT id,user_id,text,created_at FROM room_game_chat WHERE kind=$1 AND game_id=$2 AND id>$3 ORDER BY id LIMIT 60", kind, gid, after)
+    uids = [int(r["user_id"]) for r in rows]
+    names = await _rp_names(uids)
+    subs = await _mini_sub_set(uids)
+    return _j({"messages": [{"id": int(r["id"]), "user_id": int(r["user_id"]), "name": names.get(int(r["user_id"]), "بازیکن"),
+                             "text": r["text"], "prem": int(r["user_id"]) in subs, "ts": float(r["created_at"])} for r in rows]})
+
+
+async def _social_gamechat_send(b, user):
+    uid = int(user["id"])
+    kind = str(b.get("kind") or "")
+    gid = _int(b.get("game_id"))
+    if kind not in _GC_TABLES or gid is None:
+        raise _ApiError("بازی نامعتبره.")
+    txt = re.sub(r"\s+", " ", str(b.get("text") or "")).strip()
+    if not txt:
+        raise _ApiError("پیام خالیه")
+    if len(txt) > GC_MAX_LEN:
+        raise _ApiError(f"پیام خیلی طولانیه (حداکثر {GC_MAX_LEN} کاراکتر)")
+    exp = await pool.fetchval("SELECT expires_at FROM mini_subscriptions WHERE user_id=$1", uid)
+    if not (exp and float(exp) > time.time()) and not _social_emoji_staff(user):
+        raise _ApiError("چت هنگام بازی فقط با اشتراک ویژه فعاله.", 403)
+    g = await pool.fetchrow(f"SELECT creator, opponent, phase FROM {_GC_TABLES[kind]} WHERE game_id=$1", gid)
+    if not g or g["phase"] in ("lobby", "done"):
+        raise _ApiError("چت فقط وقتی بازی در جریانه فعاله.")
+    if uid not in (g["creator"], g["opponent"]):
+        raise _ApiError("فقط بازیکن‌های همین میز می‌تونن چت کنن.", 403)
+    now = time.time()
+    last = await pool.fetchval("SELECT max(created_at) FROM room_game_chat WHERE user_id=$1", uid)
+    if last and now - float(last) < 0.8:
+        raise _ApiError("آروم‌تر بفرست.")
+    mid = await pool.fetchval("INSERT INTO room_game_chat(kind,game_id,user_id,text,created_at) VALUES($1,$2,$3,$4,$5) RETURNING id", kind, gid, uid, txt, now)
+    if random.random() < 0.03:
+        await pool.execute("DELETE FROM room_game_chat WHERE created_at < $1", now - 86400)
+    return _j({"ok": True, "id": int(mid)})
 
 
 def _rp_busy_sql() -> str:
@@ -4338,13 +4499,14 @@ async def _social_poison_create(b, user):
             raise _ApiError("موجودی کافی نیست.")
         try:
             gid = await pool.fetchval(
-                "INSERT INTO room_poison_games(creator,bet,phase,state,created_at) VALUES($1,$2,'lobby','{}',$3) RETURNING game_id",
-                uid, bet, time.time())
+                "INSERT INTO room_poison_games(creator,bet,phase,state,created_at,silent) VALUES($1,$2,'lobby','{}',$3,$4) RETURNING game_id",
+                uid, bet, time.time(), bool(b.get("silent")))
         except Exception:
             await _give(uid, bet)
             raise
     creator_name = (await _rp_names([uid])).get(uid, "بازیکن")
-    await _rp_say(f"{creator_name} یک میز بازی سم یا خوراکی ساخت\nمبلغ شرط: {bet:,} تومان\nجایزه برنده: {bet * 2:,} تومان\n۱۲۰ ثانیه فرصت پیوستن به این میز دارید.\n{{game:{gid}}}")
+    if not b.get("silent"):
+      await _rp_say(f"{creator_name} یک میز بازی سم یا خوراکی ساخت\nمبلغ شرط: {bet:,} تومان\nجایزه برنده: {bet * 2:,} تومان\n۱۲۰ ثانیه فرصت پیوستن به این میز دارید.\n{{game:{gid}}}")
     return _j({"ok": True, "game_id": gid, "balance": await _mini_balance(uid)})
 
 
@@ -4369,7 +4531,8 @@ async def _social_poison_join(b, user):
             await _give(uid, int(g["bet"]))
             raise
     nm = await _rp_names([uid, g["creator"]])
-    await _rp_say(f"⚔️ {nm.get(uid, 'یه بازیکن')} به بازی {nm.get(g['creator'], 'سازنده')} پیوست!\n💰 جایزه: {int(g['bet']) * 2:,} تومن — بازی شروع شد، تماشا کنید 👀")
+    if not g.get("silent"):
+      await _rp_say(f"⚔️ {nm.get(uid, 'یه بازیکن')} به بازی {nm.get(g['creator'], 'سازنده')} پیوست!\n💰 جایزه: {int(g['bet']) * 2:,} تومن — بازی شروع شد، تماشا کنید 👀")
     return _j({"ok": True, "balance": await _mini_balance(uid)})
 
 
@@ -4684,7 +4847,7 @@ async def _cr_finish(g: dict, winner, reason: str, say: bool = True):
     else:
         await _give(winner, bet * 2)
     await _cr_store(g)
-    if say:
+    if say and not g.get("silent"):
         nm = await _rp_names([g["creator"], g.get("opponent")])
         a, b = nm.get(g["creator"], "بازیکن"), nm.get(g.get("opponent"), "بازیکن")
         sw = sum(1 for i in g["out"] if i in _cr_ids("w"))
@@ -4781,6 +4944,10 @@ async def _cr_games_for(uid: int, seen: dict, only_ids=None) -> list:
         if sh and sh["seq"] != g["seq"]:
             sh = None
         views.append(_cr_view(g, uid, names, now, sh))
+    subs = await _mini_sub_set([x for g in games for x in (g["creator"], g.get("opponent"))])
+    for v in views:
+        v["creator_prem"] = v["creator"] in subs
+        v["opponent_prem"] = bool(v["opponent"]) and v["opponent"] in subs
     views.sort(key=lambda v: (not v["me"], -v["id"]))
     return views
 
@@ -4830,13 +4997,14 @@ async def _social_carrom_create(b, user):
         try:
             st = json.dumps({"coins": {str(k): v for k, v in _cr_initial().items()}, "out": [], "seq": 0})
             gid = await pool.fetchval(
-                "INSERT INTO room_carrom_games(creator,bet,phase,state,created_at) VALUES($1,$2,'lobby',$3,$4) RETURNING game_id",
-                uid, bet, st, time.time())
+                "INSERT INTO room_carrom_games(creator,bet,phase,state,created_at,silent) VALUES($1,$2,'lobby',$3,$4,$5) RETURNING game_id",
+                uid, bet, st, time.time(), bool(b.get("silent")))
         except Exception:
             await _give(uid, bet)
             raise
     creator_name = (await _rp_names([uid])).get(uid, "بازیکن")
-    await _rp_say(f"{creator_name} یک میز بازی خط و نشان ساخت\nمبلغ شرط: {bet:,} تومان\nجایزه برنده: {bet * 2:,} تومان\n۱۲۰ ثانیه فرصت پیوستن به این میز دارید.\n{{carrom:{gid}}}")
+    if not b.get("silent"):
+      await _rp_say(f"{creator_name} یک میز بازی خط و نشان ساخت\nمبلغ شرط: {bet:,} تومان\nجایزه برنده: {bet * 2:,} تومان\n۱۲۰ ثانیه فرصت پیوستن به این میز دارید.\n{{carrom:{gid}}}")
     return _j({"ok": True, "game_id": gid, "balance": await _mini_balance(uid)})
 
 
@@ -4865,7 +5033,8 @@ async def _social_carrom_join(b, user):
             await _give(uid, int(g["bet"]))
             raise
     nm = await _rp_names([uid, g["creator"]])
-    await _rp_say(f"⚔️ {nm.get(uid, 'یه بازیکن')} به بازی «خط و نشان» {nm.get(g['creator'], 'سازنده')} پیوست!\n💰 جایزه: {int(g['bet']) * 2:,} تومن — بازی شروع شد، تماشا کنید 👀")
+    if not g.get("silent"):
+      await _rp_say(f"⚔️ {nm.get(uid, 'یه بازیکن')} به بازی «خط و نشان» {nm.get(g['creator'], 'سازنده')} پیوست!\n💰 جایزه: {int(g['bet']) * 2:,} تومن — بازی شروع شد، تماشا کنید 👀")
     return _j({"ok": True, "balance": await _mini_balance(uid)})
 
 
@@ -5045,7 +5214,7 @@ async def _g_myself(qs, user):
     return _j({"id":uid,"name":r["name"] or user.get("first_name") or "کاربر",
                "gender":gender,"level":lvl,"job":(job[1] if job else "بیکار"),"character":CHARACTERS.get(gender,CHARACTERS["m"])[lvl-1][0],
                "energy":round(float(r["energy"] or 0),1),"bank":bank,"pocket":pocket,
-               "total_assets":pocket+bank,"jaghs":int(r["jaghs"] or 0),"jagh_machine":int(await pool.fetchval("SELECT jagh_machine FROM users WHERE user_id=$1",uid) or 0),"photo":photo_url,
+               "total_assets":pocket+bank,"jaghs":int(r["jaghs"] or 0),"jagh_machine":int(await pool.fetchval("SELECT jagh_machine FROM users WHERE user_id=$1",uid) or 0),"photo":photo_url,"premium":bool(await pool.fetchval("SELECT 1 FROM mini_subscriptions WHERE user_id=$1 AND expires_at>$2",uid,time.time())),
                "cars":await _myself_cars(uid),"car_colors":[{"name":n,"rgb":list(rgb)} for n,_i,rgb in CAR_COLORS],"car_color_price":CAR_COLOR_PRICE,"car_max":CAR_MAX_LEVEL})
 
 
@@ -5249,6 +5418,7 @@ _MINI_HIST_LOADED = False
 
 async def _mini_hist_ensure():
     """بعد از ری‌استارت ربات، آخرین پروازها از دیتابیس برگردن (قبلاً با هر دیپلوی پاک می‌شدن)."""
+    return   # سوابق حالا توسط mini_crash_round_loop از جدول دورها ساخته می‌شه
     global _MINI_HIST_LOADED
     if _MINI_HIST_LOADED:
         return
@@ -5312,13 +5482,6 @@ async def _mini_crash_finish(uid: int, bet: int, st: dict, res: str, m: float) -
     payout = int(bet * m + 1e-6) if win else 0
     if payout > 0:
         await _give(uid, payout)
-    _MINI_HIST.insert(0, st["crash"])
-    del _MINI_HIST[30:]
-    try:
-        await pool.execute("INSERT INTO mini_crash_hist(point, created_at) VALUES($1,$2)", float(st["crash"]), time.time())
-        await pool.execute("DELETE FROM mini_crash_hist WHERE id < (SELECT COALESCE(MAX(id),0) - 60 FROM mini_crash_hist)")
-    except Exception:
-        log.debug("mini crash hist save failed", exc_info=True)
     return {"done": True, "active": False, "result": "win" if win else "crash", "mult": m, "crash": st["crash"],
             "bet": bet, "payout": payout, "profit": payout - bet, "balance": await _mini_balance(uid), "hist": _MINI_HIST[:14],
             "rate": MINI_CRASH_RATE}
@@ -5373,10 +5536,12 @@ async def _mini_crash_watch_state(bal: int) -> dict:
         if elapsed < _mini_time_for(cp):
             return {**_mini_base(bal), "active": False, "done": False, "watch_phase": "flying",
                     "watch_round": int(current["round_id"]), "t0": t0, "now": now,
-                    "mult": _mini_mult_at(elapsed), "rate": MINI_CRASH_RATE}
+                    "mult": _mini_mult_at(elapsed), "rate": MINI_CRASH_RATE,
+                    "next_t0": (slot + 1) * MINI_CRASH_DELAY}
         return {**_mini_base(bal), "active": False, "done": False, "watch_phase": "crashed",
                 "watch_round": int(current["round_id"]), "t0": t0, "now": now,
-                "mult": cp, "rate": MINI_CRASH_RATE}
+                "mult": cp, "rate": MINI_CRASH_RATE,
+                "next_t0": (slot + 1) * MINI_CRASH_DELAY}
     rid = slot
     starts_at = (rid + 1) * MINI_CRASH_DELAY
     rr = await pool.fetchrow(
@@ -5502,7 +5667,7 @@ _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cas
               "/api/game/mines/cashout": _p_game_mines_cashout}
 
 
-_SOCIAL_GET={"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/room/poison":_social_poison_state,"/api/social/room/carrom":_social_carrom_state,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
+_SOCIAL_GET={"/api/social/room/gamechat":_social_gamechat_get,"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/room/poison":_social_poison_state,"/api/social/room/carrom":_social_carrom_state,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
 async def _social_subscription_receipt(b, user):
     """ارسال رسید اشتراک ۳۰ روزه به مدیران برای بررسی دستی."""
     uid = int(user["id"])
@@ -5573,7 +5738,7 @@ async def mini_subscription_review_cb(update: Update, context: ContextTypes.DEFA
     else:
         await q.answer("عملیات نامعتبر است.", show_alert=True)
 
-_SOCIAL_POST={"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/carrom/create":_social_carrom_create,"/api/social/room/carrom/join":_social_carrom_join,"/api/social/room/carrom/cancel":_social_carrom_cancel,"/api/social/room/carrom/shoot":_social_carrom_shoot,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read,"/api/social/subscription/receipt":_social_subscription_receipt,"/api/social/follow":_social_follow,"/api/social/profile/like":_social_profile_like}
+_SOCIAL_POST={"/api/social/room/gamechat/send":_social_gamechat_send,"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/carrom/create":_social_carrom_create,"/api/social/room/carrom/join":_social_carrom_join,"/api/social/room/carrom/cancel":_social_carrom_cancel,"/api/social/room/carrom/shoot":_social_carrom_shoot,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read,"/api/social/subscription/receipt":_social_subscription_receipt,"/api/social/follow":_social_follow,"/api/social/profile/like":_social_profile_like}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
@@ -5719,6 +5884,10 @@ async def mini_crash_round_loop():
                 "ON CONFLICT(round_id) DO NOTHING", rid, starts_at, _mini_crash_point(), now)
             # فقط تاریخچه محدود نگه داشته شود؛ دورهای دارای شرط در mini_games اطلاعات لازم را دارند.
             await pool.execute("DELETE FROM mini_crash_rounds WHERE round_id < $1", rid - 120)
+            # سوابق: ضریب انفجار همه‌ی پروازهای تموم‌شده (چه کسی شرط بسته باشه چه نه)
+            fin = await pool.fetch("SELECT crash_point, starts_at FROM mini_crash_rounds WHERE starts_at <= $1 ORDER BY round_id DESC LIMIT 40", now)
+            _MINI_HIST[:] = [float(x["crash_point"]) for x in fin
+                             if now >= float(x["starts_at"]) + _mini_time_for(float(x["crash_point"]))][:30]
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -7714,7 +7883,16 @@ async def jagsal_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await msg.reply_text(f"دعوت جقصل برای {sent} گروه ارسال شد؛ منتظر اولین گروهی هستیم که در را باز کند.")
     return True
 
+async def _jagsal_react(bot, chat_id, message_id):
+    """روی پیام‌های ردشده توی جقصل ری‌اکشن ⚡ می‌زنه؛ اگه گروه ری‌اکشن رو نپذیره بی‌صدا رد می‌شه."""
+    try:
+        from telegram import ReactionTypeEmoji
+        await bot.set_message_reaction(chat_id=chat_id, message_id=message_id, reaction=[ReactionTypeEmoji("⚡")])
+    except Exception:
+        log.debug("jagsal reaction failed in %s", chat_id, exc_info=True)
+
 async def _jagsal_relay_message(bot, session, msg, user):
+    reply_origin = None   # پیام اصلیِ اون‌ور که این پیام بهش ریپلای شده
     # اولین پیام هر گفت‌وگو باید با ریپلای به پیام اتصال شروع شود؛ پس از آن گفتگو آزاد است.
     if not session["started_at"]:
         anchor = await pool.fetchval("SELECT message_id FROM jagsal_posts WHERE session_id=$1 AND chat_id=$2", int(session["session_id"]), int(msg.chat_id))
@@ -7732,7 +7910,9 @@ async def _jagsal_relay_message(bot, session, msg, user):
         rt = msg.reply_to_message
         ok = False
         if rt:
-            ok = bool(await pool.fetchval("SELECT 1 FROM jagsal_dest_msgs WHERE chat_id=$1 AND message_id=$2 AND session_id=$3", int(msg.chat_id), int(rt.message_id), int(session["session_id"])))
+            dm = await pool.fetchrow("SELECT origin_message FROM jagsal_dest_msgs WHERE chat_id=$1 AND message_id=$2 AND session_id=$3", int(msg.chat_id), int(rt.message_id), int(session["session_id"]))
+            ok = dm is not None
+            if ok and dm["origin_message"]: reply_origin = int(dm["origin_message"])
             if not ok:
                 anchor = await pool.fetchval("SELECT message_id FROM jagsal_posts WHERE session_id=$1 AND chat_id=$2", int(session["session_id"]), int(msg.chat_id))
                 ok = bool(anchor) and int(rt.message_id) == int(anchor)
@@ -7763,18 +7943,22 @@ async def _jagsal_relay_message(bot, session, msg, user):
     relay_id = int(row["relay_id"])
     kb = InlineKeyboardMarkup([[btn("گزارش", icon="5447644880824181073", callback_data=f"jgs:report:{relay_id}")]])
     attribution = f'<b>{html.escape(user.full_name)} از گپ {html.escape(group_title)}</b>'
+    rp = ReplyParameters(message_id=reply_origin, allow_sending_without_reply=True) if reply_origin else None
     sent_ids = []
     if msg.text:
         payload = f'{attribution}\n<blockquote>{html.escape(body[:3500])}</blockquote>'
-        sent_ids.append((await bot.send_message(dest, payload, parse_mode="HTML", reply_markup=kb)).message_id)
+        sent_ids.append((await bot.send_message(dest, payload, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)).message_id)
     else:
-        sent_ids.append((await bot.send_message(dest, attribution, parse_mode="HTML", reply_markup=kb)).message_id)
+        sent_ids.append((await bot.send_message(dest, attribution, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)).message_id)
         try:
-            sent_ids.append((await bot.copy_message(dest, msg.chat_id, msg.message_id)).message_id)
+            sent_ids.append((await bot.copy_message(dest, msg.chat_id, msg.message_id, reply_parameters=rp)).message_id)
         except Exception:
             pass
     for mid in sent_ids:
-        await pool.execute("INSERT INTO jagsal_dest_msgs(chat_id,message_id,session_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", dest, mid, int(session["session_id"]))
+        await pool.execute("INSERT INTO jagsal_dest_msgs(chat_id,message_id,session_id,origin_chat,origin_message) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", dest, mid, int(session["session_id"]), int(msg.chat_id), int(msg.message_id))
+    # ری‌اکشن ⚡ روی پیام اصلی و نسخه‌ی ردشده
+    for cid_, mid_ in [(int(msg.chat_id), int(msg.message_id))] + [(dest, m_) for m_ in sent_ids]:
+        asyncio.create_task(_jagsal_react(bot, cid_, mid_))
     return True
 
 async def jagsal_nontext(update: Update, context: ContextTypes.DEFAULT_TYPE):
