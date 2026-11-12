@@ -7827,7 +7827,11 @@ async def jagsal_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 async with c.transaction():
                     await c.fetchval("SELECT pg_advisory_xact_lock($1)", int(chat_id))
                     ses=await c.fetchrow("SELECT * FROM jagsal_sessions WHERE session_id=$1 FOR UPDATE", sid)
-                    if not ses or ses["status"]!="waiting": await q.answer("این دعوت دیگه فعال نیست.",show_alert=True); return
+                    if not ses or ses["status"]!="waiting":
+                        await q.answer("این دعوت دیگه فعال نیست.",show_alert=True)
+                        try: await q.message.delete()   # کارت دعوت قدیمی نمونه
+                        except Exception: pass
+                        return
                     if chat_id == int(ses["source_chat"]): await q.answer("این گپ خودش دعوت رو ساخته؛ باید گپ دیگه‌ای در رو باز کنه.",show_alert=True); return
                     if await c.fetchval("SELECT 1 FROM jagsal_sessions WHERE status IN ('waiting','connected') AND (source_chat=$1 OR target_chat=$1) LIMIT 1",chat_id):
                         await q.answer("این گپ در حال حاضر در یک جقصل دیگه فعاله.",show_alert=True); return
