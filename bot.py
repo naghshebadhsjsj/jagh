@@ -1013,7 +1013,11 @@ function ceI(id,size){size=size||22;const im=h('img',{class:'cei',draggable:'fal
 const SVGS={
  rocket:'<svg viewBox="0 0 64 64"><path d="M32 4c9 8 13 20 10 34H22C19 24 23 12 32 4z" fill="#e8eef8"/><circle cx="32" cy="24" r="5" fill="#2c8bd8"/><path d="M22 38l-9 10 3-14zm20 0l9 10-3-14z" fill="#e0334f"/><path d="M27 40h10l-5 16z" fill="#ffb347"/></svg>',
  roach:'<svg viewBox="0 0 40 40"><ellipse cx="20" cy="22" rx="9" ry="13" fill="#6b3a1e"/><ellipse cx="20" cy="22" rx="5" ry="9" fill="#8b5a2b"/><circle cx="20" cy="8" r="4" fill="#3b2010"/><path d="M11 16L3 11M11 22L2 22M11 28L3 34M29 16l8-5M29 22l9 0M29 28l8 6M17 5L12 0M23 5l5-5" stroke="#3b2010" stroke-width="2" fill="none"/></svg>',
- gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>'
+ gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>',
+ skull:'<svg viewBox="0 0 64 64"><defs><radialGradient id="sk1" cx=".4" cy=".3" r=".9"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#b9c4d8"/></radialGradient></defs><path d="M32 5C18 5 8 15 8 29c0 8 4 14 11 17v8c0 2 2 4 4 4h18c2 0 4-2 4-4v-8c7-3 11-9 11-17C56 15 46 5 32 5z" fill="url(#sk1)"/><circle cx="22" cy="30" r="7" fill="#151a2e"/><circle cx="42" cy="30" r="7" fill="#151a2e"/><circle cx="22" cy="30" r="2.6" fill="#39ff9c"/><circle cx="42" cy="30" r="2.6" fill="#39ff9c"/><path d="M32 38l-4 8h8z" fill="#151a2e"/><path d="M25 52v7M32 52v7M39 52v7" stroke="#151a2e" stroke-width="2.6" stroke-linecap="round"/></svg>',
+ target:'<svg viewBox="0 0 64 64"><circle cx="30" cy="34" r="26" fill="#e0334f"/><circle cx="30" cy="34" r="19" fill="#f4f7ff"/><circle cx="30" cy="34" r="12" fill="#e0334f"/><circle cx="30" cy="34" r="5" fill="#f4f7ff"/><path d="M30 34L55 9" stroke="#ffb347" stroke-width="3.6" stroke-linecap="round"/><path d="M49 8l7 0 0 7M44 13l6-6M50 19l6-6" stroke="#ffd93d" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+ mine:'<svg viewBox="0 0 64 64"><circle cx="29" cy="38" r="20" fill="#2a2f45"/><circle cx="29" cy="38" r="20" fill="none" stroke="#5b6486" stroke-width="2"/><circle cx="21" cy="30" r="5" fill="#ffffff44"/><path d="M29 12v-5M9 38H4M54 38h-5M29 64v0M15 24l-4-4M43 24l4-4M15 52l-4 4M43 52l4 4" stroke="#2a2f45" stroke-width="4" stroke-linecap="round"/><rect x="38" y="11" width="10" height="10" rx="2" transform="rotate(40 43 16)" fill="#8a93ad"/><path d="M47 12c4-4 9-3 10 2" stroke="#ffb347" stroke-width="3" fill="none" stroke-linecap="round"/><circle cx="57" cy="12" r="4" fill="#ffd93d"/><circle cx="57" cy="12" r="1.8" fill="#ff5a36"/></svg>',
+ crown:'<svg viewBox="0 0 64 64"><path d="M8 46L4 18l15 13 13-21 13 21 15-13-4 28z" fill="#f6c453"/><rect x="8" y="48" width="48" height="8" rx="3" fill="#e0a526"/><circle cx="4" cy="18" r="3" fill="#ffe08a"/><circle cx="32" cy="10" r="3" fill="#ffe08a"/><circle cx="60" cy="18" r="3" fill="#ffe08a"/></svg>'
 };
 function svgIc(name,size){size=size||24;const d=h('span',{class:'svgic',style:'width:'+size+'px;height:'+size+'px'});d.innerHTML=SVGS[name]||'';return d}
 
@@ -2644,12 +2648,12 @@ function GamesScreen(){
   clearInterval(cdT);
   const G=[
    [z=>svgIc('rocket',z),'انفجار','شرط و ضریب هدف را پیش از پرواز تعیین کن؛ برداشت خودکار روی ضریب انتخابی.','crash','blue'],
-   [z=>ceI('5256147609243889028',z),'مین','۲۵ خانه و ۳ مین؛ خانه‌های امن را باز کن و در زمان مناسب برداشت بزن.','mines','red'],
+   [z=>svgIc('mine',z),'مین','۲۵ خانه و ۳ مین؛ خانه‌های امن را باز کن و در زمان مناسب برداشت بزن.','mines','red'],
    [z=>svgIc('skull',z),'سم یا خوراکی','میز دونفره با انتظار برای حریف؛ اگر تا ۱۲۰ ثانیه کسی نیاید، شرط برمی‌گردد.','poison','red'],
    [z=>svgIc('target',z),'خط و نشان','کاروم دونفره با مهره‌های فیزیکی و نوبت ۶۰ ثانیه‌ای.','carrom','green']];
   const grid=h('div',{class:'games-grid'},...G.map(([ic,t,d,key,cls])=>{
    const v=h('div',{class:'gvisual'},ic(64));
-   if(key==='crash'){v.style.background='radial-gradient(circle,#073c42,#050b1e 72%)';v.replaceChildren(h('div',{class:'rocket-mark'},svgIc('send',76)))}
+   if(key==='crash'){v.style.background='radial-gradient(circle,#073c42,#050b1e 72%)';v.replaceChildren(h('div',{class:'rocket-mark'},svgIc('rocket',76)))}
    const kids=[v,h('div',{class:'gtitle'},t),h('div',{class:'gdesc'},d),h('button',{class:'pb '+cls,onclick:()=>play(key)},ic(22),h('span',{},'شروع بازی'))];
    return h('div',{class:'gcard','data-game':key},kids)}));
   box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),grid);
@@ -4355,7 +4359,16 @@ async def _social_room_react(b,user):
     mid=_int(b.get("message_id")); emoji=(b.get("emoji") or "❤️").strip()
     if mid is None or emoji not in ("❤️","😂","😍","🔥","👏","👍","👎","😮"): raise _ApiError("ری‌اکشن نامعتبره")
     uid=int(user["id"])
-    await pool.execute("INSERT INTO social_room_reactions(message_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,user_id,emoji) DO NOTHING",mid,uid,emoji,time.time())
+    exp=await pool.fetchval("SELECT expires_at FROM mini_subscriptions WHERE user_id=$1",uid)
+    vip=bool(exp and float(exp)>time.time()) or _social_emoji_staff(user)
+    async with pool.acquire() as c:
+        async with c.transaction():
+            if not vip:
+                # حساب عادی: روی هر پیام فقط یه ری‌اکشن؛ همون رو دوباره بزنه برمی‌داره، یکی دیگه بزنه جایگزین میشه
+                had=await c.fetchval("SELECT 1 FROM social_room_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3",mid,uid,emoji)
+                await c.execute("DELETE FROM social_room_reactions WHERE message_id=$1 AND user_id=$2",mid,uid)
+                if had: return _j({"ok":True,"removed":True})
+            await c.execute("INSERT INTO social_room_reactions(message_id,user_id,emoji,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,user_id,emoji) DO NOTHING",mid,uid,emoji,time.time())
     return _j({"ok":True})
 
 
@@ -5894,7 +5907,9 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     game = path.startswith("/api/game/")   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
-    if not social and not game and not path.startswith("/api/myself") :
+    # عکس پروفایل کاربرها (نه گروه‌ها) برای همه‌ی کاربرهای مینی‌اپ بازه؛ بدونش آواتارِ بقیه هیچ‌وقت نمی‌اومد
+    public_avatar = path == "/api/avatar" and not qs.get("chat")
+    if not social and not game and not public_avatar and not path.startswith("/api/myself") :
         _uid = int(user["id"])
         if not (has_perm(_uid, "panel") and has_perm(_uid, "miniapp")):
             return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
@@ -15325,19 +15340,20 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     text=f"<b>{line}\n\n{en}\n\n{mn}{rel_note}</b>"
     await msg.reply_text(text,parse_mode="HTML")
     await task_event(context.bot, msg.chat_id, user.id, "hug", name=user.full_name)
+    act_past="بغل کرد" if kind=="hug" else "بوسید"      # کی کیو چیکار کرد
+    A=_ltr_name(user.id,user.full_name); T=_ltr_name(target.id,target.full_name)   # لینک‌شده و ایزوله‌ی راست‌به‌چپ (اسم‌های لاتین/عدد دار به‌هم نمی‌ریزن)
     if poach:
         await pool.execute("UPDATE users SET energy=GREATEST(energy-$1::double precision,0) WHERE user_id=$2",AFFAIR_ENERGY_PENALTY,user.id)
-        await msg.reply_text(B(f"{html.escape(user.full_name)} تو حواست هست؟ {html.escape(target.full_name)} همسر داره؛ {_fmt_en(AFFAIR_ENERGY_PENALTY)} انرژی منفی می‌گیری تا دیگه رو زوجین لاو ندی 😤"),parse_mode="HTML")
+        await msg.reply_text(B(f"{RLM}{A} تو حواست هست؟ {A} همین الان {T} رو {act_past}، ولی {T} همسر داره؛ {_fmt_en(AFFAIR_ENERGY_PENALTY)} انرژی منفی می‌گیری تا دیگه رو زوجین لاو ندی 😤"),parse_mode="HTML")
     if affair:
-        cheater_name=user.full_name
-        affair_target=target.full_name
-        await msg.reply_text(B(f"⚠️ {html.escape(cheater_name)} داری به همسرت خیانت می‌کنی!"),parse_mode="HTML")
+        grp=html.escape(msg.chat.title or 'گروه')
+        await msg.reply_text(B(f"{RLM}⚠️ {A} داری به همسرت خیانت می‌کنی! {A} همین الان {T} رو {act_past}."),parse_mode="HTML")
         kb=InlineKeyboardMarkup([[btn("طلاق", "danger", callback_data=f"af:divorce:{cheater_id}:{spouse_id}:{msg.chat_id}"),btn("می‌بخشمش", "success", callback_data=f"af:forgive:{cheater_id}:{spouse_id}:{msg.chat_id}")]])
-        notice=B(f"💔 {html.escape(cheater_name)} به {html.escape(affair_target)} در گروه {html.escape(msg.chat.title or 'گروه')} نزدیک شد و داره بهت خیانت می‌کنه!\nمی‌تونی طلاق بگیری و ۱۰٪ دارایی‌ش رو به غنیمت ببری یا ببخشیش.")
+        notice=B(f"{RLM}💔 {A} در گروه «{grp}» {T} رو {act_past} و داره بهت خیانت می‌کنه!\nمی‌تونی طلاق بگیری و ۱۰٪ دارایی‌ش رو به غنیمت ببری یا ببخشیش.")
         try:
             await context.bot.send_message(spouse_id,notice,parse_mode="HTML",reply_markup=kb)
         except Exception:
-            await msg.reply_text(f"پیام به همسر ارسال نشد؛ { _ulink(spouse_id, 'همسر') }، {cheater_name} به {affair_target} نزدیک شد.",parse_mode="HTML",reply_markup=kb)
+            await msg.reply_text(B(f"{RLM}پیام به همسر ارسال نشد؛ {_ulink(spouse_id, 'همسر')}، {A} در گروه «{grp}» {T} رو {act_past}."),parse_mode="HTML",reply_markup=kb)
     return True
 
 
