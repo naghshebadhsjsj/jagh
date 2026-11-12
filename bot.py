@@ -562,6 +562,8 @@ async def init_db(app: Application):
             recipient_username TEXT NOT NULL, price BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
             receipt_file_id TEXT, created_at DOUBLE PRECISION NOT NULL, reviewed_by BIGINT, reviewed_at DOUBLE PRECISION)""")
         await c.execute("CREATE INDEX IF NOT EXISTS gift_orders_user_idx ON gift_orders(user_id, created_at DESC)")
+        await c.execute("ALTER TABLE gift_orders ADD COLUMN IF NOT EXISTS anonymous BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE gift_orders ADD COLUMN IF NOT EXISTS msg_refs TEXT NOT NULL DEFAULT '[]'")
         # جقستگرام: پروفایل، رسانه، پست، استوری، ری‌اکشن و چت‌روم عمومی
         await c.execute("CREATE TABLE IF NOT EXISTS social_profiles (user_id BIGINT PRIMARY KEY, username TEXT UNIQUE, display_name TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', avatar_media_id BIGINT, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS social_media (media_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, kind TEXT NOT NULL, data BYTEA NOT NULL, content_type TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, expires_at DOUBLE PRECISION)")
@@ -2096,7 +2098,7 @@ function SocialScreen(opts){
       cOpenId=id;cgSeen[id]=g0.seq;
       const spectate=!(g0.creator===me.id||g0.opponent===me.id);
       const rot=g0.opponent===me.id;
-      const V={g:g0,bodies:new Map(),anim:null,aim:null,vx:500,dlTs:0,readyTs:0,sending:false,overlap:false,lastSec:-1,resShown:false,pk:new Map()};
+      const V={g:g0,bodies:new Map(),anim:null,aim:null,vx:500,dlTs:0,readyTs:0,sending:false,sendTs:0,overlap:false,lastSec:-1,resShown:false,pk:new Map()};
       const ov=h('div',{class:'cov'});
       const potEl=h('div',{class:'cov-pot'});
       const xb=h('button',{class:'cov-x',onclick:()=>{cDismiss[id]=true;closeCarrom();cgSig='';cgDraw()}},'✕ بستن');
@@ -2223,35 +2225,42 @@ function SocialScreen(opts){
         c.restore();
       };
       const strikerW=()=>({x:rot?CW-V.vx:V.vx,y:rot?190:810});
+      // true = مثل تیرکمان: مهره رو به عقب بکش، به جهت مخالف انگشت شلیک میشه. false = به سمت هدف بکش.
+      const AIM_BACK=true;
       const aimVec=()=>{
         const a=V.aim;if(!a)return null;
         const dx=a.p.x-a.p0.x,dy=a.p.y-a.p0.y,pull=Math.hypot(dx,dy);if(pull<1)return null;
-        const k=rot?1:-1;
-        // در کاروم مهره به عقب کشیده می‌شود و در جهت مخالف حرکت می‌کند.
-        return{wx:-k*dx/pull,wy:-dy/pull,pull,power:Math.min(1,pull/CMAXPULL)};
+        // جهت شلیک روی صفحه‌ی نمایش؛ بعد برای بازیکن دوم (که میز ۱۸۰ درجه چرخیده) به مختصات میز برمی‌گرده.
+        const sg=AIM_BACK?-1:1,k=rot?-1:1;
+        return{wx:k*sg*dx/pull,wy:k*sg*dy/pull,pull,power:Math.min(1,pull/CMAXPULL)};
       };
       const drawAim=(c,s)=>{
         const av=aimVec();if(!av||av.pull<22||V.overlap)return;
-        // خط هدف تا اولین برخورد
+        // مسیر پیش‌بینی تا اولین برخورد (خط‌چین نازک)
         let best=1400,hit=null;
         for(const[id,b]of V.bodies){if(id===0)continue;
           const ox=b.x-s.x,oy=b.y-s.y,t=ox*av.wx+oy*av.wy;if(t<=0)continue;
           const d2=ox*ox+oy*oy-t*t,R=CRAD+CSR;if(d2>R*R)continue;
           const tt=t-Math.sqrt(R*R-d2);if(tt>0&&tt<best){best=tt;hit=b}}
         const ex=s.x+av.wx*best,ey=s.y+av.wy*best;
-        c.save();
-        // فلش جهت‌دار به‌جای خط صاف؛ نوک فلش مسیر حرکت مهره را واضح می‌کند.
-        const ax=ex-s.x,ay=ey-s.y,al=Math.hypot(ax,ay)||1,ux=ax/al,uy=ay/al;
-        const tipX=ex-ux*(hit?CSR+8:10),tipY=ey-uy*(hit?CSR+8:10),baseX=tipX-ux*25,baseY=tipY-uy*25;
-        c.setLineDash([12,10]);c.lineWidth=4;c.strokeStyle='rgba(255,255,255,.9)';
-        c.beginPath();c.moveTo(s.x,s.y);c.lineTo(baseX,baseY);c.stroke();c.setLineDash([]);
-        c.fillStyle='rgba(255,255,255,.98)';c.beginPath();c.moveTo(tipX,tipY);c.lineTo(baseX-uy*13,baseY+ux*13);c.lineTo(baseX+uy*13,baseY-ux*13);c.closePath();c.fill();
-        c.strokeStyle='rgba(255,255,255,.7)';c.lineWidth=3;c.beginPath();c.arc(ex,ey,CSR,0,7);c.stroke();
+        c.save();c.lineCap='round';c.lineJoin='round';
+        c.setLineDash([10,12]);c.lineWidth=3;c.strokeStyle='rgba(255,255,255,.55)';
+        c.beginPath();c.moveTo(s.x,s.y);c.lineTo(ex,ey);c.stroke();c.setLineDash([]);
+        c.strokeStyle='rgba(255,255,255,.6)';c.lineWidth=3;c.beginPath();c.arc(ex,ey,CSR,0,7);c.stroke();
         if(hit){const nx=hit.x-ex,ny=hit.y-ey,nl=Math.hypot(nx,ny)||1;c.strokeStyle='rgba(250,204,21,.9)';c.lineWidth=4;c.beginPath();c.moveTo(hit.x,hit.y);c.lineTo(hit.x+nx/nl*110,hit.y+ny/nl*110);c.stroke()}
-        // کشش (قدرت)
-        const bx=s.x-av.wx*(CSR+14),by=s.y-av.wy*(CSR+14),ln=av.power*170;
-        c.lineCap='round';c.lineWidth=12;c.strokeStyle=av.power>.75?'#f43f5e':(av.power>.4?'#fb923c':'#4ade80');
-        c.beginPath();c.moveTo(bx,by);c.lineTo(bx-av.wx*ln,by-av.wy*ln);c.stroke();
+        // خط کشش: از مهره تا جای انگشت (دقیقاً دنبال انگشت میاد)
+        const hx=s.x-av.wx*av.pull,hy=s.y-av.wy*av.pull;
+        c.strokeStyle='rgba(20,10,5,.45)';c.lineWidth=7;c.beginPath();c.moveTo(s.x,s.y);c.lineTo(hx,hy);c.stroke();
+        c.fillStyle='rgba(255,255,255,.9)';c.beginPath();c.arc(hx,hy,12,0,7);c.fill();
+        // فلش محکم و توپر؛ طولش به اندازه‌ی کشیدنه و جهتش جهت حرکت مهره‌ست
+        const col=av.power>.75?'#f43f5e':(av.power>.4?'#fb923c':'#4ade80');
+        const len=Math.min(CMAXPULL,av.pull),x0=s.x+av.wx*(CSR+6),y0=s.y+av.wy*(CSR+6);
+        const x1=s.x+av.wx*(CSR+6+len),y1=s.y+av.wy*(CSR+6+len),HL=34,HW=24;
+        const bx=x1-av.wx*HL,by=y1-av.wy*HL,px=-av.wy,py=av.wx;
+        c.strokeStyle='rgba(0,0,0,.35)';c.lineWidth=20;c.beginPath();c.moveTo(x0,y0);c.lineTo(bx,by);c.stroke();
+        c.strokeStyle=col;c.lineWidth=14;c.beginPath();c.moveTo(x0,y0);c.lineTo(bx,by);c.stroke();
+        c.fillStyle=col;c.strokeStyle='rgba(0,0,0,.35)';c.lineWidth=3;
+        c.beginPath();c.moveTo(x1,y1);c.lineTo(bx+px*HW,by+py*HW);c.lineTo(bx-px*HW,by-py*HW);c.closePath();c.fill();c.stroke();
         c.restore();
       };
       const frame=now=>{
@@ -2268,6 +2277,7 @@ function SocialScreen(opts){
             });
           }
         }
+        if(V.sending&&!V.anim&&Date.now()-V.sendTs>5000)V.sending=false;   /* اگه جواب شلیک گم شد قفل نمونه */
         const can=canShoot();
         const s=strikerW();
         V.overlap=false;
@@ -2309,21 +2319,23 @@ function SocialScreen(opts){
       // ───── ورودی ─────
       const vp=e=>{const r=cvs.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*CW,y:(e.clientY-r.top)/r.height*CW}};
       cvs.onpointerdown=e=>{
-        if(!canShoot())return;
+        if(!canShoot()||V.aim)return;
         const p=vp(e),s=strikerW(),screenS=rot?{x:CW-s.x,y:CW-s.y}:s;
-        // کشیدن از روی خود مهره؛ نه از یک نقطه‌ی دلخواه روی میز.
-        if(Math.hypot(p.x-screenS.x,p.y-screenS.y)>CSR*2.8)return;
+        // کشیدن باید از روی (یا نزدیکِ) خود مهره شروع بشه
+        if(Math.hypot(p.x-screenS.x,p.y-screenS.y)>CSR*3.4)return;
         try{cvs.setPointerCapture(e.pointerId)}catch(x){}
-        V.aim={p0:screenS,p:screenS};e.preventDefault();
+        V.aim={p0:p,p:p,pid:e.pointerId};e.preventDefault();
       };
-      cvs.onpointermove=e=>{if(V.aim){V.aim.p=vp(e);e.preventDefault()}};
+      cvs.onpointermove=e=>{if(V.aim&&e.pointerId===V.aim.pid){V.aim.p=vp(e);e.preventDefault()}};
       cvs.onpointercancel=()=>{V.aim=null};
+      cvs.onlostpointercapture=e=>{if(V.aim&&e.pointerId===V.aim.pid)V.aim=null};
       cvs.onpointerup=async e=>{
-        if(!V.aim)return;const av=aimVec();V.aim=null;
+        if(!V.aim||e.pointerId!==V.aim.pid)return;
+        V.aim.p=vp(e);const av=aimVec();V.aim=null;
         if(!av||av.pull<22)return;
         if(!canShoot())return;
         if(V.overlap){toast('استرایکر روی یه مهره‌ست؛ جاش رو عوض کن',1);return}
-        const s=strikerW();V.sending=true;
+        const s=strikerW();V.sending=true;V.sendTs=Date.now();
         const r=await carromCall('/api/social/room/carrom/shoot',{game_id:id,x:s.x,angle:Math.atan2(av.wy,av.wx),power:av.power});
         if(!r){V.sending=false;loadCarrom()}
       };
@@ -2876,6 +2888,23 @@ function GamesScreen(){
  }
  async function crash(){
   let st,active=null,busy=false,stopped=false,timer=null,poll=null,watchPoll=null,raf=null,watchRound=null;
+  /* ساعت گوشی ممکنه با سرور فرق داشته باشه؛ اختلاف رو از جواب سرور حساب می‌کنیم تا ضریب جلوتر یا عقب‌تر نره */
+  let skew=0,lastOk=performance.now();
+  const sNow=()=>Date.now()/1000+skew;
+  async function apiS(path,body){const t0=Date.now()/1000;const r=await api(path,body);const t1=Date.now()/1000;if(r&&r.now)skew=Number(r.now)-(t0+t1)/2;lastOk=performance.now();return r}
+  function endUnknown(r){
+    /* سرور می‌گه بازیِ فعالی نداری ولی نتیجه‌اش به ما نرسیده؛ شمارنده نباید بی‌نهایت بالا بره */
+    if(!active)return;
+    clearInterval(timer);clearInterval(poll);active=null;
+    if(r&&r.balance!=null)balance.textContent=num(r.balance);
+    if(r&&r.hist)drawHist(r.hist);
+    mult.className='rk-mult lose';
+    if(r&&r.watch_phase==='crashed')mult.textContent=fx(r.mult);
+    status.textContent='⏹ این دور تموم شد؛ نتیجه‌اش توی موجودی ثبت شده.';
+    panel.replaceChildren(h('div',{class:'rk-hint'},'نتیجه‌ی این دور قبلاً ثبت شده است.'),
+      h('button',{class:'rk-main',onclick:()=>{mult.className='rk-mult cd';scene.reset();betPhase()}},'🔄 بازی دوباره'));
+    watchRounds();
+  }
   const cv=h('canvas',{class:'rk-cv'}),scene=rocketScene(cv),status=h('div',{class:'rk-tgt'},'آماده‌ی پرواز…'),hist=h('div',{class:'rk-hist'});
   const balance=h('b',{},'…'),mult=h('div',{class:'rk-mult cd'},'x1.00'),panel=h('div',{class:'rk-panel'});
   const cash=h('button',{class:'rk-main green',onclick:cashout,disabled:true},'برداشت جایزه');
@@ -2892,11 +2921,11 @@ function GamesScreen(){
     const pollWatch=async()=>{
       if(stopped||active||busy)return;
       try{
-        const r=await api('/api/game/crash/state');
+        const r=await apiS('/api/game/crash/state');
         if(r.hist)drawHist(r.hist);
         if(r.active){active=r;scene.reset();scene.setRate(r.rate||.12);run();return}
         if(r.watch_round!==watchRound){watchRound=r.watch_round;scene.reset();mult.className='rk-mult cd'}
-        const now=Date.now()/1000,delay=Math.max(0,(r.t0||now)-now);
+        const now=sNow(),delay=Math.max(0,(r.t0||now)-now);
         if(r.watch_phase==='waiting'){
           mult.textContent='x1.00';status.textContent='🚀 پرواز خودکار بعدی تا '+num(delay.toFixed(1))+' ثانیه دیگر';
           scene.reset();
@@ -2920,7 +2949,7 @@ function GamesScreen(){
         if(busy)return;busy=true;
         try{
           const rawTarget=String(target.value||'').trim();const tgt=rawTarget?Number(rawTarget):null;if(rawTarget&&(!Number.isFinite(tgt)||tgt<1.1||tgt>100)){toast('ضریب هدف باید بین ۱٫۱ تا ۱۰۰ باشد یا خالی بماند.',1);return}
-          const r=await api('/api/game/crash/start',{bet,target:tgt});
+          const r=await apiS('/api/game/crash/start',{bet,target:tgt});
           clearInterval(watchPoll);balance.textContent=num(r.balance);active=r;scene.reset();scene.setRate(r.rate||.12);
           status.textContent='شمارش معکوس شروع شد…';cash.disabled=true;run();
         }catch(e){toast(e.message,1)}
@@ -2931,8 +2960,9 @@ function GamesScreen(){
     clearInterval(timer);clearInterval(poll);
     const tick=()=>{
       if(stopped||!active)return;
-      const now=Date.now()/1000,delay=Math.max(0,active.t0-now);
+      const now=sNow(),delay=Math.max(0,active.t0-now);
       if(delay>0){status.textContent='⏳ شروع پرواز تا '+num(delay.toFixed(1))+' ثانیه';mult.textContent='آماده…';return}
+       if(performance.now()-lastOk>2500){status.textContent='⚠️ اتصال ضعیفه؛ ضریب تا برگشتن اتصال ثابت می‌مونه…';return}
       const el=Math.max(0,now-active.t0),m=Math.exp((active.rate||.12)*el);
       scene.setRate(active.rate||.12);scene.setEl(el);scene.go();
       mult.textContent=fx(m);status.textContent='🚀 موشک در حال اوج‌گیری است!';
@@ -2942,12 +2972,13 @@ function GamesScreen(){
     poll=setInterval(async()=>{
       if(stopped||busy||!active)return;
       try{
-        const r=await api('/api/game/crash/state');
+        const r=await apiS('/api/game/crash/state');
         if(r.hist)drawHist(r.hist);
         if(r.done){finish(r);return}
         if(r.active){balance.textContent=num(r.balance);active={...active,t0:r.t0,rate:r.rate,bet:r.bet};}
+        else{endUnknown(r);return}
       }catch(e){/* خطای گذرای شبکه؛ تلاش بعدی انجام می‌شود */}
-    },450);
+    },220);
     panel.replaceChildren(h('div',{class:'rk-lbl'},'شرط: '+num(active.bet)+' تومان'),
       cash,h('div',{class:'rk-hint'},'هر لحظه می‌توانی برداشت کنی؛ منتظر نمان تا ضریب بیش از حد بالا برود.'));
   }
@@ -2980,7 +3011,7 @@ function GamesScreen(){
     watchRounds();
   }
   try{
-    st=await api('/api/game/crash/state');balance.textContent=num(st.balance);drawHist(st.hist||[]);
+    st=await apiS('/api/game/crash/state');balance.textContent=num(st.balance);drawHist(st.hist||[]);
     if(st.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
     if(st.active){active=st;scene.setRate(st.rate||.12);run()}
     else if(st.done){drawHist(st.hist||[]);status.textContent=st.result==='win'?'🏆 بازی قبلی با برد تمام شد.':'💥 بازی قبلی به انفجار رسید.';betPhase()}
@@ -3192,24 +3223,34 @@ function openTab(k){
  if(!tabEls[k])tabEls[k]=TABS[k]();push(tabEls[k],true);
 }
 async function bootTabs(){
- try{
-  const m=await api('/api/social/me'),isSupport=m.is_support;
-  if(!isSupport){
-   ['chats','users','panel'].forEach(k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove());
-   openTab('myself');
-  }else{
-   if(!(m.perms||[]).includes('group_msgs'))document.querySelector('#tabs button[data-k="chats"]')?.remove();
-   if(!(m.perms||[]).includes('panel'))document.querySelector('#tabs button[data-k="panel"]')?.remove();
-   if(!(m.perms||[]).includes('staff_list')&&!m.perms?.length)document.querySelector('#tabs button[data-k="users"]')?.remove();
-   openTab('myself');
-  }
- }catch(e){
-  ['chats','users','panel'].forEach(k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove());
-  openTab('myself');
+ /* صفحه‌ی آماده‌سازی: همه‌چیز (چت‌روم، بازی‌ها، فروشگاه، خودم) قبل از ورود کاربر بالا میاد */
+ const sty=document.createElement('style');sty.textContent='@keyframes spn{to{transform:rotate(360deg)}}';document.head.append(sty);
+ const splash=h('div',{style:'position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px'},
+  h('div',{style:'width:44px;height:44px;border:4px solid var(--line);border-top-color:var(--btn);border-radius:50%;animation:spn .9s linear infinite'}),
+  h('div',{style:'font-size:14px;color:var(--hint)'},'در حال آماده‌سازی مینی‌اپ…'));
+ document.body.append(splash);
+ const rm=k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove();
+ let m=null;
+ try{m=await api('/api/social/me')}catch(e){}
+ if(!m||!m.is_support){
+  /* کاربر عادی فقط: چت‌روم، فروشگاه، بازی‌ها و خودم */
+  ['chats','users','panel'].forEach(rm);
+ }else{
+  if(!(m.perms||[]).includes('group_msgs'))rm('chats');
+  if(!(m.perms||[]).includes('panel'))rm('panel');
+  if(!(m.perms||[]).includes('staff_list')&&!m.perms?.length)rm('users');
  }
+ const keys=[...document.querySelectorAll('#tabs button')].map(b=>b.dataset.k);
+ /* داده‌ی سرور رو از قبل گرم می‌کنیم و همه‌ی تب‌ها همین الان ساخته میشن تا دیتاشون بیاد */
+ const warm=['/api/myself','/api/social/room','/api/social/leaderboard','/api/game/crash/state'].map(u=>api(u).catch(()=>null));
+ for(const k of keys){try{if(!tabEls[k])tabEls[k]=TABS[k]()}catch(e){console.error(e)}}
+ const loading=()=>keys.some(k=>tabEls[k]&&[...tabEls[k].querySelectorAll('.empty')].some(e=>/^در حال/.test(e.textContent||'')));
+ const t0=performance.now();
+ await Promise.race([Promise.allSettled(warm),new Promise(r=>setTimeout(r,6000))]);
+ while(loading()&&performance.now()-t0<6000)await new Promise(r=>setTimeout(r,120));
+ openTab('myself');
+ splash.style.transition='opacity .25s';splash.style.opacity='0';setTimeout(()=>splash.remove(),260);
 }
-document.querySelectorAll('#tabs i[data-ce]').forEach(i=>i.append(ceI(i.dataset.ce,26)));
-document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>openTab(b.dataset.k));
 bootTabs();
 </script></body></html>
 """
@@ -5990,9 +6031,12 @@ async def startup(app: Application):
         app.bot_data["energy_task"] = asyncio.create_task(energy_decay_loop())
         app.bot_data["bank_interest_task"] = asyncio.create_task(bank_interest_loop())
         try:
-            from telegram import MenuButtonDefault
+            from telegram import MenuButtonDefault, MenuButtonWebApp
             await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
-            await app.bot.set_chat_menu_button(menu_button=MenuButtonDefault())
+            if WEBAPP_URL.startswith("https://"):   # مینی‌اپ برای همه‌ی کاربرها: دکمه‌ی کنار فیلد پیام
+                await app.bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="📱 مینی‌اپ", web_app=WebAppInfo(url=WEBAPP_URL)))
+            else:
+                await app.bot.set_chat_menu_button(menu_button=MenuButtonDefault())
         except Exception:
             log.warning("reset commands menu failed", exc_info=True)
         app.bot_data["ref_task"] = asyncio.create_task(referral_check_loop(app))
@@ -6091,7 +6135,10 @@ def welcome_ok() -> str:
 
 
 def welcome_keyboard(bot_username: str = "") -> InlineKeyboardMarkup:
-    rows = [
+    rows = []
+    if WEBAPP_URL.startswith("https://"):
+        rows.append([btn("📱 مینی‌اپ", "success", web_app=WebAppInfo(url=WEBAPP_URL))])
+    rows += [
         [btn("زیرمجموعه‌گیری", "success", icon=REF_EID, callback_data="rf:open")],
         [btn("خرید پول بازی", "primary", icon=EID_MONEY, callback_data="bu:menu")],
         [btn("📖 راهنما", "primary", callback_data="guide:open")],
@@ -8925,18 +8972,18 @@ async def set_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # با نوشتن «شغل» یا «شغل ها» لیست شغل‌ها میاد: حقوق + اینکه چند جق مونده تا اون شغل.
 JOB_REQUIRED_JAGHS = [5, 100, 250, 450, 700, 1000, 1400, 1800, 2150, 2500]
 JOB_PAY = [
-    ("30K", "50K"), ("80K", "100K"), ("150K", "250K"), ("400K", "600K"), ("2M", "3700K"),
-    ("3700K", "4300K"), ("4300K", "6M"), ("6M", "7100K"), ("7100K", "8500K"), ("8500K", "10M"),
+    ("60K", "60K"), ("105K", "105K"), ("181K", "181K"), ("243K", "243K"), ("436K", "436K"),
+    ("592K", "592K"), ("800K", "800K"), ("1.1M", "1.1M"), ("1.5M", "1.5M"), ("1.8M", "1.8M"),
 ]
 # (اسم شغل، سطح کاراکتری که ایموجیش ازش میاد)
 JOBS = {
     "m": [("دانشجو", 2), ("سرباز", 1), ("راننده تاکسی", 3), ("فروشنده", 4), ("وکیل", 5),
-          ("فضانورد", 6), ("رئیس اداره", 7), ("رئیس‌جمهور", 8), ("رهبر", 9), ("میلیاردر", 10)],
+          ("فضانورد", 6), ("رئیس اداره", 7), ("رئیس‌جمهور", 8), ("رهبر", 9), ("میلیونر", 10)],
     "f": [("دانشجو", 1), ("بلاگر", 2), ("رقاص", 3), ("ناخن‌کار", 4), ("دندان‌پزشک", 5),
-          ("داروخونه‌دار", 6), ("وکیل", 7), ("فضانورد", 8), ("شغل مرموز", 9), ("میلیاردر", 10)],
+          ("داروخونه‌دار", 6), ("وکیل", 7), ("فضانورد", 8), ("شغل مرموز", 9), ("میلیونر", 10)],
 }
 JOB_GLYPHS = {"دانشجو": "🎓", "سرباز": "🪖", "راننده تاکسی": "🚕", "فروشنده": "🛍", "وکیل": "⚖️",
-              "فضانورد": "🚀", "رئیس اداره": "👔", "رئیس‌جمهور": "🏛", "رهبر": "🎖", "میلیاردر": "💰",
+              "فضانورد": "🚀", "رئیس اداره": "👔", "رئیس‌جمهور": "🏛", "رهبر": "🎖", "میلیونر": "💰",
               "بلاگر": "📱", "رقاص": "💃", "ناخن‌کار": "💅", "دندان‌پزشک": "🦷", "داروخونه‌دار": "💊"}
 JOBS_WORDS = {"شغل", "شغلها", "jobs"}
 
@@ -9128,7 +9175,7 @@ def jobs_rows(gender: str, jaghs: int):
         lo, hi = JOB_PAY[i]
         if left and nxt is None:
             nxt = (name, left)
-        rows.append((JOB_GLYPHS.get(name, "💼"), name, f"{lo}-{hi}", left))
+        rows.append((JOB_GLYPHS.get(name, "💼"), name, lo if lo == hi else f"{lo}-{hi}", left))
     return rows, nxt
 
 
@@ -9360,7 +9407,7 @@ SHIFT_QS = {
             ("بلند می‌شم قدم می‌زنم", "قدم زدی و ایده‌ی خوبی به ذهنت رسید."),
         ]),
     ],
-    "میلیاردر": [
+    "میلیونر": [
         ("یه استارتاپ ازت سرمایه می‌خواد. چکار می‌کنی؟", [
             ("سرمایه‌گذاری می‌کنم", "سرمایه‌گذاری کردی و سودش زود رسید."),
             ("ایده‌ش رو بررسی می‌کنم", "ایده رو بررسی کردی و یه شراکت خوب بستی."),
@@ -9537,7 +9584,7 @@ SHIFT_QS_EXTRA = {
         ("خدمتکار چای خیلی داغ ریخته.", "صبر می‌کنم", "چای خنک شد و لذت بردی.", "می‌خندم", "همه خندیدن.", "عوضش می‌کنم", "چای جدید آوردن."),
         ("مشاورت یه نقشه‌ی بلندپروازانه داده.", "اجراش می‌کنم", "نقشه جواب داد و افتخار کردی.", "اصلاحش می‌کنم", "نقشه بهتر شد.", "بایگانیش می‌کنم", "نقشه برای بعدا موند."),
     ],
-    "میلیاردر": [
+    "میلیونر": [
         ("سهام شرکتت ۱۰٪ ریخته.", "می‌فروشم", "ضرر کم شد.", "نگه می‌دارم", "هفته‌ی بعد بالا رفت!", "بیشتر می‌خرم", "قیمت برگشت و سود کردی."),
         ("تصمیم داری یه جزیره بخری.", "خصوصی می‌خرم", "جزیره مال تو شد.", "اجاره می‌کنم", "ارزون‌تر تموم شد.", "فکر می‌کنم", "هنوز دودلی ولی جزیره می‌مونه."),
         ("شریکت کلاهبردار از آب دراومد.", "شکایت می‌کنم", "پولت برگشت.", "ازش می‌گذرم", "درس گرفتی.", "شرکت رو تقسیم می‌کنم", "با جدایی راحت شدی."),
@@ -9619,7 +9666,7 @@ SHIFT_DEFAULT_QS = SHIFT_QS["دانشجو"]
 def parse_pay(s: str) -> int:
     s = s.strip().upper()
     mult = 1_000_000 if s.endswith("M") else 1_000 if s.endswith("K") else 1
-    return int(float(s.rstrip("KM")) * mult)
+    return int(round(float(s.rstrip("KM")) * mult))
 
 
 def current_job(gender: str, jaghs: int, work_count: int = 0):
@@ -9631,6 +9678,245 @@ def current_job(gender: str, jaghs: int, work_count: int = 0):
     if best and best[0] == len(JOBS[gender]) - 1 and work_count < 1200:
         best = (len(JOBS[gender]) - 2, JOBS[gender][len(JOBS[gender]) - 2][0]) if len(JOBS[gender]) > 1 and jaghs >= JOB_REQUIRED_JAGHS[-2] else None
     return best
+
+
+# ───── متن‌های خفن شیفت: هر شغل مجموعه‌ی جدا داره. هر دور کار: یه «شروع» + نتیجه‌ی سوال + یه «واکنش» + خط حقوق، همه رندوم ─────
+SHIFT_OPEN = {
+    "دانشجو": [
+        "کوله‌ات رو انداختی رو دوش، چشمات نیمه‌بازه و تنها امیدت به رحمت استاده. 🎒",
+        "بوی کافه‌ی دانشکده میاد و حساب بانکیت داره آروم آروم جون می‌ده.",
+        "ترم آخره (برای بار پنجم) و تو هنوز عین شیر سر پایی. 🦁",
+    ],
+    "سرباز": [
+        "شیپور صبحگاه زده شد و پوتینت از همین الان داره شکایت می‌کنه. 🎺",
+        "گروهبان با اون ابروهای گره‌خورده‌ش داره می‌چرخه؛ یه چیزی تو هواست.",
+        "پادگان بوی عدسی و غیرت میده، یعنی یه روز عادی دیگه.",
+    ],
+    "راننده تاکسی": [
+        "فرمون رو چسبیدی، رادیو روی اخبار ترافیک و بنزین هم که… خب، بنزینه. 🚕",
+        "مسافر اولت سوار شد و گفت «آقا تند نرو، ولی دیرم شده!»",
+        "چراغ «آزاد» روشنه و تهران داره نفس‌نفس می‌زنه.",
+    ],
+    "فروشنده": [
+        "کرکره رو دادی بالا و مشتری‌ها مثل ماهی توی دریا دورت می‌چرخن. 🛍",
+        "یه مشتری اومد تو و گفت «فقط نگاه می‌کنم»… یعنی خرید داره!",
+        "تابلوی «حراج» رو زدی؛ حالا هر چی هم گرون باشه، حراجه.",
+    ],
+    "وکیل": [
+        "کت‌وشلوارت اتو کشیده، پرونده‌ها روی میز و لبخندت مثل اینه که قاضی رو از قبل می‌شناسی. ⚖️",
+        "یه موکل با یه پرونده‌ی به‌شدت مشکوک اومد دفترت. جذاب شد.",
+        "دادگاه ساعت ۹ شروع میشه و تو هنوز داری جمله‌ی اول دفاعیه رو تمرین می‌کنی.",
+    ],
+    "فضانورد": [
+        "کاونت‌داون شروع شد، دلت هم همراهش؛ ۱۰… ۹… ۸… 🚀",
+        "از پنجره‌ی ایستگاه زمین عین یه تیله‌ی آبی دیده میشه و تو دلت تنگ شده برای نون سنگک.",
+        "کلاه فضانوردی رو گذاشتی و خودت رو تو آینه «ارباب کهکشان» صدا زدی.",
+    ],
+    "رئیس اداره": [
+        "پشت میز بزرگ نشستی و یه فنجون چای جلوته؛ همه‌ی کارمندا یهو مشغول به نظر میان. 👔",
+        "منشی خبر داد جلسه‌ی «خیلی مهم» ساعت ۱۰ه… که نصفش بی‌ربطه.",
+        "تلفنت زنگ می‌خوره و تو با صدای یه رئیس واقعی میگی «بفرمایید».",
+    ],
+    "رئیس‌جمهور": [
+        "اتاق کار با پرچم‌ها و میکروفون‌ها آماده‌ست و یه خبرنگار دنبال یه سوال سخته. 🏛",
+        "مشاورت با یه پوشه‌ی کلفت اومد تو و گفت «قربان، یه خبر خوب و یه خبر بد دارم.»",
+        "کاروان آماده‌ست و تو فقط داری فکر می‌کنی ناهار چی بخوری.",
+    ],
+    "رهبر": [
+        "همه‌ی نگاه‌ها به توئه و تو داری ریش‌هات رو (یا سبیلت رو) با غرور مرتب می‌کنی. 🎖",
+        "صدای هلهله از پشت پنجره میاد؛ یه روز دیگه، یه رهبری دیگه.",
+        "گزارش‌ها رو روی میز ریختن و یه سکوت سنگین تو اتاق پیچیده.",
+    ],
+    "میلیونر": [
+        "ساعتت رو نگاه کردی؛ طلاییه. دوباره نگاه کردی؛ بازم طلاییه. 💰",
+        "راننده‌ی شخصی تو ماشین منتظره و گارسون با یه لبخند وسط اتاق وایساده.",
+        "حساب بانکیت اونقدر صفر داره که ماشین‌حساب خجالت می‌کشه.",
+    ],
+    "بلاگر": [
+        "رینگ‌لایت رو روشن کردی و دوربین رو با ژست «طبیعی» (۴۰ بار تمرین‌شده) گذاشتی. 📱",
+        "فالوورها دارن می‌پرسن «پارت بعدی کِی میاد؟» و تو یه لبخند ژنده‌ی حرفه‌ای می‌زنی.",
+        "گوشیت ۳٪ شارژ داره ولی ایده‌ی ویدیوی بعدی ۱۰۰٪ توئه.",
+    ],
+    "رقاص": [
+        "موزیک پلی شد و پاهات خودشون راه افتادن؛ دیگه به مغز احتیاجی ندارن. 💃",
+        "سالن پر شده، نورها رو تو تنظیم کردن و قلبت با بیت هماهنگ میزنه.",
+        "کفشات رو پوشیدی و یه چرخ زدی، فقط برای اینکه مطمئن شی هنوز استادی.",
+    ],
+    "ناخن‌کار": [
+        "ست لاک‌ها رو چیدی و یه مشتری با ناخن شکسته اومد تو. 💅",
+        "بوی استون و ذوق مشتریا سالن رو برداشته؛ امروز روز پرکاریه.",
+        "دست‌هات تیز و قلم‌موهات آماده‌ن؛ ناخن‌ها منتظر شاهکارت هستن.",
+    ],
+    "دندان‌پزشک": [
+        "دستکش‌هات رو پوشیدی و چراغ بالای سر بیمار رو روشن کردی؛ بیمار داره عرق می‌کنه. 🦷",
+        "صدای دریل از اتاق بغلی میاد و تو با یه لبخند آروم میگی «درد نداره».",
+        "یه بیمار اومد و گفت «دکتر، من فقط یه کوچولو درد دارم»… که معلوم شد اصلاً کوچولو نیست.",
+    ],
+    "داروخونه‌دار": [
+        "قفسه‌ها مرتبن و تو با یه نگاه می‌فهمی کی سرماخورده و کی فقط می‌خواد حرف بزنه. 💊",
+        "یه مشتری با یه نسخه‌ی غیرقابل خوندن اومد؛ دست‌خط دکترا همیشه معماست.",
+        "زنگ در به صدا دراومد و بوی نعناع و الکل پیچید تو داروخونه.",
+    ],
+    "شغل مرموز": [
+        "یه پاکت مشکی روی میزت بود؛ بدون فرستنده، بدون اسم، فقط یه مهر عجیب. 🕵️",
+        "چراغ‌ها یه لحظه پلک زدن و تو فهمیدی کسی داره بهت نگاه می‌کنه.",
+        "گوشیت یه پیام رمزی گرفت: «ساعت ۳، همونجا.» کدوم «همونجا»؟!",
+    ],
+}
+
+SHIFT_OUTRO = {
+    "دانشجو": [
+        "استاده یه نگاه بهت انداخت و گفت «شما… از اون خرابکارای باهوشی». این یعنی نمره‌ی بیست. 🎓",
+        "رفقات تو گروه کلاس اسمت رو شد «مغز متفکر پشت‌پرده» و ازت خواستن بعداً کلاس خصوصی بذاری.",
+        "تو بوفه همه فکر می‌کنن تو نابغه‌ای؛ فقط خودت می‌دونی با چند تا استیکر شانس آوردی.",
+        "عکس‌ت رو با جمله‌ی «دانشجوی نمونه» تو تابلوی اعلانات زدن؛ یه نفر هم زیرش نوشته «ولی نمی‌دونم چطوری».",
+        "حالا نصف دانشکده می‌دونه تو بی‌جزوه هم می‌تونی؛ نصف دیگه فقط حسودیشون شد.",
+        "برگه‌ات رو تحویل دادی و تا ته راهرو با قدم‌های شیک رفتی، عین یه دانشجوی سال آخر دکترا.",
+    ],
+    "سرباز": [
+        "فرمانده زیر لب گفت «آفرین سرباز!» و یه نگاه کرد که معلوم نبود تحسینه یا ترس. 🪖",
+        "هم‌خدمتی‌هات با افتخار بهت می‌گن «ستون پادگان» و یکی ازشون برات چای شیرین ریخت.",
+        "امشب پادگان می‌تونه خیالش راحت بخوابه؛ چون تو بیداری، و بیدار موندنت هم یه افسانه‌ست.",
+        "گروهبان خواست اسمت رو تو دفتر افتخار بنویسه ولی خودکارش خشک بود، پس فعلاً تو دلش نوشت.",
+        "تا ته خط همه از قدم‌های محکمت حرف می‌زنن؛ حتی اون نگهبان بغلی که دیشب خواب بود.",
+        "پوتین‌هات هنوز بوی عدسی میدن، ولی دلت پر از غروره و جیبت پر از حقوق. 🫡",
+    ],
+    "راننده تاکسی": [
+        "مسافر وقتی پیاده شد گفت «شما بهترین راننده‌ی تهرانی» و نه کرایه رو کامل داد نه پشیمون شد. 🚕",
+        "یه ترافیک نیم‌ساعته رو با یه میان‌بُر مخفی ۷ دقیقه کردی؛ راننده‌های بغلی ازت عکس گرفتن.",
+        "رادیو داشت آهنگ نوستالژی پخش می‌کرد، مسافر همخوانی کرد و کلی انعام داد.",
+        "کل مسیر درباره‌ی سیاست، فوتبال و طرز درست پختن آبگوشت حرف زدین و آخرش هم دوست شدین.",
+        "بنزین سوزوندی و کلی کرایه جمع کردی؛ داشبورد ماشین هم کیف کرد از اینهمه سکه.",
+        "امروز هیچ مسافری ازت شکایت نکرد، که برای یه تاکسی‌گیر تو تهران یعنی افتخار ملی!",
+    ],
+    "فروشنده": [
+        "مشتری رفت، ولی با سه تا چیزی که اصلاً قصدش رو نداشت. استاد فروش یعنی همین. 🛍",
+        "همسایه‌ی مغازه‌ای ازت راز کار پرسید و تو با یه لبخند معنی‌دار فقط گفتی «اعتماد».",
+        "یه نفر اومد تخفیف بخواد و تو با ادب گفتی «نه»؛ ولی یه آبنبات هم بهش دادی، و خرید کرد!",
+        "کرکره‌ی مغازه خوشحاله و صندوقت هم داره با صدای خشک‌خشک سکه آواز می‌خونه. 🎶",
+        "مشتری قبلی دوباره برگشت و گفت «همون جنس قبلی، ولی دو تا». دل فروشنده یعنی همین.",
+        "امروز تونستی یه یخچال به یه آدم فروش بدی که تو قطب شمال زندگی می‌کرد!",
+    ],
+    "وکیل": [
+        "قاضی با ابروی بالا رفته نگاهت کرد، ولی لب‌هاش یه لبخند ریز داشت: دفاعیه‌ت تموم بود. ⚖️",
+        "موکل با چشمای خیس گفت «شما نجاتم دادی». ازش حق‌الوکاله هم گرفتی، که هم احساس هم حساب.",
+        "طرف مقابل تا آخر جلسه یه کلمه نگفت. چون تو همه‌ش رو قبل از اون گفته بودی.",
+        "پرونده بسته شد، پوشه رو زدی زیر بغل و مثل یه قهرمان فیلمای هالیوودی تو راهرو راه رفتی.",
+        "تو دادگاه یه جمله گفتی که الان تو دفتر وکلا به‌عنوان قصار نوشته شده.",
+        "کت‌وشلوارت هنوز تمیز بود، یعنی همه‌چیز طبق نقشه پیش رفت. 😎",
+    ],
+    "فضانورد": [
+        "از بالا به زمین نگاه کردی و گفتی «همه‌ی دردسرها از اینجا ذره‌ای هم دیده نمیشن». ماموریت موفق. 🚀",
+        "ایستگاه فضایی یه لرزه کرد، تو لیوان قهوه‌ت رو نگه داشتی و حتی یه قطره هم نریخت.",
+        "گروه کنترل زمین با هیجان گفت «تو افسانه‌ای!»؛ تو فقط یه ستاره‌ی دیگه رو اسم‌گذاری کردی.",
+        "یه شهاب‌سنگ با فاصله‌ی ۳ متر از کنارت رد شد. تو فقط پلک زدی.",
+        "کلاهت رو برداشتی و تو بی‌وزنی یه چرخ خوشگل زدی؛ همه‌ی دنیا از رادیو شنیدن.",
+        "با یه اشتباه کوچولو تو دکمه‌ها، یه رکورد جهانی ثبت کردی. هنوز نمی‌دونن چطوری.",
+    ],
+    "رئیس اداره": [
+        "کارمندا بعد از جلسه با نگاه‌های پر از احترام رفتن؛ یکی هم چای دم کرد بدون اینکه بخوای. 👔",
+        "یه امضای محکم پای نامه زدی و همه‌ی دفتر لرزید؛ هم از هیبت، هم از ترس.",
+        "بالاخره تونستی جلسه‌ی دو ساعته رو تو ۲۰ دقیقه جمع کنی؛ به نظر همه یه معجزه بود.",
+        "منشی بهت یه نگاه کرد و گفت «رئیس، شما فوق‌العاده‌این». احتمالاً می‌خواست مرخصی بگیره، ولی خوب بود.",
+        "یه فایل خیلی مهم رو پیدا کردی که کل شرکت هفته‌ها دنبالش بود. تو بیرونش آوردی از پوشه‌ی «متفرقه».",
+        "ساعت ۵ شد، کتت رو برداشتی و بدون عجله رفتی. چون رئیس‌ها هیچ‌وقت عجله ندارن.",
+    ],
+    "رئیس‌جمهور": [
+        "تو کنفرانس خبری یه جمله گفتی که همه‌ی خبرنگارا همزمان دست زدن و یکی هم فراموش کرد گزارشش رو بنویسه. 🏛",
+        "پرچم‌ها آروم تکون خوردن؛ انگار حتی باد هم موافق تصمیمت بود.",
+        "مشاورت زیر لب گفت «واقعاً حرفه‌ای بودین» و تو فقط یه ابروت رو بالا انداختی.",
+        "تو جلسه‌ی دولت یه ایده دادی که کل کابینه رو ساکت کرد؛ یا فوق‌العاده بود یا کاملاً گیج‌کننده.",
+        "تو راه برگشت، وسط ترافیک یه پیرمرد بهت دست تکون داد و تو هم با شکوه تکون دادی. 🎩",
+        "تاریخ یه خط جدید بالاخره براش نوشت، با اسم تو، با قلم طلایی.",
+    ],
+    "رهبر": [
+        "با یه نگاه تو سالن سکوت برقرار شد؛ حتی پرنده‌های بیرون هم دست از جیک‌جیک کشیدن. 🎖",
+        "پیروان با شوق دورت جمع شدن و یکی هم با صدای لرزون گفت «رهبر ما بی‌نظیره».",
+        "یه فرمان دادی که همه‌چیز رو روشن کرد؛ قبلش هیچ‌کس هیچی نفهمیده بود.",
+        "پرچمت با افتخار بالا رفت و یه مورچه هم رو‌ش ایستاد و ادای احترام کرد.",
+        "تو خطبه‌ات یه جمله بود که حالا همه‌جا حک شده؛ حتی رو دیوار دستشویی عمومی.",
+        "با قدم‌های سنگین راه رفتی و کف زمین زیر پات یه لرزش خفیف حس کرد. نه از زلزله؛ از هیبت تو.",
+    ],
+    "میلیونر": [
+        "یه معامله‌ی ساده انجام دادی و دو دقیقه بعد حسابت یه صفر بیشتر داشت. چه شد؟ هیچی، فقط نبوغ. 💰",
+        "گارسون گفت «قربان، صورت‌حساب»، تو گفتی «همه‌ی رستوران رو می‌خرم، صورت‌حساب بمونه». خوشمزه بود.",
+        "یه فقیر قدیمی (قبل از ثروتت) رو دیدی و یه لبخند زدی؛ بعد دو تا ساعت لوکس بهش هدیه دادی.",
+        "کت‌وشلوارت خیلی گرون بود ولی لکه شد؛ دور انداختیش و یکی تازه خریدی. زندگی همینه.",
+        "با تلفن یه شرکت خریدی، ولی همین‌طور که رد می‌شدی یادت رفت اسمش چی بود.",
+        "الان تو تاپ ثروتمندهای شهری، و هنوز بدون اینکه بفهمی چقدر پولداری، ساندویچ می‌خوری. 🥪",
+    ],
+    "بلاگر": [
+        "ویدیو رو آپلود کردی و تو ده دقیقه ۵۰۰ لایک و ۳۰ تا کامنت «چه باحال!» گرفتی. 📱",
+        "یه فالوور بهت پیام داد «خیلی ازت یاد گرفتم»؛ نمی‌دونست تو هم از اون یاد گرفتی.",
+        "استوری‌ت وایرال شد و یه برند ازت خواست تبلیغشون رو بکنی. ظاهراً قیمت هم بد نیست.",
+        "رینگ‌لایت رو خاموش کردی و به خودت گفتی «همین! امروز هم یه شاهکار خلق کردم».",
+        "اون ژست «طبیعی» که چهل بار تمرین کردی بالاخره جواب داد؛ همه‌ی کامنت‌ها گفتن «چه خوشگل بدون فیلتر!» (فیلتر داشت).",
+        "ویدیوت ترند شد و الان تو توییتر هشتگ خودت داری. فقط یه ایراد؛ اسمت رو غلط نوشتن.",
+    ],
+    "رقاص": [
+        "موزیک تموم شد، سالن چند ثانیه ساکت بود و بعد با یه انفجار تشویق روبه‌رو شدی. 💃",
+        "یه چرخش آخر زدی که نور اسپات‌لایت رو هم چرخوند؛ مخاطب‌ها دهنشون باز مونده بود.",
+        "پشت صحنه همه‌ی رقاصا بهت نگاه می‌کنن و آروم می‌گن «چطوری اینو یاد گرفتی؟»",
+        "کفش‌هات داغ شدن ولی دلت خنک بود؛ چون امشب هر قدمت یه شعر بود.",
+        "یه نفر از بین تماشاچی‌ها یه دسته گل پرت کرد و تو با یه پا رو هوا گرفتیش. حرفه‌ای!",
+        "امشب مجری اسمت رو سه بار اشتباه گفت، ولی تو انقدر باحال رقصیدی که هیچکس نفهمید.",
+    ],
+    "ناخن‌کار": [
+        "مشتری با ناخن‌های براق نگاه کرد و آروم گفت «این… هنره». دلت قنج رفت. 💅",
+        "یه طرح فوق‌العاده خلق کردی که تو ده دقیقه تو دایرکتت ۲۰ نفر خواستن ازش.",
+        "لاک قرمزِ ناب رو انتخاب کردی و مشتری اون‌قدر ذوق کرد که یادش رفت پول بده؛ بعد برگشت و انعام هم داد.",
+        "دست‌هات هنوز بوی استون میدن، ولی روحت بوی موفقیت میده.",
+        "یه ناخن شکسته رو طوری ترمیم کردی که الان از سالم‌ها هم قشنگ‌تره.",
+        "مشتری با دست‌های خوشگلش اینستاگرام رو منفجر کرد و تگ سالن رو هم زد. شهرت تو راهه!",
+    ],
+    "دندان‌پزشک": [
+        "بیمار پایین اومد، دهنش رو چک کرد و با تعجب گفت «واقعاً دردی نداشت». تو فقط لبخند زدی. 🦷",
+        "یه دندون عقل سرتق رو بدون یه کلمه شکایت کشیدی؛ دندون هم احساس کرد کار تمیز بود.",
+        "بچه‌ای که ازت می‌ترسید، آخر کار یه نقاشی از تو کشید با عنوان «دکتر مهربون».",
+        "کلاه جراحیت رو درآوردی و آینه گفت «تو تمیزترین دندون‌پزشک کل شهری».",
+        "بیمار با دهن بی‌حس‌شده سعی کرد تشکر کنه و چیزی شبیه «آووووو» گفت؛ ولی تو فهمیدی.",
+        "امروز هیچ بیماری نگفت «آخ»، که تو دنیای دندون‌پزشکی معادل برنده‌شدن جایزه‌ی نوبله!",
+    ],
+    "داروخونه‌دار": [
+        "نسخه‌ی عجیب‌وغریب رو خوندی و درست داروی لازم رو پیدا کردی؛ مشتری مات و مبهوت گفت «شما جادوگری». 💊",
+        "یه مادر نگران اومد و تو آرومش کردی و بهش گفتی چه کار کنه؛ رفت و لبخند زد.",
+        "قفسه‌ها همه مرتبن و تو بدون نگاه کردن، یه قرص رو از وسط ۲۰۰ جعبه برداشتی. استاد!",
+        "یه مشتری فقط اومد حرف بزنه و تو دو ساعت با صبر گوش دادی؛ آخرش یه شیشه آب‌پرتقال خرید.",
+        "امروز هیچ‌کس با قرص اشتباه نرفت و هیچ‌کس هم شکایت نکرد. روز رو برنده شدی!",
+        "بوی نعناع و الکل داروخونه رو برداشته و تو احساس می‌کنی قهرمان گمنام محله‌ای. 🦸",
+    ],
+    "شغل مرموز": [
+        "پاکت رو باز کردی، یه نقشه‌ی نیمه‌سوخته بود و یه جمله «به کسی نگو». نگفتی. 🕵️",
+        "تو تاریکی یه نفر سرش رو تکون داد و رفت؛ تو هنوز نمی‌دونی کی بود ولی حقوقت اومد.",
+        "کار تموم شد، شواهد محو شد و تنها نشونه‌ی ماموریت، یه رد پای کوچیک روی قالیچه بود.",
+        "رمز رو شکستی، ولی وقتی فهمیدی معنیش چیه ترجیح دادی بی‌خیال بشی. حقوقت واریز شد.",
+        "یه پیام عجیب گرفتی که فقط نوشته «خوب بود.» و پول اومد. هنوز نمی‌دونی برای کی کار می‌کنی.",
+        "امشب یه نفر از دور بهت سلام نظامی داد؛ تو هم بی‌تفاوت رد شدی. چون حرفه‌ای‌ها اینجورین.",
+    ],
+}
+
+SHIFT_PAY_LINES = [
+    "حقوق این شیفت: {pay} تومن 🤑 (یه لبخند هم بدون هزینه!)",
+    "حقوق این شیفت: {pay} تومن، مستقیم رفت تو جیبت! 😎",
+    "حقوق این شیفت: {pay} تومن؛ این یعنی دسترنجِ بی‌نقص! 🔥",
+    "حقوق این شیفت: {pay} تومن و یه عالمه حس خوب! ✨",
+    "حقوق این شیفت: {pay} تومن، آماده‌ی خرج‌کردن؟ 💸",
+    "حقوق این شیفت: {pay} تومن؛ دمت گرم، سخت‌کوش! 💪",
+]
+
+_SHIFT_LAST: dict = {}
+
+
+def shift_pick(pool_list: list, uid: int, kind: str, name: str):
+    """یه گزینه‌ی رندوم که با دفعه‌ی قبلیِ همین کاربر یکی نباشه."""
+    if not pool_list:
+        return ""
+    key = (uid, kind, name)
+    last = _SHIFT_LAST.get(key)
+    choices = [i for i in range(len(pool_list)) if i != last] or list(range(len(pool_list)))
+    i = random.choice(choices)
+    _SHIFT_LAST[key] = i
+    return pool_list[i]
 
 
 def shift_header(name: str) -> str:
@@ -9679,7 +9965,8 @@ async def show_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup(
         [[btn(options[o][0], "primary", callback_data=f"sh:{user.id}:{qi}:{o}")] for o in order]
     )
-    text = f"{shift_header(name)}\n\n{html.escape(question)}"
+    opening = shift_pick(SHIFT_OPEN.get(name, []), user.id, "open", name)
+    text = f"{shift_header(name)}\n\n" + (f"<i>{html.escape(opening)}</i>\n\n" if opening else "") + f"<b>{html.escape(question)}</b>"
     try:
         await msg.reply_text(text, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
     except Exception:
@@ -9724,7 +10011,8 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"{shift_header(name)}\n\n"
         f"<blockquote><b>{html.escape(done)}\n\n"
-        f"{_te(SHIFT_EMOJI_DONE, '💰')} حقوق این شیفت: {pay:,} تومن</b></blockquote>"
+        f"{html.escape(shift_pick(SHIFT_OUTRO.get(name, []), q.from_user.id, 'outro', name))}\n\n"
+        f"{_te(SHIFT_EMOJI_DONE, '💰')} {html.escape(shift_pick(SHIFT_PAY_LINES, q.from_user.id, 'pay', '')).replace('{pay}', f'{pay:,}')}</b></blockquote>"
     )
     if (_eb := event_banner()):
         text += f"<b>{_eb}</b>"
@@ -15956,15 +16244,34 @@ async def gift_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("قیمت این گیفت هنوز توسط پشتیبانی ثبت نشده.", show_alert=True)
             return
         await q.answer()
-        context.user_data["gift_order"] = {"stage": "gift_text", "tier": tier, "key": key,
-                                           "name": name, "price": price}
+        context.user_data["gift_order"] = {"stage": "anon", "tier": tier, "key": key,
+                                           "name": name, "price": price, "anonymous": False}
         kb = InlineKeyboardMarkup([
-            [btn("بدون متن", "primary", callback_data="gft:text:none")],
+            [btn("🕶 ناشناس", "primary", callback_data="gft:anon:1"),
+             btn("👤 با اسم خودم", "success", callback_data="gft:anon:0")],
             [btn("انصراف", "danger", callback_data="gft:cancel")],
         ])
         await edit_html(q, f"{gift_emoji(eid, fallback)} <b>{html.escape(name)}</b>\n"
                            f"💳 قیمت: <b>{price:,} تومان</b>\n\n"
-                           "متن دلخواهت برای همراه گیفت رو بفرست؛ یا گزینه «بدون متن» رو بزن.",
+                           "🕶 گیفت <b>ناشناس</b> فرستاده بشه یا با اسم خودت؟",
+                        kb)
+    elif action == "anon":
+        data = context.user_data.get("gift_order")
+        if not data or data.get("stage") != "anon":
+            await q.answer("مرحله سفارش منقضی شده است.", show_alert=True)
+            return
+        await q.answer()
+        data["anonymous"] = parts[2] == "1"
+        data["stage"] = "gift_text"
+        _, _, eid, fallback = GIFT_ITEMS[data["key"]]
+        kb = InlineKeyboardMarkup([
+            [btn("بدون متن", "primary", callback_data="gft:text:none")],
+            [btn("انصراف", "danger", callback_data="gft:cancel")],
+        ])
+        await edit_html(q, f"{gift_emoji(eid, fallback)} <b>{html.escape(data['name'])}</b>\n"
+                           f"💳 قیمت: <b>{data['price']:,} تومان</b>\n"
+                           f"🕶 نوع ارسال: <b>{'ناشناس' if data['anonymous'] else 'با اسم خودت'}</b>\n\n"
+                           "✍️ متن دلخواهت برای همراه گیفت رو بفرست؛ یا گزینه «بدون متن» رو بزن.",
                         kb)
     elif action == "text" and parts[2] == "none":
         data = context.user_data.get("gift_order")
@@ -16036,45 +16343,54 @@ async def gift_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
         return True
     tracking = "FG" + datetime.now().strftime("%y%m%d") + str(random.randint(100000, 999999))
     now = time.time()
+    anonymous = bool(data.get("anonymous"))
     order_id = await pool.fetchval("""INSERT INTO gift_orders
-        (tracking_code,user_id,tier,item_key,item_name,gift_text,recipient_username,price,status,receipt_file_id,created_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10) RETURNING order_id""",
-        tracking, user.id, data["tier"], data["key"], data["name"], data.get("gift_text",""),
-        data["recipient"], data["price"], msg.photo[-1].file_id, now)
+        (tracking_code,user_id,tier,item_key,item_name,gift_text,recipient_username,price,status,receipt_file_id,created_at,anonymous)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10,$11) RETURNING order_id""",
+        tracking, user.id, data["tier"], data["key"], data["name"], data.get("gift_text", ""),
+        data["recipient"], data["price"], msg.photo[-1].file_id, now, anonymous)
     context.user_data.pop("gift_order", None)
     dt = datetime.fromtimestamp(now).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     uname = ("@" + user.username) if user.username else "ندارد"
     caption = (f"🎁 <b>سفارش جدید گیفت استارزی</b>\n"
                f"🔖 شماره پیگیری: <code>{tracking}</code>\n"
-               f"📦 نوع سفارش: <b>خرید گیفت استارزی</b>\n"
-               f"⭐ نوع گیفت: <b>{data['tier']} استارزی</b>\n"
                f"🎀 اسم سفارش: <b>{html.escape(data['name'])}</b>\n"
+               f"📦 نوع سفارش: <b>خرید گیفت {data['tier']} استارزی</b>\n"
+               f"💳 قیمت سفارش: <b>{data['price']:,} تومان</b>\n"
+               f"🕒 زمان سفارش: <code>{dt}</code>\n"
+               f"🕶 نوع ارسال: <b>{'ناشناس' if anonymous else 'با اسم فرستنده'}</b>\n"
                f"👤 گیرنده: <b>{html.escape(data['recipient'])}</b>\n"
                f"✍️ متن گیفت: <b>{html.escape(data.get('gift_text') or 'بدون متن')}</b>\n"
-               f"💳 مبلغ: <b>{data['price']:,} تومان</b>\n"
                f"🆔 سفارش‌دهنده: <code>{user.id}</code> ({html.escape(uname)})\n"
-               f"🕒 زمان دقیق سفارش: <code>{dt}</code>\n"
-               f"🧾 کد سفارش: <code>#{order_id}</code>")
+               f"🧾 کد سفارش: <code>#{order_id}</code>\n"
+               f"📌 وضعیت: ⏳ در انتظار بررسی")
     kb = InlineKeyboardMarkup([[btn("✅ تایید سفارش", "success", callback_data=f"gvr:ok:{order_id}"),
                                 btn("❌ رد سفارش", "danger", callback_data=f"gvr:no:{order_id}")]])
+    refs = []
     sent_support = 0
-    for aid in [a for a in (set(OWNER_IDS) | set(STAFF)) if has_perm(a, "pay")]:
+    targets = [a for a in (set(OWNER_IDS) | set(STAFF)) if has_perm(a, "pay")]
+    for aid in targets:
         try:
-            await context.bot.send_photo(aid, msg.photo[-1].file_id, caption=caption,
-                                         parse_mode="HTML", reply_markup=kb)
+            m = await context.bot.send_photo(aid, msg.photo[-1].file_id, caption=caption,
+                                             parse_mode="HTML", reply_markup=kb)
+            refs.append([aid, m.message_id])
             sent_support += 1
         except Exception:
             log.warning("gift order support notification failed for %s", aid, exc_info=True)
     channel_ok = False
     try:
-        await context.bot.send_photo(GIFT_CHANNEL, msg.photo[-1].file_id,
-                                     caption=caption, parse_mode="HTML")
+        m = await context.bot.send_photo(GIFT_CHANNEL, msg.photo[-1].file_id,
+                                         caption=caption, parse_mode="HTML", reply_markup=kb)
+        refs.append([m.chat_id, m.message_id])
         channel_ok = True
     except Exception:
         log.exception("gift order channel delivery failed")
+    if refs:
+        await pool.execute("UPDATE gift_orders SET msg_refs=$2 WHERE order_id=$1", order_id, json.dumps(refs))
     await send_html(context.bot, user.id,
         B(f"✅ سفارش گیفتت ثبت شد!\n\n🔖 شماره پیگیری: <code>{tracking}</code>\n"
           f"📦 {html.escape(data['name'])} · {data['tier']} استارزی\n"
+          f"🕶 {'ناشناس' if anonymous else 'با اسم خودت'}\n"
           f"🕒 {dt}\n\nنتیجه بررسی پشتیبانی بهت اطلاع داده می‌شه."))
     if not sent_support or not channel_ok:
         log.error("gift order %s delivery status: support=%s channel=%s", tracking, sent_support, channel_ok)
@@ -16089,22 +16405,51 @@ async def gift_review_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, act, oid_s = q.data.split(":")
     oid = int(oid_s)
     row = await pool.fetchrow("""UPDATE gift_orders SET status=$2,reviewed_by=$3,reviewed_at=$4
-        WHERE order_id=$1 AND status='pending' RETURNING user_id,tracking_code,item_name""",
+        WHERE order_id=$1 AND status='pending' RETURNING user_id,tracking_code,item_name,msg_refs""",
         oid, "approved" if act == "ok" else "rejected", q.from_user.id, time.time())
     if not row:
         await q.answer("این سفارش قبلاً بررسی شده.", show_alert=True)
         return
     await q.answer("ثبت شد.")
+    approved = act == "ok"
+    new_status = "✅ تایید شد" if approved else "❌ رد شد"
+    caption = (q.message.caption_html or "").replace("⏳ در انتظار بررسی", new_status)
+    caption += f"\n👮 بررسی‌کننده: {html.escape(q.from_user.full_name)}"
     try:
-        await q.edit_message_caption(caption=(q.message.caption_html or "") +
-                                     ("\n\n✅ تایید شد" if act == "ok" else "\n\n❌ رد شد"),
-                                     parse_mode="HTML", reply_markup=None)
+        refs = json.loads(row["msg_refs"] or "[]")
     except Exception:
-        pass
-    result = ("✅ سفارش گیفتت تایید شد؛ پشتیبانی برای ارسال باهات هماهنگ می‌کنه."
-              if act == "ok" else "❌ سفارش گیفتت رد شد. برای پیگیری با پشتیبانی تماس بگیر.")
-    await send_html(context.bot, row["user_id"],
-                    B(f"{result}\n🔖 شماره پیگیری: <code>{row['tracking_code']}</code>"))
+        refs = []
+    if not refs:
+        refs = [[q.message.chat_id, q.message.message_id]]
+    for cid, mid in refs:   # پیام پشتیبان‌ها و کانال هر دو آپدیت میشن و دکمه‌ها برمی‌دارن
+        try:
+            await context.bot.edit_message_caption(chat_id=cid, message_id=mid, caption=caption,
+                                                   parse_mode="HTML", reply_markup=InlineKeyboardMarkup([]))
+        except Exception:
+            log.warning("gift review edit failed for %s/%s", cid, mid, exc_info=True)
+    if approved:
+        ok_e = gift_emoji("5397818149179502406", "✅")
+        gift_e = gift_emoji(GIFT_EMOJI, "🎁")
+        trophy_e = gift_emoji(EID_TROPHY, "🏆")
+        fire_e = gift_emoji("5987616823636401062", "🔥")
+        money_e = gift_emoji(EID_MONEY, "💰")
+        text = B(f"{ok_e} سفارش گیفتت تایید شد {gift_e}\n"
+                 f"🔖 شماره پیگیری: <code>{row['tracking_code']}</code>\n\n"
+                 f"{trophy_e} امیدوارم از خریدتون راضی باشین {fire_e}{money_e}")
+    else:
+        text = B(f"❌ سفارش گیفتت رد شد. برای پیگیری با پشتیبانی تماس بگیر.\n"
+                 f"🔖 شماره پیگیری: <code>{row['tracking_code']}</code>")
+    await send_html(context.bot, row["user_id"], text)
+
+
+async def app_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/app — دکمه‌ی باز کردن مینی‌اپ برای همه."""
+    if not WEBAPP_URL.startswith("https://"):
+        await update.effective_message.reply_text("مینی‌اپ هنوز فعال نشده.")
+        return
+    await update.effective_message.reply_text(
+        "📱 برای ورود به مینی‌اپ (چت‌روم، بازی‌ها، فروشگاه و خودم) دکمه‌ی زیر رو بزن:",
+        reply_markup=InlineKeyboardMarkup([[btn("📱 ورود به مینی‌اپ", "success", web_app=WebAppInfo(url=WEBAPP_URL))]]))
 
 
 async def gift_prices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -16146,10 +16491,12 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.TEXT & ~filters.COMMAND, jagsal_nontext))
     app.add_handler(CallbackQueryHandler(duel_answer, pattern=r"^du:(ok|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
-    app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\\d+)$"))
-    app.add_handler(CallbackQueryHandler(purchase_review_cb, pattern=r"^bp:(ok|no):\\d+$"))
+    app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\d+)$"))
+    app.add_handler(CallbackQueryHandler(purchase_review_cb, pattern=r"^bp:(ok|no):\d+$"))
     app.add_handler(CallbackQueryHandler(gift_cb, pattern=r"^gft:"))
-    app.add_handler(CallbackQueryHandler(gift_review_cb, pattern=r"^gvr:(ok|no):\\d+$"))
+    app.add_handler(CallbackQueryHandler(gift_review_cb, pattern=r"^gvr:(ok|no):\d+$"))
+    app.add_handler(CommandHandler("app", app_cmd, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("miniapp", app_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("giftprices", gift_prices_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("giftprice", gift_prices_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(mini_subscription_review_cb, pattern=r"^sub:(ok|no):\d+$"))
