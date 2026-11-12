@@ -627,6 +627,7 @@ async def init_db(app: Application):
             session_id BIGINT NOT NULL REFERENCES jagsal_sessions(session_id) ON DELETE CASCADE,
             chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, PRIMARY KEY(session_id, chat_id)
         )""")
+        await c.execute("CREATE TABLE IF NOT EXISTS jagsal_dest_msgs (chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, session_id BIGINT NOT NULL, PRIMARY KEY(chat_id,message_id))")
         await c.execute("""CREATE TABLE IF NOT EXISTS jagsal_relays (
             relay_id BIGSERIAL PRIMARY KEY, session_id BIGINT NOT NULL REFERENCES jagsal_sessions(session_id) ON DELETE CASCADE,
             source_chat BIGINT NOT NULL, source_message BIGINT NOT NULL, source_user BIGINT NOT NULL,
@@ -7726,6 +7727,16 @@ async def _jagsal_relay_message(bot, session, msg, user):
             return False
         await pool.execute("UPDATE jagsal_sessions SET started_at=$2 WHERE session_id=$1 AND started_at IS NULL", int(session["session_id"]), time.time())
         session = await pool.fetchrow("SELECT * FROM jagsal_sessions WHERE session_id=$1", int(session["session_id"]))
+    else:
+        # پیام عادی گروه به گپ مقابل نمی‌ره؛ فقط ریپلای به پیامِ رسیده از اون‌ور (یا کارت اتصال)
+        rt = msg.reply_to_message
+        ok = False
+        if rt:
+            ok = bool(await pool.fetchval("SELECT 1 FROM jagsal_dest_msgs WHERE chat_id=$1 AND message_id=$2 AND session_id=$3", int(msg.chat_id), int(rt.message_id), int(session["session_id"])))
+            if not ok:
+                anchor = await pool.fetchval("SELECT message_id FROM jagsal_posts WHERE session_id=$1 AND chat_id=$2", int(session["session_id"]), int(msg.chat_id))
+                ok = bool(anchor) and int(rt.message_id) == int(anchor)
+        if not ok: return False
     if msg.chat_id == int(session["source_chat"]):
         dest = int(session["target_chat"]); group_title = msg.chat.title or str(msg.chat_id)
     elif msg.chat_id == int(session["target_chat"]):
@@ -7750,17 +7761,20 @@ async def _jagsal_relay_message(bot, session, msg, user):
         int(session["session_id"]), msg.chat_id, msg.message_id, user.id, user.full_name, group_title, body[:4000], time.time())
     if not row: return False
     relay_id = int(row["relay_id"])
-    kb = InlineKeyboardMarkup([[btn("گزارش", "danger", icon="5447644880824181073", callback_data=f"jgs:report:{relay_id}")]])
+    kb = InlineKeyboardMarkup([[btn("گزارش", icon="5447644880824181073", callback_data=f"jgs:report:{relay_id}")]])
     attribution = f'<b>{html.escape(user.full_name)} از گپ {html.escape(group_title)}</b>'
+    sent_ids = []
     if msg.text:
         payload = f'{attribution}\n<blockquote>{html.escape(body[:3500])}</blockquote>'
-        await bot.send_message(dest, payload, parse_mode="HTML", reply_markup=kb)
+        sent_ids.append((await bot.send_message(dest, payload, parse_mode="HTML", reply_markup=kb)).message_id)
     else:
-        await bot.send_message(dest, attribution, parse_mode="HTML", reply_markup=kb)
+        sent_ids.append((await bot.send_message(dest, attribution, parse_mode="HTML", reply_markup=kb)).message_id)
         try:
-            await bot.copy_message(dest, msg.chat_id, msg.message_id)
+            sent_ids.append((await bot.copy_message(dest, msg.chat_id, msg.message_id)).message_id)
         except Exception:
             pass
+    for mid in sent_ids:
+        await pool.execute("INSERT INTO jagsal_dest_msgs(chat_id,message_id,session_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", dest, mid, int(session["session_id"]))
     return True
 
 async def jagsal_nontext(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7785,14 +7799,29 @@ async def _jagsal_end(bot, session, actor_id: int, reason: str):
             if r["target_user"]:
                 await c.execute("INSERT INTO jagsal_cooldowns(kind,object_id,until_ts) VALUES('user',$1,$2) ON CONFLICT(kind,object_id) DO UPDATE SET until_ts=EXCLUDED.until_ts", int(r["target_user"]), now+300)
             await c.execute("INSERT INTO jagsal_cooldowns(kind,object_id,until_ts) SELECT 'user',user_id,$2 FROM jagsal_participants WHERE session_id=$1 ON CONFLICT(kind,object_id) DO UPDATE SET until_ts=GREATEST(jagsal_cooldowns.until_ts,EXCLUDED.until_ts)", sid, now+300)
+    # پرحرف‌ترین فرد این جقصل (بر اساس پیام‌های ردشده)
+    try:
+        top = await pool.fetchrow("SELECT source_user, MAX(source_name) AS name, COUNT(*) AS cnt FROM jagsal_relays WHERE session_id=$1 GROUP BY source_user ORDER BY cnt DESC, MIN(created_at) LIMIT 1", sid)
+    except Exception:
+        top = None
+    if reason == "admin_disconnect":
+        head = '<tg-emoji emoji-id="5330572782528915278">💔</tg-emoji> یکی از ادمین‌ها ارتباط رو قطع کرد.'
+    else:
+        head = '<tg-emoji emoji-id="5265252136752533810">⏳</tg-emoji> زمان گفت‌وگو تموم شد و ارتباط قطع شد.'
+    if top:
+        stats = (f'\n\n<tg-emoji emoji-id="5875065225664798722">🔥</tg-emoji> پرحرف‌ترین فرد این جقصل: {html.escape(top["name"] or "ناشناس")}\n'
+                 f'<tg-emoji emoji-id="5875483791702630534">🎉</tg-emoji> تعداد پیام‌ها: {int(top["cnt"])}')
+    else:
+        stats = "\n\nکسی توی این جقصل حرفی نزد."
+    end_text = f"<b>{head}{stats}\n\nبرای استفاده دوباره باید ۵ دقیقه صبر کنید.</b>"
     for cid in (int(r["source_chat"]), int(r["target_chat"]) if r["target_chat"] else None):
         if not cid: continue
         post = await pool.fetchval("SELECT message_id FROM jagsal_posts WHERE session_id=$1 AND chat_id=$2", sid, cid)
         if post:
             try: await bot.unpin_chat_message(cid, post)
             except Exception: pass
-        try: await bot.send_message(cid, "<b>ارتباط جقصل قطع شد. برای استفاده دوباره باید ۵ دقیقه صبر کنید.</b>", parse_mode="HTML")
-        except Exception: pass
+        try: await _jagsal_photo(bot, cid, end_text)
+        except Exception: log.exception("jagsal end card failed in %s", cid)
     return True
 
 async def _jagsal_report_send(bot, relay, reporter):
