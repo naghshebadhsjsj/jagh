@@ -119,6 +119,8 @@ SECTIONS = {
     "job":     ("ایموجی‌شغل", ["شغل۱", "شغل۲", "شغل۳", "شغل۴", "شغل۵", "شغل۶", "شغل۷", "شغل۸", "شغل۹", "شغل۱۰"]),
     "lock":    ("قفل", ["قفل بسته", "قفل باز"]),
     "energy":  ("انرژی", ["نوار پر", "نوار خالی"]),
+    "jm":      ("دستگاه جق", ["نوار پر", "نوار خالی"]),
+    "selfen":  ("انرژی خودم", ["نوار پر", "نوار خالی"]),   # فقط نوار انرژی پنل «خودم»
 }
 # اسم فارسی بخش‌ها هم تو دستور قبوله (مثلا /setemoji لیدربرد ...)
 ALIASES = {title: key for key, (title, _) in SECTIONS.items()}
@@ -138,6 +140,8 @@ EMOJI_IDS = {
     ("top", 1): "5938264290740933445",
     ("lock", 2): "6034962180875490251",  # قفل باز (شغلی که کاربر داره)
     ("energy", 1): "5400280896311944960",  # نوار انرژی (خونه‌ی پر)
+    ("selfen", 1): "5789435092589876174",  # نوار انرژی فقط تو پنل «خودم»
+    ("jm", 1): "5792112815720371175",      # نوار دستگاه جق
 }
 
 
@@ -235,8 +239,8 @@ def perms_of(uid: int) -> set:
 
 TRIGGER_WORD = "جق"
 COOLDOWN_SECONDS = 5 * 60 + 5  # پایه ۵:۰۵؛ با پنج ارتقا به ۴:۴۰ می‌رسد
-MIN_REWARD = 5
-MAX_REWARD = 100
+MIN_REWARD = 500     # پول هر جق (تومن)، شانسی بین این دو عدد
+MAX_REWARD = 1200
 
 # ───────────────────────── کاراکترها ─────────────────────────
 # هر کاربر یه کاراکتر داره که با بالا رفتن موجودیش ارتقا می‌گیره (۱۰ سطح).
@@ -340,23 +344,23 @@ CHANNELS = ["@jagh_game", "@selfsaz_iran"]  # عضویت اجباری در هر 
 # هر ردیف: (حداکثر مبلغ, [متن‌ها]). اولین ردیفی که مبلغ بهش بخوره انتخاب میشه
 # و یکی از متن‌هاش رندوم میاد. {amount} = مبلغ
 REPLY_TIERS = [
-    (20, [
+    (240, [
         "این یکی خیلی معمولی بود 😅 فقط {amount} تومن گیرت اومد {MEH}",
         "شروع بدی نبود، ولی هنوز جا برای پیشرفت داری! {amount} تومن گرفتی {HD}",
     ]),
-    (45, [
+    (540, [
         "بد نبود! {amount} تومن به حسابت اضافه شد {HD}",
         "یه حرکت قابل‌قبول؛ جایزه‌ات {amount} تومنه {HD}",
     ]),
-    (70, [
+    (840, [
         "آفرین! این یکی حسابی به هدف زد؛ {amount} تومن بردی {HD}",
         "خوبه! با این حرکت {amount} تومن به جیب زدی {HD}",
     ]),
-    (90, [
+    (1080, [
         "ترکوندی! {amount} تومن جایزه گرفتی {FIRE}{HD}",
         "چه اجرای قدرتمندی! {amount} تومن مال تو شد {FIRE}{HD}",
     ]),
-    (100, [
+    (1200, [
         "افسانه‌ای بود! رکوردت با {amount} تومن ثبت شد {TROPHY}{HD}",
         "جک‌پات! بهترین نتیجه رو زدی و {amount} تومن بردی {TROPHY}{HD}",
     ]),
@@ -549,6 +553,15 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS giveaway_posts (gid BIGINT NOT NULL, chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, PRIMARY KEY(gid, chat_id, message_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS giveaway_sent (gid BIGINT NOT NULL, chat_id BIGINT NOT NULL, PRIMARY KEY(gid, chat_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS purchases (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, amount BIGINT NOT NULL, price BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, file_id TEXT, reviewer BIGINT, reviewed_at DOUBLE PRECISION)")
+        await c.execute("""CREATE TABLE IF NOT EXISTS gift_prices (
+            item_key TEXT PRIMARY KEY, price BIGINT NOT NULL CHECK(price >= 0), updated_by BIGINT NOT NULL DEFAULT 0,
+            updated_at DOUBLE PRECISION NOT NULL DEFAULT 0)""")
+        await c.execute("""CREATE TABLE IF NOT EXISTS gift_orders (
+            order_id BIGSERIAL PRIMARY KEY, tracking_code TEXT UNIQUE NOT NULL, user_id BIGINT NOT NULL,
+            tier INT NOT NULL, item_key TEXT NOT NULL, item_name TEXT NOT NULL, gift_text TEXT NOT NULL DEFAULT '',
+            recipient_username TEXT NOT NULL, price BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            receipt_file_id TEXT, created_at DOUBLE PRECISION NOT NULL, reviewed_by BIGINT, reviewed_at DOUBLE PRECISION)""")
+        await c.execute("CREATE INDEX IF NOT EXISTS gift_orders_user_idx ON gift_orders(user_id, created_at DESC)")
         # جقستگرام: پروفایل، رسانه، پست، استوری، ری‌اکشن و چت‌روم عمومی
         await c.execute("CREATE TABLE IF NOT EXISTS social_profiles (user_id BIGINT PRIMARY KEY, username TEXT UNIQUE, display_name TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', avatar_media_id BIGINT, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS social_media (media_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, kind TEXT NOT NULL, data BYTEA NOT NULL, content_type TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, expires_at DOUBLE PRECISION)")
@@ -2445,7 +2458,7 @@ const gameCss=document.createElement('style');gameCss.textContent=`
 .rk-hl{flex:0 0 auto;font-size:11.5px;font-weight:800;color:#8b96b0;padding-inline-end:4px;white-space:nowrap}
 .rk-chip{flex:0 0 auto;border-radius:11px;padding:5px 9px;font-weight:900;font-size:12.5px;background:#232b40;color:#8b96b0;direction:ltr}
 .rk-chip.lo{color:#ff8a98}.rk-chip.first{background:#fff;color:#0b1220}.rk-chip.mid{background:#1f4fd1;color:#fff}.rk-chip.hi{background:#6a35e0;color:#fff}.rk-chip.top{background:#d62f8f;color:#fff}
-.rk-stage{position:relative;height:330px;border-radius:24px;overflow:hidden;background:#050b1e;margin-bottom:12px;box-shadow:0 12px 34px #0006,inset 0 0 0 1px #ffffff14}
+.rk-stage{position:relative;height:390px;border-radius:24px;overflow:hidden;background:#050b1e;margin-bottom:12px;box-shadow:0 12px 34px #0006,inset 0 0 0 1px #ffffff14}
 .rk-cv{position:absolute;inset:0;width:100%;height:100%;display:block}
 .rk-tgt{position:absolute;left:10px;top:10px;z-index:2;background:#ffffff18;border-radius:12px;padding:5px 10px;font-size:11.5px;font-weight:800;color:#bfe9ff;backdrop-filter:blur(4px)}
 .rk-mult{position:absolute;left:0;right:0;top:12px;text-align:center;font-size:48px;font-weight:900;direction:ltr;text-shadow:0 0 24px #3b82ff99;z-index:2;pointer-events:none;letter-spacing:-1px}
@@ -2599,6 +2612,8 @@ const perkCss=document.createElement('style');perkCss.textContent=`
 .smsg.premium-msg,.smsg.mine.premium-msg{background:linear-gradient(135deg,rgba(255,205,92,.30),rgba(255,241,190,.16)),var(--bg);border:1px solid rgba(245,190,70,.6);box-shadow:0 0 14px rgba(245,190,70,.16)}
 .smsg.pill,.smsg.mine.pill,.smsg:not(.mine).pill{border-radius:32px!important;padding-inline:20px}.smsg.pill .tx{border-radius:24px}
 .sub-on{margin:10px 0 2px;padding:11px;border-radius:14px;background:linear-gradient(120deg,#9b6b18,#f8dfa0,#a8751e);color:#241800;font-weight:900;text-align:center;line-height:1.8}
+.mbar{margin-top:14px}.mbar-t{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:6px}.mbar-tr{height:14px;border-radius:9px;background:#ffffff1c;overflow:hidden}.mbar-f{display:block;height:100%;border-radius:9px;transition:width .6s}
+.mbar-f.y{background:linear-gradient(90deg,#f59e0b,#ffe14d);box-shadow:0 0 10px #ffd84d66}.mbar-f.p{background:linear-gradient(90deg,#6d28d9,#c084fc);box-shadow:0 0 10px #a855f766}
 .sub-off{margin:8px 0 2px;color:#ffffffaa;font-size:12.5px;text-align:center}
 .gc{margin-top:8px;border-radius:14px;background:var(--bg);padding:6px}.gc.dark{background:#0d1426;color:#fff;margin:6px 8px}
 .gc-list{max-height:92px;overflow-y:auto;font-size:12.5px;line-height:1.7;overflow-wrap:anywhere}
@@ -2643,7 +2658,7 @@ function GamesScreen(){
  function rocketScene(cv){
   const ctx=cv.getContext('2d');
   let W=0,H=0,raf=null,last=performance.now(),alive=true,acc=0;
-  const S={mode:'idle',el:0,rate:.12,time:0,ang:-.55,bgv:12,shake:0,flash:0,bt:0,at:0,bx:0,by:0};
+  const S={mode:'idle',el:0,elT:0,ref:0,rate:.12,time:0,ang:-.6,bgv:12,shake:0,flash:0,bt:0,at:0,bx:0,by:0,mt:0,mx:0,my:0};
   const P=[],ST=[];
   for(let i=0;i<80;i++)ST.push({x:Math.random(),y:Math.random(),z:.25+Math.random()*.75,tw:Math.random()*6.28});
   const rnd=(a,b)=>a+Math.random()*(b-a),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -2653,70 +2668,118 @@ function GamesScreen(){
    if(cv.width!==pw||cv.height!==ph){cv.width=pw;cv.height=ph}
    ctx.setTransform(d,0,0,d,0,0);W=w;H=hh;return true;
   }
-  const view=()=>{const el=Math.max(0,S.el),m=Math.exp(S.rate*el);return{el,m,vt:Math.max(5,el),vm:Math.max(2,m)}};
-  const X0=()=>52,Y0=()=>H-52,X1=()=>W*.74,Y1=()=>98;
-  const pt=(t,m,v)=>[X0()+(X1()-X0())*Math.min(1,t/v.vt),Y0()-(Y0()-Y1())*((m-1)/(v.vm-1))];
+  const sc=()=>clamp(Math.min(W/205,H/215),1.2,1.75);
+  /* مسیر نرم پرواز: از پایین‌چپ بلند می‌شود و روی ارتفاع کروز می‌نشیند */
+  const path=t=>{const p=1-Math.exp(-Math.max(0,t)/4.2);return[W*.36+(W*.56-W*.36)*p,H*.70-(H*.70-H*.44)*p,p]};
   function pose(){
-   const v=view(),p=pt(v.el,v.m,v);let x=p[0],y=p[1];
-   const dx=(X1()-X0())/v.vt,dy=(Y0()-Y1())*S.rate*v.m/(v.vm-1);
-   let a=-Math.atan2(dy,dx);a=clamp(a,-1.2,-.25);
-   if(S.mode==='idle'||v.el<=0)a=-.55;
-   const lock=clamp((v.el-4)/2,0,1);
-   y+=Math.sin(S.time*2.4)*4*lock+(S.mode==='idle'?Math.sin(S.time*2)*3:0);
-   return{x,y,a,v};
+   const el=Math.max(0,S.el),m=Math.exp(S.rate*el),q=path(el),p=q[2];
+   let x=q[0],y=q[1];
+   const idle=S.mode==='idle'||el<=0;
+   x+=Math.sin(S.time*1.1)*7*p;
+   y+=(idle?Math.sin(S.time*2)*4:(Math.sin(S.time*1.9)*7+Math.sin(S.time*.8)*5)*p);
+   let a=idle?-.6:(-.72+.38*p+Math.cos(S.time*1.9)*.05*p);
+   return{x,y,a,m,el};
   }
-  function emit(x,y,a,n,pw){
+  function emit(x,y,a,n,pw,K){
    acc+=n;
    while(acc>=1){acc--;
-    const sp=rnd(70,150)*pw,an=a+Math.PI+rnd(-.3,.3);
-    P.push({k:'f',x:x+rnd(-2,2),y:y+rnd(-2,2),vx:Math.cos(an)*sp,vy:Math.sin(an)*sp,l:0,m:rnd(.3,.65),s:rnd(3,6.5)});
-    if(Math.random()<.5)P.push({k:'s',x,y,vx:Math.cos(an)*sp*.4+rnd(-12,12),vy:Math.sin(an)*sp*.4+rnd(-12,12),l:0,m:rnd(.8,1.5),s:rnd(5,10)});
+    const sp=rnd(90,170)*pw,an=a+Math.PI+rnd(-.1,.1),side=Math.random()<.5?-1:1;
+    const lx=-34*K,ly=side*15*K,ca=Math.cos(a),sa=Math.sin(a);
+    P.push({k:'f',x:x+lx*ca-ly*sa+rnd(-2,2),y:y+lx*sa+ly*ca+rnd(-2,2),vx:Math.cos(an)*sp,vy:Math.sin(an)*sp,l:0,m:rnd(.25,.55),s:rnd(2.5,5.5)});
+    if(Math.random()<.35)P.push({k:'s',x:x+lx*ca-ly*sa,y:y+lx*sa+ly*ca,vx:Math.cos(an)*sp*.35+rnd(-10,10),vy:Math.sin(an)*sp*.35+rnd(-10,10),l:0,m:rnd(.7,1.3),s:rnd(5,9)});
    }
-   if(P.length>380)P.splice(0,P.length-380);
+   if(P.length>360)P.splice(0,P.length-360);
   }
-  function explode(x,y){
+  function explode(x,y,rock){
    for(let i=0;i<80;i++){const a=rnd(0,6.283),sp=rnd(40,380);P.push({k:'e',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,l:0,m:rnd(.45,1.1),s:rnd(2,6.5)})}
    for(let i=0;i<26;i++){const a=rnd(0,6.283),sp=rnd(10,90);P.push({k:'s',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,l:0,m:rnd(1,1.9),s:rnd(10,24)})}
-   const cols=['#e8eef8','#e0334f','#9fb2cc','#ffb347'];
-   for(let i=0;i<18;i++){const a=rnd(0,6.283),sp=rnd(80,300);P.push({k:'d',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-60,l:0,m:rnd(.9,1.6),s:rnd(3,7),r:rnd(0,6),vr:rnd(-12,12),c:cols[i%4]})}
+   const cols=rock?['#e8eef8','#9fb2cc','#8a5a3a','#4a2e1c']:['#e8eef8','#e0334f','#9fb2cc','#ffb347'];
+   for(let i=0;i<(rock?30:18);i++){const a=rnd(0,6.283),sp=rnd(80,320);P.push({k:'d',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-60,l:0,m:rnd(.9,1.7),s:rnd(3,8),r:rnd(0,6),vr:rnd(-12,12),c:cols[i%4]})}
   }
   function glow(x,y,r,c){const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,c);g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.fillRect(x-r,y-r,r*2,r*2)}
+  /* موشک: هواپیمای کاغذی فلزی با دو ردیف موتور فیروزه‌ای (شبیه عکس مرجع) */
   function rocket(x,y,a,flame){
-   // موشک کاغذی/فلزی الهام‌گرفته از فرم مرجع: بدنه‌ی منشوری نقره‌ای و دو موتور فیروزه‌ای
-   ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.scale(1.12,1.12);
-   const halo=ctx.createRadialGradient(0,0,8,0,0,100);halo.addColorStop(0,'rgba(30,230,220,.22)');halo.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=halo;ctx.fillRect(-100,-100,200,200);
-   const L=Math.max(10,flame);
-   for(const yy of [-17,17]){
-    const fg=ctx.createLinearGradient(-48,yy,-48-L,yy);fg.addColorStop(0,'rgba(230,255,255,.98)');fg.addColorStop(.25,'rgba(45,245,226,.9)');fg.addColorStop(1,'rgba(0,190,255,0)');
-    ctx.fillStyle=fg;ctx.beginPath();ctx.moveTo(-39,yy-5);ctx.quadraticCurveTo(-48-L*.65,yy-10,-48-L,yy);ctx.quadraticCurveTo(-48-L*.65,yy+10,-39,yy+5);ctx.closePath();ctx.fill();
+   const K=sc();
+   ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.scale(K,K);
+   const U=[-48,-31],D=[-48,31],N=[68,-1],Kt=[-22,-3],Kb=[-22,3],Mt=[-2,-4],Mb=[-2,4];
+   const lerp=(p,q,t)=>[p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t];
+   const L=Math.max(14,flame)*1.5;
+   glow(-30,0,120,'rgba(20,230,215,.30)');
+   /* پرتوهای موتور */
+   ctx.save();ctx.globalCompositeOperation='lighter';ctx.lineCap='round';
+   for(const [A,B] of [[U,Kt],[D,Kb]])for(let i=0;i<5;i++){
+    const p=lerp(A,B,(i+.5)/5),len=L*(.8+.2*Math.sin(S.time*22+i*1.7+A[1]));
+    const g=ctx.createLinearGradient(p[0],p[1],p[0]-len,p[1]);g.addColorStop(0,'rgba(215,255,252,.95)');g.addColorStop(.3,'rgba(40,240,225,.6)');g.addColorStop(1,'rgba(0,170,255,0)');
+    ctx.strokeStyle=g;ctx.lineWidth=5.2;ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(p[0]-len,p[1]);ctx.stroke();
    }
-   const metal=ctx.createLinearGradient(0,-34,0,34);metal.addColorStop(0,'#f8fdff');metal.addColorStop(.22,'#9eb2c4');metal.addColorStop(.48,'#eef7ff');metal.addColorStop(.72,'#71879b');metal.addColorStop(1,'#dce8f2');
-   ctx.shadowColor='#b9faff';ctx.shadowBlur=18;ctx.fillStyle=metal;ctx.strokeStyle='#d8f4ff';ctx.lineWidth=1.5;
-   ctx.beginPath();ctx.moveTo(-46,-24);ctx.lineTo(62,0);ctx.lineTo(-46,24);ctx.lineTo(-26,5);ctx.closePath();ctx.fill();ctx.stroke();
-   ctx.shadowBlur=0;
-   ctx.fillStyle='#f7fcff';ctx.beginPath();ctx.moveTo(-46,-24);ctx.lineTo(62,0);ctx.lineTo(-8,-5);ctx.closePath();ctx.fill();
-   ctx.fillStyle='#7f95aa';ctx.beginPath();ctx.moveTo(-46,24);ctx.lineTo(62,0);ctx.lineTo(-8,5);ctx.closePath();ctx.fill();
-   ctx.fillStyle='#b9d0df';ctx.beginPath();ctx.moveTo(-28,-10);ctx.lineTo(44,0);ctx.lineTo(-28,10);ctx.closePath();ctx.fill();
-   ctx.fillStyle='#eaffff';ctx.beginPath();ctx.moveTo(-40,-19);ctx.lineTo(48,-1);ctx.lineTo(-25,-8);ctx.closePath();ctx.fill();
    ctx.restore();
+   const poly=(pts,fill)=>{ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=1;ctx.lineJoin='round';ctx.stroke()};
+   ctx.shadowColor='rgba(120,250,255,.55)';ctx.shadowBlur=16;
+   const gu=ctx.createLinearGradient(0,-31,0,-3);gu.addColorStop(0,'#ffffff');gu.addColorStop(.55,'#cfdde8');gu.addColorStop(1,'#8ea5b8');
+   poly([U,N,Mt,Kt],gu);
+   ctx.shadowBlur=0;
+   const gd=ctx.createLinearGradient(0,3,0,31);gd.addColorStop(0,'#62798d');gd.addColorStop(.6,'#a7bccc');gd.addColorStop(1,'#e2eef6');
+   poly([D,N,Mb,Kb],gd);
+   const gk=ctx.createLinearGradient(-22,0,68,0);gk.addColorStop(0,'#aebfce');gk.addColorStop(.5,'#f6fbff');gk.addColorStop(1,'#cfdde8');
+   poly([Kt,Mt,N,Mb,Kb],gk);
+   ctx.strokeStyle='rgba(255,255,255,.85)';ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(-14,-15);ctx.lineTo(52,-2);ctx.stroke();
+   ctx.strokeStyle='rgba(60,85,110,.5)';ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(-14,16);ctx.lineTo(52,2);ctx.stroke();
+   /* نوار موتورها و شیارهای نورانی */
+   for(const [A,B] of [[U,Kt],[D,Kb]]){
+    ctx.lineCap='butt';ctx.strokeStyle='#0c9fc6';ctx.lineWidth=7.5;ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(B[0],B[1]);ctx.stroke();
+    ctx.strokeStyle='#33ece4';ctx.lineWidth=4.6;ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(B[0],B[1]);ctx.stroke();
+    ctx.shadowColor='#4ff5ea';ctx.shadowBlur=9;ctx.fillStyle='#effffe';
+    for(let i=0;i<5;i++){const p=lerp(A,B,(i+.5)/5);ctx.beginPath();ctx.arc(p[0],p[1],2.3,0,6.283);ctx.fill()}
+    ctx.shadowBlur=0;
+   }
+   ctx.restore();
+  }
+  /* شهاب‌سنگ */
+  function meteor(mx,my,dx,dy,K){
+   const R=12*K,n=Math.hypot(dx,dy)||1,ux=dx/n,uy=dy/n;
+   ctx.save();
+   ctx.globalCompositeOperation='lighter';ctx.lineCap='round';
+   const tl=150*K,g=ctx.createLinearGradient(mx,my,mx-ux*tl,my-uy*tl);g.addColorStop(0,'rgba(255,190,80,.95)');g.addColorStop(.4,'rgba(255,110,30,.5)');g.addColorStop(1,'rgba(255,60,10,0)');
+   ctx.strokeStyle=g;ctx.lineWidth=R*1.5;ctx.beginPath();ctx.moveTo(mx,my);ctx.lineTo(mx-ux*tl,my-uy*tl);ctx.stroke();
+   glow(mx,my,R*3,'rgba(255,140,40,.5)');
+   ctx.restore();
+   ctx.save();ctx.translate(mx,my);ctx.rotate(S.time*3);
+   const rg=ctx.createRadialGradient(-R*.35,-R*.35,1,0,0,R*1.1);rg.addColorStop(0,'#e0b894');rg.addColorStop(.55,'#8a5a3a');rg.addColorStop(1,'#2d1810');
+   ctx.fillStyle=rg;ctx.beginPath();
+   for(let i=0;i<10;i++){const an=i/10*6.283,r=R*(.86+.2*Math.sin(i*2.7+1.3));const px=Math.cos(an)*r,py=Math.sin(an)*r;i?ctx.lineTo(px,py):ctx.moveTo(px,py)}
+   ctx.closePath();ctx.fill();
+   ctx.fillStyle='rgba(30,15,8,.55)';for(const [cx,cy,cr] of [[-.3,.2,.28],[.35,-.25,.2],[.1,.45,.16]]){ctx.beginPath();ctx.arc(cx*R,cy*R,cr*R,0,6.283);ctx.fill()}
+   ctx.restore();
+  }
+  function detonate(){
+   const ps=pose();S.mode='boom';S.bt=0;S.bx=ps.x;S.by=ps.y;S.shake=16;S.flash=.55;explode(ps.x,ps.y,S.hit);
   }
   function draw(dt){
    S.time+=dt;
-   const ps=pose();S.ang+=(ps.a-S.ang)*Math.min(1,dt*7);
-   const v=ps.v,ca=Math.cos(S.ang),sa=Math.sin(S.ang),mode=S.mode,flying=(mode==='fly'&&v.el>0);
-   const tg=mode==='boom'?0:mode==='away'?280:flying?34+24*Math.min(v.m,9):mode==='fly'?6:14;
-   S.bgv+=(tg-S.bgv)*Math.min(1,dt*2.5);
-   const sx=-ca*S.bgv,sy=-sa*S.bgv;
+   const K=sc();
+   if(S.mode==='fly'){const tg=S.elT+(performance.now()-S.ref)/1000;S.el+=(tg-S.el)*Math.min(1,dt*10)}
+   const ps=pose();S.ang+=(ps.a-S.ang)*Math.min(1,dt*6);
+   const m=ps.m,ca=Math.cos(S.ang),sa=Math.sin(S.ang),mode=S.mode,flying=((mode==='fly'||mode==='meteor')&&ps.el>0);
+   const tg2=mode==='boom'?0:mode==='away'?300:flying?60+22*Math.min(m,9):mode==='fly'?8:14;
+   S.bgv+=(tg2-S.bgv)*Math.min(1,dt*2.5);
+   const sx=-ca*S.bgv,sy=-sa*S.bgv*.55;
    let rx=ps.x,ry=ps.y,show=mode!=='boom';
-   if(mode==='away'){S.at+=dt;const d=80*S.at+520*S.at*S.at;rx+=ca*d;ry+=sa*d;if(S.at>1.6)show=false}
+   if(mode==='away'){S.at+=dt;const d=80*S.at+560*S.at*S.at;rx+=ca*d;ry+=sa*d;if(S.at>1.6)show=false}
    if(mode==='boom')S.bt+=dt;
    S.shake=Math.max(0,S.shake-dt*22);
    let flame=0;
    if(show){
-    const cd=mode==='fly'&&v.el<=0;
-    flame=mode==='idle'?14+rnd(0,4):cd?36+rnd(0,6):mode==='away'?60+rnd(0,12):28+rnd(0,9)+Math.min(22,v.m*3);
-    emit(rx-ca*32,ry-sa*32,S.ang,(mode==='idle'?22:mode==='away'?200:cd?90:120)*dt,mode==='away'?1.6:1);
-    if(cd)S.shake=Math.max(S.shake,2.4);
+    const cd=mode==='fly'&&ps.el<=0;
+    flame=mode==='idle'?16+rnd(0,4):cd?40+rnd(0,6):mode==='away'?64+rnd(0,12):34+rnd(0,8)+Math.min(24,m*3);
+    emit(rx,ry,S.ang,(mode==='idle'?30:mode==='away'?200:cd?100:130)*dt,mode==='away'?1.6:1,K);
+    if(cd)S.shake=Math.max(S.shake,2);
+   }
+   let mx=0,my=0,mdx=0,mdy=0,mOn=false;
+   if(mode==='meteor'){
+    S.mt+=dt;const dur=.5,p=clamp(S.mt/dur,0,1),e=p*p*(.55+.45*p);
+    const sxm=rx+W*.55,sym=ry-H*.85;
+    mx=sxm+(rx-sxm)*e;my=sym+(ry-sym)*e;mdx=rx-sxm;mdy=ry-sym;mOn=true;
+    if(p>=1){S.hit=true;detonate();mOn=false}
    }
    for(let i=P.length-1;i>=0;i--){
     const p=P[i];p.l+=dt;if(p.l>=p.m){P.splice(i,1);continue}
@@ -2724,7 +2787,7 @@ function GamesScreen(){
     if(p.k==='d'){p.vy+=360*dt;p.r+=p.vr*dt}else if(p.k==='e'){p.vx*=1-1.6*dt;p.vy*=1-1.6*dt}else if(p.k==='s'){p.vx*=1-.8*dt;p.vy*=1-.8*dt}
    }
    ctx.save();ctx.translate((Math.random()-.5)*S.shake,(Math.random()-.5)*S.shake);
-   const bgd=ctx.createLinearGradient(0,0,0,H);bgd.addColorStop(0,'#050b1e');bgd.addColorStop(.6,'#0b1a3d');bgd.addColorStop(1,'#12254f');
+   const bgd=ctx.createLinearGradient(0,0,0,H);bgd.addColorStop(0,'#03071a');bgd.addColorStop(.6,'#081635');bgd.addColorStop(1,'#10234a');
    ctx.fillStyle=bgd;ctx.fillRect(-20,-20,W+40,H+40);
    glow(W*.78+Math.sin(S.time*.2)*14,H*.28,150,'rgba(120,70,255,.16)');glow(W*.25,H*.7+Math.cos(S.time*.25)*10,170,'rgba(30,200,200,.12)');
    const spd=Math.hypot(sx,sy);
@@ -2735,27 +2798,25 @@ function GamesScreen(){
     if(spd*s.z>70){ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=1.2*s.z;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-sx*s.z*.05,y-sy*s.z*.05);ctx.stroke()}
     else ctx.fillRect(x,y,1.2+s.z*1.4,1.2+s.z*1.4);
    }
-   if(S.el>0){
-    const ticks=[1.5,2,3,5,10,20,50,100];let ly=1e9;ctx.font='600 10.5px sans-serif';ctx.textAlign='left';
-    for(const tv of ticks){if(tv>v.vm*1.02)break;const y=Y0()-(Y0()-Y1())*((tv-1)/(v.vm-1));if(Math.abs(ly-y)<30)continue;ly=y;
-     ctx.strokeStyle='rgba(255,255,255,.07)';ctx.lineWidth=1;ctx.setLineDash([4,6]);ctx.beginPath();ctx.moveTo(30,y);ctx.lineTo(W-8,y);ctx.stroke();ctx.setLineDash([]);
-     ctx.fillStyle='rgba(255,255,255,.35)';ctx.fillText('x'+tv,6,y-3)}
-    const N=44,pts=[];for(let i=0;i<=N;i++){const t=v.el*i/N;pts.push(pt(t,Math.exp(S.rate*t),v))}
-    ctx.globalAlpha=mode==='boom'?clamp(1-S.bt/2.2,.25,1):1;
-    ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(const q of pts)ctx.lineTo(q[0],q[1]);ctx.lineTo(pts[N][0],Y0()+28);ctx.lineTo(pts[0][0],Y0()+28);ctx.closePath();
-    const ag=ctx.createLinearGradient(0,Y1(),0,Y0());ag.addColorStop(0,'rgba(45,226,197,.30)');ag.addColorStop(1,'rgba(45,226,197,0)');ctx.fillStyle=ag;ctx.fill();
+   if(S.el>0&&mode!=='idle'){
+    const N=30,pts=[];for(let i=0;i<=N;i++){const q=path(S.el*i/N);pts.push(q)}
+    ctx.globalAlpha=mode==='boom'?clamp(1-S.bt/1.4,0,1):.9;
+    const g=ctx.createLinearGradient(pts[0][0],pts[0][1],pts[N][0],pts[N][1]);g.addColorStop(0,'rgba(45,226,197,0)');g.addColorStop(1,'rgba(45,226,197,.55)');
     ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(const q of pts)ctx.lineTo(q[0],q[1]);
-    ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=mode==='boom'?'#ff6b7d':'#37f0d2';ctx.shadowColor=mode==='boom'?'#ff3b55':'#2de2c5';ctx.shadowBlur=12;ctx.stroke();ctx.shadowBlur=0;ctx.globalAlpha=1;
+    ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=g;ctx.stroke();ctx.globalAlpha=1;
    }
    for(const p of P)if(p.k==='s'){const t=p.l/p.m;ctx.fillStyle='rgba(160,172,196,'+(.22*(1-t)).toFixed(3)+')';ctx.beginPath();ctx.arc(p.x,p.y,p.s*(1+1.6*t),0,6.283);ctx.fill()}
    ctx.globalCompositeOperation='lighter';
    for(const p of P){
-    if(p.k==='f'||p.k==='e'){const t=p.l/p.m;ctx.fillStyle='rgba(255,'+Math.round(230-190*t)+','+Math.round(140-120*t)+','+((1-t)*(p.k==='e'?1:.85)).toFixed(2)+')';ctx.beginPath();ctx.arc(p.x,p.y,p.s*(1-.55*t),0,6.283);ctx.fill()}
-    else if(p.k==='c'){const t=p.l/p.m;ctx.fillStyle='rgba(255,215,90,'+(1-t).toFixed(2)+')';ctx.beginPath();ctx.arc(p.x,p.y,p.s*(1-.4*t),0,6.283);ctx.fill()}
+    const t=p.l/p.m;
+    if(p.k==='f'){ctx.fillStyle='rgba('+Math.round(150-130*t)+','+Math.round(255-70*t)+','+Math.round(245-10*t)+','+((1-t)*.85).toFixed(2)+')';ctx.beginPath();ctx.arc(p.x,p.y,p.s*(1-.55*t),0,6.283);ctx.fill()}
+    else if(p.k==='e'){ctx.fillStyle='rgba(255,'+Math.round(230-190*t)+','+Math.round(140-120*t)+','+(1-t).toFixed(2)+')';ctx.beginPath();ctx.arc(p.x,p.y,p.s*(1-.55*t),0,6.283);ctx.fill()}
+    else if(p.k==='c'){ctx.fillStyle='rgba(255,215,90,'+(1-t).toFixed(2)+')';ctx.beginPath();ctx.arc(p.x,p.y,p.s*(1-.4*t),0,6.283);ctx.fill()}
    }
    ctx.globalCompositeOperation='source-over';
    for(const p of P)if(p.k==='d'){const t=p.l/p.m;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.r);ctx.globalAlpha=1-t*t;ctx.fillStyle=p.c;ctx.fillRect(-p.s/2,-p.s/3,p.s,p.s*.66);ctx.restore()}
    if(show)rocket(rx,ry,S.ang,flame);
+   if(mOn)meteor(mx,my,mdx,mdy,K);
    if(mode==='boom'){
     const rt=clamp(S.bt/.7,0,1);
     if(rt<1){ctx.strokeStyle='rgba(255,200,120,'+(1-rt).toFixed(2)+')';ctx.lineWidth=4*(1-rt)+1;ctx.beginPath();ctx.arc(S.bx,S.by,12+rt*130,0,6.283);ctx.stroke()}
@@ -2772,11 +2833,16 @@ function GamesScreen(){
   raf=requestAnimationFrame(loop);
   return{
    setRate(r){S.rate=r||.12},
-   setEl(e){S.el=e},
-   go(){S.mode='fly';S.at=0;S.bt=0},
-   reset(){S.mode='idle';S.el=0;S.at=0;S.bt=0;S.shake=0;S.flash=0;P.length=0},
-   boom(el){S.el=el;const ps=pose();S.ang=ps.a;S.mode='boom';S.bt=0;S.bx=ps.x;S.by=ps.y;S.shake=16;S.flash=.55;explode(ps.x,ps.y)},
-   win(el){S.el=el;S.mode='away';S.at=0;const ps=pose();for(let i=0;i<46;i++)P.push({k:'c',x:ps.x,y:ps.y,vx:rnd(-160,160),vy:rnd(-200,60),l:0,m:rnd(.7,1.4),s:rnd(1.5,3.2)})},
+   setEl(e){S.elT=e;S.ref=performance.now();if(S.mode!=='fly')S.el=e},
+   go(){if(S.mode==='idle'){S.mode='fly';S.at=0;S.bt=0}},
+   reset(){S.mode='idle';S.el=0;S.elT=0;S.at=0;S.bt=0;S.mt=0;S.hit=false;S.shake=0;S.flash=0;P.length=0},
+   /* mult کم (زیر ۱٫۶) = برخورد با شهاب‌سنگ؛ بیشتر = انفجار موتور */
+   boom(el,mult){
+    if(S.mode==='boom'||S.mode==='meteor')return;
+    S.el=S.elT=el;
+    if(mult&&mult<1.6){S.mode='meteor';S.mt=0;S.hit=false}else{S.hit=false;detonate()}
+   },
+   win(el){S.el=S.elT=el;S.mode='away';S.at=0;const ps=pose();for(let i=0;i<46;i++)P.push({k:'c',x:ps.x,y:ps.y,vx:rnd(-160,160),vy:rnd(-200,60),l:0,m:rnd(.7,1.4),s:rnd(1.5,3.2)})},
    stop(){alive=false;cancelAnimationFrame(raf)}
   };
  }
@@ -2838,7 +2904,7 @@ function GamesScreen(){
           const el=Math.max(0,now-r.t0),m=Math.max(1,Number(r.mult)||1);
           scene.setRate(r.rate||.12);scene.setEl(el);scene.go();mult.textContent=fx(m);status.textContent='🚀 موشک در حال پرواز است؛ شرط بستن اختیاری است.';
         }else if(r.watch_phase==='crashed'){
-          scene.boom(Math.log(Math.max(1,Number(r.mult)||1))/(r.rate||.12));mult.textContent=fx(r.mult);mult.className='rk-mult lose';{const nd=Math.max(0,(r.next_t0||now)-now);status.textContent='💥 موشک منفجر شد؛ پرواز بعدی تا '+num(nd.toFixed(1))+' ثانیه دیگر';}
+          scene.boom(Math.log(Math.max(1,Number(r.mult)||1))/(r.rate||.12),Number(r.mult)||1);mult.textContent=fx(r.mult);mult.className='rk-mult lose';{const nd=Math.max(0,(r.next_t0||now)-now);status.textContent='💥 موشک منفجر شد؛ پرواز بعدی تا '+num(nd.toFixed(1))+' ثانیه دیگر';}
         }
       }catch(e){}
     };
@@ -2902,7 +2968,7 @@ function GamesScreen(){
       panel.replaceChildren(h('div',{class:'rk-lbl'},'💰 جایزه: '+num(r.payout)+' تومان'),
         h('div',{class:'rk-hint'},'سود خالص: '+num(r.profit)+' تومان'));
     }else{
-      scene.boom(Math.log(Math.max(1,r.crash||1))/(active?.rate||.12));
+      scene.boom(Math.log(Math.max(1,r.crash||1))/(active?.rate||.12),r.crash||1);
       mult.textContent=fx(r.crash);mult.className='rk-mult lose';
       status.textContent='💥 انفجار! این دور شرطت از دست رفت.';
       panel.replaceChildren(h('div',{class:'rk-lbl'},'ضریب انفجار: '+fx(r.crash)),
@@ -2990,19 +3056,21 @@ function MyselfScreen(){
  const E={money:'6233367447789899509',bank:'5805331874653932911',cars:'5323272789824654613',powers:'5204118276635892650',spy:'5805161437466726782',theft:'5316700038162817675',hand:'5388881284309195257',back:'5816895683256390576',trophy:'5413566144986503832',jm:'5190526908462292507',vs:'6213060666320754449',wallet:'5334806881548379091',engine:'5775888804392996347',body:'5037414171923186776',tires:'5377521684221815300',glass:'5037614751190879049',energy:'5400280896311944960',hg:'5787432469598835099'};
  const pb=(label,fn,cls,icon)=>h('button',{class:'pb '+(cls||''),onclick:fn},icon?(icon.nodeType?icon:ceI(icon,24)):null,h('span',{},label));
  const title=t=>h('div',{class:'ghead'},t);
+ const mbar=(label,v,max,cls,txt)=>h('div',{class:'mbar'},h('div',{class:'mbar-t'},h('span',{},label),h('b',{},txt)),h('div',{class:'mbar-tr'},h('i',{class:'mbar-f '+cls,style:'width:'+Math.max(v>0?3:0,Math.min(100,v/max*100)).toFixed(1)+'%'})));
  const moneyInput=ph=>h('input',{class:'inp',type:'number',inputmode:'numeric',min:'1',placeholder:ph});
  async function load(){data=await api('/api/myself');home()}
  function home(){
   const av=h('div',{class:'self-avatar self-fallback'},ceI(E.trophy,52));
   if(data.photo)blob(data.photo,data.photo).then(u=>{if(u)av.replaceWith(h('img',{class:'self-avatar',alt:'',src:u}))});
   const avBox=data.premium?h('div',{class:'premium-ring sq'},av):av;
-  const st=[[E.money,'جیب',num(data.pocket)+' تومان'],[E.bank,'بانک',num(data.bank)+' تومان'],[E.wallet,'دارایی کل',num(data.total_assets)+' تومان'],[E.energy,'انرژی',data.energy+'٪'],[E.hand,'تعداد جق',num(data.jaghs)],[E.vs,'شناسه',String(data.id)]];
+  const st=[[E.money,'جیب',num(data.pocket)+' تومان'],[E.bank,'بانک',num(data.bank)+' تومان'],[E.wallet,'دارایی کل',num(data.total_assets)+' تومان'],[E.hand,'تعداد جق',num(data.jaghs)],[E.vs,'شناسه',String(data.id)]];
   box.replaceChildren(title('خودم'),h('div',{class:'gcard self-card'},
    h('div',{class:'selfhero'},avBox,h('div',{},h('div',{class:'gtitle'},data.character,data.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null),h('div',{class:'gdesc'},data.name+' • سطح '+data.level+(data.job?' • '+data.job:'')))),
-   h('div',{class:'gstats'},st.map(([ic,k,v])=>h('div',{class:'gstat'},h('div',{class:'gk'},ceI(ic,18),h('span',{class:'gdesc'},k)),h('b',{},v))))),
+   h('div',{class:'gstats'},st.map(([ic,k,v])=>h('div',{class:'gstat'},h('div',{class:'gk'},ceI(ic,18),h('span',{class:'gdesc'},k)),h('b',{},v)))),
+   mbar('انرژی',Number(data.energy)||0,100,'y',num(Math.round(Number(data.energy)||0))+'٪'),
+   mbar('دستگاه جق',Number(data.jagh_machine)||0,1200000,'p',num(data.jagh_machine)+' / ۱٬۲۰۰٬۰۰۰ تومان')),
    h('div',{class:'self-grid'},pb('بانک',bank,'',E.bank),pb('ماشین من',()=>cars(),'gold',E.cars),pb('قدرت‌ها',powers,'green',E.powers),pb('تنظیمات',settings,'dark',svgIc('gear',22)),
-    h('div',{class:'gdesc wide'},ceI(E.jm,18),'موجودی دستگاه جق: '+num(data.jagh_machine)+' / ۱٬۲۰۰٬۰۰۰ تومان'),
-    pb('برداشت دستگاه جق · ۲ برابر',machine,'pink wide',E.jm)));
+    pb('برداشت دستگاه جق · ۲ برابر',machine,'pink wide')));
  }
  function bank(){
   const amount=moneyInput('مبلغ به تومان');
@@ -6785,6 +6853,26 @@ def settings_keyboard(uid: int) -> InlineKeyboardMarkup:
     ])
 
 
+JM_CELLS = 10   # تعداد خونه‌های نوار دستگاه جق
+
+
+def self_energy_line(energy) -> str:
+    """نوار انرژی پنل «خودم» (ایموجی جدا از بقیه‌ی جاها)."""
+    e = max(0.0, min(ENERGY_MAX, float(energy or 0)))
+    filled = min(ENERGY_CELLS, math.ceil(e / ENERGY_MAX * ENERGY_CELLS - 1e-9)) if e > 0 else 0
+    bar = ce("selfen", 1, "🟨") * filled + ce("selfen", 2, "▫️") * (ENERGY_CELLS - filled)
+    return f"{ce('energy', 1, '⚡')} انرژی\n{bar} {_fmt_en(e / ENERGY_MAX * 100)}٪"
+
+
+def jm_bar_line(amount) -> str:
+    """نوار دستگاه جق با ایموجی پرمیوم بنفش (با /setemoji دستگاه جق ست میشه؛ اسلت ۱ = پر، ۲ = خالی)."""
+    a = max(0, min(JM_CAP, int(amount or 0)))
+    filled = min(JM_CELLS, math.ceil(a / JM_CAP * JM_CELLS - 1e-9)) if a > 0 else 0
+    bar = ce("jm", 1, "🟪") * filled + ce("jm", 2, "▫️") * (JM_CELLS - filled)
+    st = "پره، بنویس «دستگاه جق»" if a >= JM_CAP else ("آماده‌ی برداشته" if a >= JM_MIN else f"حداقل برداشت {JM_MIN:,} تومن")
+    return f"{JM_CE} دستگاه جق ({st})\n{bar} {a:,} / {JM_CAP:,} تومن"
+
+
 async def self_panel_text(uid: int, name: str = "") -> str:
     row = await get_user(uid)
     total = int(row["balance"] or 0) + int(row["bank_balance"] or 0)
@@ -6806,8 +6894,8 @@ async def self_panel_text(uid: int, name: str = "") -> str:
         f"💼 شغل: {html.escape(job_name)}\n"
         f"{MONEY_CE} دارایی کل: {total:,} تومان\n"
         f"{HG_CE} زمان جق: {jagh_t} (هر {_duration_fa(cooldown)})\n"
-        f"{jm_status_line(row.get('jagh_machine', 0))}\n\n"
-        f"{energy_line(row.get('energy', 0))}\n\n"
+        f"{jm_bar_line(row.get('jagh_machine', 0))}\n\n"
+        f"{self_energy_line(row.get('energy', 0))}\n\n"
         "یکی از بخش‌ها رو انتخاب کن:"
     )
 
@@ -8698,6 +8786,8 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await support_add_input(update, context):
         return
+    if await gift_text_input(update, context):
+        return
     if await event_text(update, context, msg.text or ""):
         return
     if await spy_text(update, context, msg.text or ""):
@@ -9011,6 +9101,8 @@ async def on_private_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پیام‌های غیرمتنی تو پی‌وی (مثل جدول واقعی تلگرام): فقط وقتی پشتیبان بعد از /setjobs منتظره."""
     msg = update.effective_message
     if await admin_input(update, context):
+        return
+    if await gift_receipt(update, context):
         return
     if await buy_receipt(update, context):
         return
@@ -13768,7 +13860,8 @@ def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
     add(("broadcast", btn("📢 پیام همگانی", "primary", callback_data="ad:bc")),
         ("stats", btn("📊 آمار", "primary", callback_data="ad:stats")))
     add(("group_msgs", btn("👁 پیام‌های گروه‌ها", "primary", callback_data="ad:gm")))
-    add(("giveaway", btn("🎁 قرعه‌کشی", "success", callback_data="ad:gw")))
+    add(("giveaway", btn("🎁 قرعه‌کشی", "success", callback_data="ad:gw")),
+        ("pay", btn("🎁 تنظیم قیمت گیفت‌ها", "success", callback_data="ad:giftprices")))
     if not rows:
         rows.append([btn("🔒 هنوز دسترسی‌ای برات فعال نشده", callback_data="ad:noop")])
     return InlineKeyboardMarkup(rows)
@@ -13779,13 +13872,15 @@ _ADMIN_ACT_PERM = {
     "money": "money_sub", "money_add": "money_add", "jagh": "jagh_sub", "jagh_add": "jagh_add",
     "gm": "group_msgs", "gl": "group_msgs", "gu0": "group_msgs", "gu": "group_msgs",
     "ban": "ban", "unban": "unban", "task_daily": "task_daily", "task_weekly": "task_weekly",
-    "toggle": "bot_toggle", "stats": "stats", "bc": "broadcast", "bcgo": "broadcast", "slist": "staff_list", "gw": "giveaway",
+    "toggle": "bot_toggle", "stats": "stats", "bc": "broadcast", "bcgo": "broadcast", "slist": "staff_list", "gw": "giveaway", "giftprices": "pay", "giftprice": "pay",
 }
 
 
 def _adm_state_perm(st: dict):
     """دسترسی لازم برای مرحله‌ی در حال انجام (اگه وسط کار دسترسی گرفته بشن، ادامه نمی‌دن)."""
     act = st.get("act")
+    if act == "gift_price":
+        return "pay"
     if act == "task_add":
         return "task_daily" if st.get("period") == "daily" else "task_weekly"
     return {"money": "money_sub", "money_add": "money_add", "jagh": "jagh_sub", "jagh_add": "jagh_add",
@@ -14074,7 +14169,24 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("این دسترسی برات فعال نیست.", show_alert=True)
         return
     await q.answer()
-    if act in ("menu", "cancel"):
+    if act == "giftprices":
+        rows = []
+        for tier in (15, 25, 50, 100):
+            price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0)
+            label = f"⭐ {tier} استارزی — {price:,} تومان" if price else f"⭐ {tier} استارزی — قیمت ثبت نشده"
+            rows.append([btn(label, "primary", callback_data=f"ad:giftprice:{tier}")])
+        rows.append([btn("🔙 برگشت به پنل", callback_data="ad:menu")])
+        await q.edit_message_text("🎁 <b>تنظیم قیمت گیفت‌ها</b>\n\nبسته‌ای که می‌خوای قیمتش رو تغییر بدی انتخاب کن:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+    elif act == "giftprice":
+        try:
+            tier = int(parts[2])
+        except (IndexError, ValueError):
+            return
+        if tier not in (15, 25, 50, 100):
+            return
+        context.user_data["adm"] = {"act": "gift_price", "step": "price", "tier": tier}
+        await q.edit_message_text(f"⭐ تنظیم قیمت بسته {tier} استارزی\n\nقیمت جدید رو به تومان و فقط به‌صورت عدد بفرست.\nبرای لغو بنویس «لغو».", reply_markup=CANCEL_KB)
+    elif act in ("menu", "cancel"):
         context.user_data.pop("adm", None)
         await q.edit_message_text(admin_menu_text(), reply_markup=admin_menu_kb(q.from_user.id))
     elif act in ("money", "jagh", "money_add", "jagh_add"):
@@ -14264,6 +14376,22 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         await msg.reply_text("این دسترسی برات فعال نیست.", reply_markup=admin_menu_kb(user.id))
         return True
     act = st["act"]
+    if act == "gift_price":
+        raw = (msg.text or "").strip().replace(",", "").replace("٬", "")
+        if st.get("step") != "price" or not raw.isdigit() or int(raw) <= 0:
+            await msg.reply_text("قیمت معتبر نیست؛ فقط یک عدد مثبت به تومان بفرست.", reply_markup=CANCEL_KB)
+            return True
+        tier = int(st["tier"])
+        price = int(raw)
+        keys = [f"tier_{tier}"] + [item[0] for item in GIFT_TIERS[tier]]
+        for key in keys:
+            await pool.execute(
+                "INSERT INTO gift_prices(item_key,price,updated_by,updated_at) VALUES($1,$2,$3,$4) "
+                "ON CONFLICT(item_key) DO UPDATE SET price=EXCLUDED.price,updated_by=EXCLUDED.updated_by,updated_at=EXCLUDED.updated_at",
+                key, price, user.id, time.time())
+        context.user_data.pop("adm", None)
+        await msg.reply_text(f"✅ قیمت همه‌ی گیفت‌های بسته {tier} استارزی روی {price:,} تومان تنظیم شد.", reply_markup=admin_menu_kb(user.id))
+        return True
     if act == "gw":
         return await gw_admin_input(update, context, st)
     if act == "gmu":
@@ -14555,7 +14683,7 @@ async def jagh_machine_collect(update: Update, context: ContextTypes.DEFAULT_TYP
 GIFT_MONEY_CE = '<tg-emoji emoji-id="5289850733011693663">💰</tg-emoji>'
 AFFAIR_ENERGY_PENALTY = 3.0      # انرژی منفی برای کسی که رو زوجین بوس/بغل میده
 HUG_COOLDOWN = 5 * 60            # هر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد
-HUG_MONEY = (30, 50)             # تومن
+HUG_MONEY = (3_000, 5_000)       # تومن؛ هر دو نفر مبلغ یکسان می‌گیرن
 HUG_ENERGY = (1.0, 2.5)          # شانسی بین این دو عدد
 
 # هر هدیه: اسم، ایموجی پرمیوم (None = ایموجی معمولی)، قیمت (تومن)، انرژی، اسم‌های قابل قبول، جمله
@@ -15136,10 +15264,10 @@ async def sex_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───────────────────────── گی و لز (بین کاراکترهای هم‌جنس، با ریپلای) ─────────────────────────
 # مردها با «گی»/«لواط» و دخترها با «لز»/«قیچی» روی پیامِ یه کاربرِ هم‌جنس ریپلای می‌کنن.
 # هر کاربر هر ۳۰ دقیقه فقط یه بار تو گی/لز شرکت می‌کنه (چه خودش شروع کرده باشه چه طرف مقابل بوده)؛
-# تا ۳۰ دقیقه با هیچ‌کس دیگه‌ای نمی‌تونه. هر دو نفر شانسی ۵ تا ۷ هزار تومن می‌گیرن.
+# تا ۳۰ دقیقه با هیچ‌کس دیگه‌ای نمی‌تونه. هر دو نفر ۷ هزار تومن (یکسان) می‌گیرن.
 # اگه هر کدوم از دو طرف همسر داشته باشه انجام نمیشه.
 PAIR_FUN_COOLDOWN = 30 * 60
-PAIR_FUN_MONEY = (5_000, 7_000)
+PAIR_FUN_MONEY = (7_000, 7_000)   # ثابت؛ برای هر دو نفر یکسان
 PAIR_FUN = {
     "gay": dict(
         gender="m", only="مرد", mate="زن", do="گی کنی", name="گی کردن",
@@ -15213,7 +15341,7 @@ async def pair_fun(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
                 elif waits[target.id] > 0:
                     err = f"{HG_CE} این کاربر تازه تو {cfg['name']} شرکت کرده؛ {_duration_fa(int(waits[target.id]) + 1)} دیگه باید صبر کنه."
                 else:
-                    m1, m2 = random.randint(*PAIR_FUN_MONEY), random.randint(*PAIR_FUN_MONEY)
+                    m1 = m2 = random.randint(*PAIR_FUN_MONEY)
                     await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", m1, user.id)
                     await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", m2, target.id)
                     for uid_ in (user.id, target.id):
@@ -15558,6 +15686,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [kbtn("خرید پول بازی", "success", EID_MONEY)],
+            [kbtn("خرید گیفت استارزی", "primary", "5228972255945437745")],
             [kbtn("زیرمجموعه‌گیری", "primary", REF_EID), kbtn("خودم", "danger", EID_TROPHY)],
             [kbtn("بانک", None, BANK_EMOJIS[0]), kbtn("تسک‌ها", None, EID_TROPHY)],
         ],
@@ -15578,6 +15707,9 @@ async def menu_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     t = (msg.text or "").replace("\u200c", "").strip() if msg else ""
     if t.replace(" ", "") == "خریدپولبازی":
         await buy_cmd(update, context)
+        return True
+    if t.replace(" ", "") in ("خریدگیفتاستارزی", "گیفتاستارزی"):
+        await gift_store_cmd(update, context)
         return True
     if t == "زیرمجموعهگیری":
         await referral_cmd(update, context)
@@ -15745,6 +15877,250 @@ async def purchase_review_cb(update: Update, context: ContextTypes.DEFAULT_TYPE)
         log.warning("purchase result notify failed", exc_info=True)
 
 
+# ───────────────────── سفارش گیفت استارزی ─────────────────────
+GIFT_CHANNEL = "@foxfrenzy_gift"
+GIFT_CARD = "6219861851160068"
+GIFT_EMOJI = "5228972255945437745"
+GIFT_TIERS = {
+    15: [("teddy", "تدی", "5206502842478638898", "🧸"), ("heart", "قلب", None, "💝")],
+    25: [("rose", "گل رز", "5363938656874673963", "🌹"), ("present", "کادو", "5449800250032143374", "🎁")],
+    50: [("cake", "کیک", "5452055425690123301", "🎂"), ("bouquet", "دسته گل", None, "💐"),
+         ("spaceship", "سفینه", "5418279291773282421", "🚀")],
+    100: [("trophy", "جام", None, "🏆"), ("diamond", "الماس", None, "💎"), ("ring", "حلقه", None, "💍")],
+}
+GIFT_ITEMS = {k: (tier, name, eid, fallback) for tier, items in GIFT_TIERS.items() for k, name, eid, fallback in items}
+
+
+def gift_emoji(eid, fallback):
+    return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>' if eid else fallback
+
+
+async def gift_store_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rows = []
+    lines = [f'{gift_emoji(GIFT_EMOJI, "🎁")} <b>خرید گیفت استارزی</b>', '',
+             'یکی از بسته‌های گیفت رو انتخاب کن:']
+    for tier in (15, 25, 50, 100):
+        tier_price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0)
+        if not tier_price:
+            old_prices = await pool.fetch("SELECT item_key,price FROM gift_prices WHERE item_key=ANY($1::text[])", [x[0] for x in GIFT_TIERS[tier]])
+            tier_price = max((int(r["price"]) for r in old_prices), default=0)
+        lines.append(f'⭐ <b>گیفت {tier} استارزی</b> — ' + (f'{tier_price:,} تومان' if tier_price else 'قیمت اعلام‌نشده'))
+        rows.append([btn(f"خرید گیفت {tier} استارزی", "success" if tier == 100 else "primary",
+                         icon=GIFT_EMOJI, callback_data=f"gft:tier:{tier}")])
+    rows.append([btn("بازگشت به منو", "primary", icon=EID_BACK, callback_data="gft:home")])
+    await send_html(context.bot, update.effective_user.id, B("\\n".join(lines)),
+                    reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def gift_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if q.message.chat.type != "private":
+        await q.answer("سفارش گیفت فقط در پی‌وی ربات انجام می‌شه.", show_alert=True)
+        return
+    parts = q.data.split(":")
+    action = parts[1]
+    if action == "home":
+        await q.answer()
+        context.user_data.pop("gift_order", None)
+        await edit_html(q, welcome_ok(), welcome_keyboard((await context.bot.get_me()).username or ""))
+        return
+    if action == "tier":
+        tier = int(parts[2])
+        if tier not in GIFT_TIERS:
+            await q.answer("بسته نامعتبر است.", show_alert=True)
+            return
+        await q.answer()
+        rows = []
+        for key, name, eid, fallback in GIFT_TIERS[tier]:
+            price = await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}")
+            if not price:
+                price = await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", key)
+            price = int(price or 0)
+            label = f"{fallback} {name} · {price:,} تومان" if price else f"{fallback} {name} · قیمت اعلام‌نشده"
+            rows.append([btn(label, "primary", icon=eid, callback_data=f"gft:item:{key}")])
+        rows.append([btn("برگشت", "primary", icon=EID_BACK, callback_data="gft:back")])
+        await edit_html(q, f"⭐ <b>انتخاب گیفت {tier} استارزی</b>\n\nنوع گیفت رو انتخاب کن:", InlineKeyboardMarkup(rows))
+    elif action == "back":
+        await q.answer()
+        class Dummy: pass
+        d = Dummy(); d.effective_user = q.from_user
+        await gift_store_edit(q, context)
+    elif action == "item":
+        key = parts[2]
+        if key not in GIFT_ITEMS: return
+        tier, name, eid, fallback = GIFT_ITEMS[key]
+        price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0)
+        if not price:
+            price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", key) or 0)
+        if price <= 0:
+            await q.answer("قیمت این گیفت هنوز توسط پشتیبانی ثبت نشده.", show_alert=True)
+            return
+        await q.answer()
+        context.user_data["gift_order"] = {"stage": "gift_text", "tier": tier, "key": key,
+                                           "name": name, "price": price}
+        kb = InlineKeyboardMarkup([
+            [btn("بدون متن", "primary", callback_data="gft:text:none")],
+            [btn("انصراف", "danger", callback_data="gft:cancel")],
+        ])
+        await edit_html(q, f"{gift_emoji(eid, fallback)} <b>{html.escape(name)}</b>\n"
+                           f"💳 قیمت: <b>{price:,} تومان</b>\n\n"
+                           "متن دلخواهت برای همراه گیفت رو بفرست؛ یا گزینه «بدون متن» رو بزن.",
+                        kb)
+    elif action == "text" and parts[2] == "none":
+        data = context.user_data.get("gift_order")
+        if not data or data.get("stage") != "gift_text":
+            await q.answer("مرحله سفارش منقضی شده است.", show_alert=True)
+            return
+        await q.answer()
+        data["gift_text"] = ""
+        data["stage"] = "recipient"
+        await edit_html(q, "👤 حالا <b>یوزرنیم گیرنده</b> رو بفرست (با @ یا بدون @).")
+    elif action == "cancel":
+        await q.answer()
+        context.user_data.pop("gift_order", None)
+        await edit_html(q, "سفارش لغو شد. هر زمان خواستی دوباره از منو اقدام کن.",
+                        InlineKeyboardMarkup([[btn("رفتن به خرید گیفت", "success", callback_data="gft:home")]]))
+
+
+async def gift_store_edit(q, context):
+    rows = []
+    lines = [f'{gift_emoji(GIFT_EMOJI, "🎁")} <b>خرید گیفت استارزی</b>', '', 'یکی از بسته‌های گیفت رو انتخاب کن:']
+    for tier in (15, 25, 50, 100):
+        price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0)
+        if not price:
+            old_prices = await pool.fetch("SELECT item_key,price FROM gift_prices WHERE item_key=ANY($1::text[])", [x[0] for x in GIFT_TIERS[tier]])
+            price = max((int(r["price"]) for r in old_prices), default=0)
+        lines.append(f"⭐ <b>{tier} استارزی</b> — " + (f"{price:,} تومان" if price else "قیمت اعلام‌نشده"))
+        rows.append([btn(f"خرید گیفت {tier} استارزی", "primary", icon=GIFT_EMOJI, callback_data=f"gft:tier:{tier}")])
+    rows.append([btn("بازگشت به منو", "primary", icon=EID_BACK, callback_data="gft:home")])
+    await edit_html(q, B("\\n".join(lines)), InlineKeyboardMarkup(rows))
+
+
+async def gift_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    msg = update.effective_message
+    data = context.user_data.get("gift_order")
+    if not msg or not msg.text or not data:
+        return False
+    stage = data.get("stage")
+    if stage == "gift_text":
+        value = msg.text.strip()
+        if len(value) > 250:
+            await msg.reply_text("متن گیفت حداکثر ۲۵۰ کاراکتر باشه.")
+            return True
+        data["gift_text"] = value
+        data["stage"] = "recipient"
+        await msg.reply_text("👤 حالا یوزرنیم گیرنده رو بفرست (با @ یا بدون @).")
+        return True
+    if stage == "recipient":
+        username = msg.text.strip().replace("https://t.me/", "").lstrip("@")
+        if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
+            await msg.reply_text("یوزرنیم معتبر نیست؛ فقط حروف انگلیسی، عدد و _ (حداقل ۵ کاراکتر) بفرست.")
+            return True
+        data["recipient"] = "@" + username
+        data["stage"] = "receipt"
+        await msg.reply_text(f"💳 مبلغ سفارش: {data['price']:,} تومان\n"
+                             f"شماره کارت: <code>{GIFT_CARD}</code>\n\n"
+                             "بعد از پرداخت، <b>عکس رسید بانکی</b> رو همینجا ارسال کن.",
+                             parse_mode="HTML")
+        return True
+    return False
+
+
+async def gift_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    data = context.user_data.get("gift_order")
+    if not data or data.get("stage") != "receipt" or not msg:
+        return False
+    if not msg.photo:
+        await msg.reply_text("لطفاً عکس رسید پرداخت رو به‌صورت تصویر ارسال کن.")
+        return True
+    tracking = "FG" + datetime.now().strftime("%y%m%d") + str(random.randint(100000, 999999))
+    now = time.time()
+    order_id = await pool.fetchval("""INSERT INTO gift_orders
+        (tracking_code,user_id,tier,item_key,item_name,gift_text,recipient_username,price,status,receipt_file_id,created_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10) RETURNING order_id""",
+        tracking, user.id, data["tier"], data["key"], data["name"], data.get("gift_text",""),
+        data["recipient"], data["price"], msg.photo[-1].file_id, now)
+    context.user_data.pop("gift_order", None)
+    dt = datetime.fromtimestamp(now).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    uname = ("@" + user.username) if user.username else "ندارد"
+    caption = (f"🎁 <b>سفارش جدید گیفت استارزی</b>\n"
+               f"🔖 شماره پیگیری: <code>{tracking}</code>\n"
+               f"📦 نوع سفارش: <b>خرید گیفت استارزی</b>\n"
+               f"⭐ نوع گیفت: <b>{data['tier']} استارزی</b>\n"
+               f"🎀 اسم سفارش: <b>{html.escape(data['name'])}</b>\n"
+               f"👤 گیرنده: <b>{html.escape(data['recipient'])}</b>\n"
+               f"✍️ متن گیفت: <b>{html.escape(data.get('gift_text') or 'بدون متن')}</b>\n"
+               f"💳 مبلغ: <b>{data['price']:,} تومان</b>\n"
+               f"🆔 سفارش‌دهنده: <code>{user.id}</code> ({html.escape(uname)})\n"
+               f"🕒 زمان دقیق سفارش: <code>{dt}</code>\n"
+               f"🧾 کد سفارش: <code>#{order_id}</code>")
+    kb = InlineKeyboardMarkup([[btn("✅ تایید سفارش", "success", callback_data=f"gvr:ok:{order_id}"),
+                                btn("❌ رد سفارش", "danger", callback_data=f"gvr:no:{order_id}")]])
+    sent_support = 0
+    for aid in [a for a in (set(OWNER_IDS) | set(STAFF)) if has_perm(a, "pay")]:
+        try:
+            await context.bot.send_photo(aid, msg.photo[-1].file_id, caption=caption,
+                                         parse_mode="HTML", reply_markup=kb)
+            sent_support += 1
+        except Exception:
+            log.warning("gift order support notification failed for %s", aid, exc_info=True)
+    channel_ok = False
+    try:
+        await context.bot.send_photo(GIFT_CHANNEL, msg.photo[-1].file_id,
+                                     caption=caption, parse_mode="HTML")
+        channel_ok = True
+    except Exception:
+        log.exception("gift order channel delivery failed")
+    await send_html(context.bot, user.id,
+        B(f"✅ سفارش گیفتت ثبت شد!\n\n🔖 شماره پیگیری: <code>{tracking}</code>\n"
+          f"📦 {html.escape(data['name'])} · {data['tier']} استارزی\n"
+          f"🕒 {dt}\n\nنتیجه بررسی پشتیبانی بهت اطلاع داده می‌شه."))
+    if not sent_support or not channel_ok:
+        log.error("gift order %s delivery status: support=%s channel=%s", tracking, sent_support, channel_ok)
+    return True
+
+
+async def gift_review_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not has_perm(q.from_user.id, "pay"):
+        await q.answer("دسترسی بررسی سفارش گیفت رو نداری.", show_alert=True)
+        return
+    _, act, oid_s = q.data.split(":")
+    oid = int(oid_s)
+    row = await pool.fetchrow("""UPDATE gift_orders SET status=$2,reviewed_by=$3,reviewed_at=$4
+        WHERE order_id=$1 AND status='pending' RETURNING user_id,tracking_code,item_name""",
+        oid, "approved" if act == "ok" else "rejected", q.from_user.id, time.time())
+    if not row:
+        await q.answer("این سفارش قبلاً بررسی شده.", show_alert=True)
+        return
+    await q.answer("ثبت شد.")
+    try:
+        await q.edit_message_caption(caption=(q.message.caption_html or "") +
+                                     ("\n\n✅ تایید شد" if act == "ok" else "\n\n❌ رد شد"),
+                                     parse_mode="HTML", reply_markup=None)
+    except Exception:
+        pass
+    result = ("✅ سفارش گیفتت تایید شد؛ پشتیبانی برای ارسال باهات هماهنگ می‌کنه."
+              if act == "ok" else "❌ سفارش گیفتت رد شد. برای پیگیری با پشتیبانی تماس بگیر.")
+    await send_html(context.bot, row["user_id"],
+                    B(f"{result}\n🔖 شماره پیگیری: <code>{row['tracking_code']}</code>"))
+
+
+async def gift_prices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not has_perm(uid, "pay"):
+        await update.effective_message.reply_text("دسترسی مدیریت قیمت گیفت رو نداری.")
+        return
+    rows = []
+    for tier in (15, 25, 50, 100):
+        price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0)
+        rows.append([btn(f"⭐ {tier} استارزی — {price:,} تومان" if price else f"⭐ {tier} استارزی — ثبت نشده",
+                         "primary", callback_data=f"ad:giftprice:{tier}")])
+    rows.append([btn("🔙 پنل پشتیبانی", callback_data="ad:menu")])
+    await update.effective_message.reply_text("🎁 تنظیم قیمت گیفت‌ها\n\nبرای تغییر، بسته‌ی موردنظر رو انتخاب کن:", reply_markup=InlineKeyboardMarkup(rows))
+
+
 def main():
     app = (
         Application.builder()
@@ -15770,8 +16146,12 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.TEXT & ~filters.COMMAND, jagsal_nontext))
     app.add_handler(CallbackQueryHandler(duel_answer, pattern=r"^du:(ok|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
-    app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\d+)$"))
-    app.add_handler(CallbackQueryHandler(purchase_review_cb, pattern=r"^bp:(ok|no):\d+$"))
+    app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\\d+)$"))
+    app.add_handler(CallbackQueryHandler(purchase_review_cb, pattern=r"^bp:(ok|no):\\d+$"))
+    app.add_handler(CallbackQueryHandler(gift_cb, pattern=r"^gft:"))
+    app.add_handler(CallbackQueryHandler(gift_review_cb, pattern=r"^gvr:(ok|no):\\d+$"))
+    app.add_handler(CommandHandler("giftprices", gift_prices_cmd, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("giftprice", gift_prices_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(mini_subscription_review_cb, pattern=r"^sub:(ok|no):\d+$"))
     app.add_handler(CallbackQueryHandler(jagsal_cb, pattern=r"^jgs:"))
     app.add_handler(CommandHandler("admin", admin_cmd, filters=filters.ChatType.PRIVATE))
