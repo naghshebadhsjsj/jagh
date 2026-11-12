@@ -3245,6 +3245,11 @@ async function bootTabs(){
   if(!(m.perms||[]).includes('staff_list')&&!m.perms?.length)rm('users');
  }
  const keys=[...document.querySelectorAll('#tabs button')].map(b=>b.dataset.k);
+ /* کلیک دکمه‌های نوار پایین + آیکن پرمیوم‌شون (قبلاً هیچ‌کدوم وصل نبود و فقط تب «خودم» باز می‌موند) */
+ document.querySelectorAll('#tabs button').forEach(b=>{
+  b.onclick=()=>{if(b.dataset.k)openTab(b.dataset.k)};
+  const ic=b.querySelector('i[data-ce]');if(ic){const id=ic.getAttribute('data-ce');ic.replaceChildren(ceI(id,26))}
+ });
  /* داده‌ی سرور رو از قبل گرم می‌کنیم و همه‌ی تب‌ها همین الان ساخته میشن تا دیتاشون بیاد */
  const warm=['/api/myself','/api/social/room','/api/social/leaderboard','/api/game/crash/state'].map(u=>api(u).catch(()=>null));
  for(const k of keys){try{if(!tabEls[k])tabEls[k]=TABS[k]()}catch(e){console.error(e)}}
@@ -6156,6 +6161,7 @@ def welcome_keyboard(bot_username: str = "") -> InlineKeyboardMarkup:
     rows += [
         [btn("زیرمجموعه‌گیری", "success", icon=REF_EID, callback_data="rf:open")],
         [btn("خرید پول بازی", "primary", icon=EID_MONEY, callback_data="bu:menu")],
+        [btn("خرید گیفت استارزی", "primary", icon="5228972255945437745", callback_data="gft:store")],
         [btn("📖 راهنما", "primary", callback_data="guide:open")],
     ]
     if bot_username:
@@ -16012,7 +16018,8 @@ async def menu_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if t.replace(" ", "") == "خریدپولبازی":
         await buy_cmd(update, context)
         return True
-    if t.replace(" ", "") in ("خریدگیفتاستارزی", "گیفتاستارزی"):
+    _tt = t.replace(" ", "").replace("ي", "ی").replace("ك", "ک")
+    if _tt in ("خریدگیفتاستارزی", "گیفتاستارزی", "گیفت") or ("گیفت" in _tt and "استارز" in _tt and len(_tt) <= 30):
         await gift_store_cmd(update, context)
         return True
     if t == "زیرمجموعهگیری":
@@ -16227,6 +16234,11 @@ async def gift_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         context.user_data.pop("gift_order", None)
         await edit_html(q, welcome_ok(), welcome_keyboard((await context.bot.get_me()).username or ""))
+        return
+    if action == "store":
+        await q.answer()
+        context.user_data.pop("gift_order", None)
+        await gift_store_edit(q, context)
         return
     if action == "tier":
         tier = int(parts[2])
@@ -16529,6 +16541,7 @@ def main():
     app.add_handler(CallbackQueryHandler(gw_cb, pattern=r"^gw:"))
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("menu", menu_cmd, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("gift", gift_store_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("referral", referral_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("buy", buy_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(check_join, pattern="^check_join$"))
