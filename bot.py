@@ -6259,6 +6259,8 @@ async def startup(app: Application):
         app.bot_data["gw_task"] = asyncio.create_task(giveaway_loop(app))
         app.bot_data["mini_crash_round_task"] = asyncio.create_task(mini_crash_round_loop())
         app.bot_data["jagsal_expiry_task"] = asyncio.create_task(jagsal_expiry_loop())
+        await boss_init_db()
+        app.bot_data["boss_task"] = asyncio.create_task(boss_loop(app))
         try:
             app.bot_data["web"] = await start_webapp()
         except Exception:
@@ -8675,6 +8677,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _TASK_MSG_TS[user.id] = _tm
         await task_event(context.bot, msg.chat_id, user.id, "msg", name=user.full_name)
     if await event_text(update, context, text):
+        return
+    if await boss_text(update, context, text):
         return
     if await spy_text(update, context, text):
         return
@@ -16940,6 +16944,276 @@ async def gift_prices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                          "primary", callback_data=f"ad:giftprice:{tier}")])
     rows.append([btn("🔙 پنل پشتیبانی", callback_data="ad:menu")])
     await update.effective_message.reply_text("🎁 تنظیم قیمت گیفت‌ها\n\nبرای تغییر، بسته‌ی موردنظر رو انتخاب کن:", reply_markup=InlineKeyboardMarkup(rows))
+
+
+# ═════════════════════════ باس‌فایت گروهی ═════════════════════════
+# هر ۳ ساعت یه غول (با گیف انیمیشنی) تو گروه‌های فعال میاد؛ همه ریپلای می‌کنن «شلیک»،
+# هر نفر هر ۱۰ ثانیه یه شلیک (۱ انرژی). غول بمیره پول بین همه به نسبت آسیب تقسیم میشه.
+BOSS_EVERY = 3 * 3600          # فاصله‌ی ظاهر شدن غول تو هر گروه
+BOSS_DURATION = 40 * 60        # مهلت نابود کردن؛ بعدش فرار می‌کنه
+BOSS_HIT_CD = 10               # هر نفر هر چند ثانیه یه شلیک
+BOSS_ENERGY_COST = 1.0         # انرژی هر شلیک
+BOSS_ACTIVE_WINDOW = 6 * 3600  # فقط گروه‌هایی که تو این مدت پیام داشتن غول می‌گیرن
+BOSS_TICK = 4                  # هر چند ثانیه یه بار پیام غول آپدیت میشه (جلوگیری از لیمیت تلگرام)
+BOSS_WORDS = {"شلیک", "شلیککن", "شلیکنابودش", "شلیکنابودکن"}
+BOSS_SPAWN_WORDS = {"باس", "غول", "باسفایت", "شروعباس"}   # فقط پشتیبان‌ها: ظاهر کردن فوری غول
+BOSSES = [   # file = ویدیوی انیمیشنی غول (کنار bot.py)
+    {"file": "boss_milk.mp4",      "name": "پاکت شیر نابودگر", "hp": 35_000,  "pool": 500_000},
+    {"file": "boss_banana.mp4",    "name": "موزِ زورگو",        "hp": 45_000,  "pool": 1_000_000},
+    {"file": "boss_ice.mp4",       "name": "غول یخی",           "hp": 60_000,  "pool": 1_500_000},
+    {"file": "boss_lava.mp4",      "name": "غول گدازه",         "hp": 80_000,  "pool": 2_200_000},
+    {"file": "boss_lightning.mp4", "name": "غول رعد و برق",     "hp": 100_000, "pool": 2_800_000},
+    {"file": "boss_shadow.mp4",    "name": "هیولای سایه",       "hp": 130_000, "pool": 3_500_000},
+]
+# نوار جون غول از ست‌های نوار دستگاه جق ساخته میشه؛ ست قرمز خواستی این خط رو عوض کن
+BAR_SETS["boss"] = BAR_SETS["jm"]
+BAR_CAP_KEY["boss"] = "boss"
+BOSS_BAR_CELLS = 8
+BOSS_SKULL_CE = '<tg-emoji emoji-id="5987616823636401062">🔥</tg-emoji>'
+_BOSS_FILE_ID: dict[str, str] = {}
+_BOSS_LAST_HIT: dict[tuple, float] = {}
+_BOSS_WARNED: dict[tuple, float] = {}
+_BOSS_REPLY_TS: dict[int, list] = {}
+_BOSS_DIRTY: set[int] = set()
+def _boss_path(fname: str):
+    here = Path(__file__).resolve().parent
+    for p in (here / fname, here / "boss_media" / fname, here / "assets" / fname):
+        if p.exists():
+            return p
+    return None
+
+
+async def _boss_media(bot, chat_id: int, fname: str, caption: str):
+    """ویدیوی غول رو می‌فرسته؛ بار اول از فایل، بعدش با file_id (سریع). فایل نبود فقط متن میره."""
+    if fname in _BOSS_FILE_ID:
+        try:
+            return await bot.send_animation(chat_id, _BOSS_FILE_ID[fname], caption=caption, parse_mode="HTML")
+        except Exception:
+            _BOSS_FILE_ID.pop(fname, None)
+    p = _boss_path(fname)
+    if not p:
+        log.warning("boss media missing: %s", fname)
+        return await bot.send_message(chat_id, caption, parse_mode="HTML")
+    bio = BytesIO(p.read_bytes()); bio.name = fname
+    m = await bot.send_animation(chat_id, bio, caption=caption, parse_mode="HTML", width=480, height=720)
+    try:
+        _BOSS_FILE_ID[fname] = m.animation.file_id
+    except Exception:
+        pass
+    return m
+
+
+async def boss_init_db():
+    await pool.execute("CREATE TABLE IF NOT EXISTS boss_fights (chat_id BIGINT PRIMARY KEY, idx INT NOT NULL, hp BIGINT NOT NULL, hp_max BIGINT NOT NULL, pool BIGINT NOT NULL, msg_id BIGINT NOT NULL DEFAULT 0, started DOUBLE PRECISION NOT NULL, ends_at DOUBLE PRECISION NOT NULL, status TEXT NOT NULL DEFAULT 'active', last_hitter BIGINT NOT NULL DEFAULT 0)")
+    await pool.execute("CREATE TABLE IF NOT EXISTS boss_hits (chat_id BIGINT NOT NULL, user_id BIGINT NOT NULL, name TEXT, damage BIGINT NOT NULL DEFAULT 0, hits INT NOT NULL DEFAULT 0, PRIMARY KEY(chat_id, user_id))")
+    await pool.execute("CREATE TABLE IF NOT EXISTS boss_sched (chat_id BIGINT PRIMARY KEY, next_spawn DOUBLE PRECISION NOT NULL)")
+
+
+def _boss_bar(hp: int, hp_max: int) -> str:
+    return _custom_bar("boss", 100.0 * hp / max(1, hp_max), BOSS_BAR_CELLS)
+
+
+async def _boss_caption(chat_id: int, f, state: str = "active", extra: str = "") -> str:
+    b = BOSSES[f["idx"]]
+    hp, hp_max = int(f["hp"]), int(f["hp_max"])
+    top = await pool.fetch("SELECT name, damage FROM boss_hits WHERE chat_id=$1 ORDER BY damage DESC LIMIT 3", chat_id)
+    medals = ("🥇", "🥈", "🥉")
+    tops = "\n".join(f"{medals[i]} {html.escape(r['name'] or 'ناشناس')} — {int(r['damage']):,}" for i, r in enumerate(top)) or "هنوز کسی شلیک نکرده!"
+    pct = 100.0 * hp / max(1, hp_max)
+    if state == "active":
+        left = max(0, int(f["ends_at"] - time.time()))
+        head = f"{BOSS_SKULL_CE} غول «{b['name']}» ظاهر شد! {BOSS_SKULL_CE}"
+        foot = (f"{SWORDS_CE} روی همین پیام ریپلای کن و بنویس: «شلیک»\n"
+                f"هر نفر هر {BOSS_HIT_CD} ثانیه یه شلیک ({BOSS_ENERGY_COST:g} انرژی)")
+        timer = f"{HG_CE} مهلت: {_duration_fa(left)}\n"
+    elif state == "dead":
+        head = f"☠️ غول «{b['name']}» نابود شد! 🎉"
+        foot, timer = "پاداش‌ها به حساب شرکت‌کننده‌ها واریز شد.", ""
+    else:
+        head = f"💨 غول «{b['name']}» فرار کرد!"
+        foot, timer = "این بار نتونستین نابودش کنین؛ دفعه‌ی بعد جدی‌تر!", ""
+    return B(f"{head}\n\n{_boss_bar(hp, hp_max)}\n❤️ جون: {pct:.0f}٪ — {hp:,} از {hp_max:,}\n{timer}"
+             f"{MONEY_CE} جایزه‌ی کل: {int(f['pool']):,} تومان\n\n{TROPHY_CE} برترین‌ها:\n{tops}\n\n{foot}{extra}")
+
+
+async def boss_spawn(bot, chat_id: int, force: bool = False) -> bool:
+    now = time.time()
+    cur = await pool.fetchrow("SELECT status, ends_at FROM boss_fights WHERE chat_id=$1", chat_id)
+    if cur and cur["status"] == "active" and cur["ends_at"] > now:
+        return False
+    idx = random.randrange(len(BOSSES))
+    b = BOSSES[idx]
+    await pool.execute("DELETE FROM boss_hits WHERE chat_id=$1", chat_id)
+    await pool.execute(
+        "INSERT INTO boss_fights (chat_id, idx, hp, hp_max, pool, msg_id, started, ends_at, status, last_hitter) VALUES ($1,$2,$3,$3,$4,0,$5,$6,'active',0) "
+        "ON CONFLICT (chat_id) DO UPDATE SET idx=EXCLUDED.idx, hp=EXCLUDED.hp, hp_max=EXCLUDED.hp_max, pool=EXCLUDED.pool, msg_id=0, started=EXCLUDED.started, ends_at=EXCLUDED.ends_at, status='active', last_hitter=0",
+        chat_id, idx, b["hp"], b["pool"], now, now + BOSS_DURATION)
+    f = await pool.fetchrow("SELECT * FROM boss_fights WHERE chat_id=$1", chat_id)
+    try:
+        m = await _boss_media(bot, chat_id, b["file"], await _boss_caption(chat_id, f))
+    except Exception:
+        log.warning("boss spawn failed in %s", chat_id, exc_info=True)
+        await pool.execute("UPDATE boss_fights SET status='cancelled' WHERE chat_id=$1", chat_id)
+        return False
+    await pool.execute("UPDATE boss_fights SET msg_id=$2 WHERE chat_id=$1", chat_id, m.message_id)
+    await pool.execute("INSERT INTO boss_sched (chat_id, next_spawn) VALUES ($1,$2) ON CONFLICT (chat_id) DO UPDATE SET next_spawn=EXCLUDED.next_spawn", chat_id, now + BOSS_EVERY)
+    return True
+
+
+async def _boss_edit(bot, chat_id: int, state: str = "active", extra: str = ""):
+    f = await pool.fetchrow("SELECT * FROM boss_fights WHERE chat_id=$1", chat_id)
+    if not f or not f["msg_id"]:
+        return
+    try:
+        cap = await _boss_caption(chat_id, f, state, extra)
+        try:
+            await bot.edit_message_caption(chat_id=chat_id, message_id=f["msg_id"], caption=cap, parse_mode="HTML")
+        except BadRequest as e0:
+            if "no caption" in str(e0).lower() or "there is no text" in str(e0).lower():
+                await bot.edit_message_text(cap, chat_id=chat_id, message_id=f["msg_id"], parse_mode="HTML")
+            else:
+                raise
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            log.warning("boss caption edit failed: %s", e)
+    except RetryAfter:
+        pass
+    except Exception:
+        log.warning("boss caption edit failed", exc_info=True)
+
+
+async def _boss_finish_kill(bot, chat_id: int, last_uid: int):
+    f = await pool.fetchrow("SELECT * FROM boss_fights WHERE chat_id=$1", chat_id)
+    hits = await pool.fetch("SELECT user_id, name, damage FROM boss_hits WHERE chat_id=$1 ORDER BY damage DESC", chat_id)
+    total = sum(int(h["damage"]) for h in hits) or 1
+    P = int(f["pool"])
+    pay = {int(h["user_id"]): P * int(h["damage"]) // total for h in hits}
+    for uid, frac in zip([int(h["user_id"]) for h in hits[:3]], (0.20, 0.10, 0.05)):
+        pay[uid] += int(P * frac)
+    pay[last_uid] = pay.get(last_uid, 0) + int(P * 0.05)
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute("UPDATE boss_fights SET status='dead' WHERE chat_id=$1", chat_id)
+            for uid, amt in pay.items():
+                await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", amt, uid)
+    names = {int(h["user_id"]): (h["name"] or "ناشناس") for h in hits}
+    medals = ("🥇", "🥈", "🥉")
+    lines = [f"{medals[i]} {html.escape(names[int(h['user_id'])])} — {int(h['damage']):,} آسیب | {MONEY_CE} {pay[int(h['user_id'])]:,} تومان" for i, h in enumerate(hits[:3])]
+    last_name = html.escape(names.get(last_uid, "ناشناس"))
+    text = B(f"☠️ {BOSSES[f['idx']]['name']} نابود شد! {TROPHY_CE}\n\n" + "\n".join(lines) +
+             f"\n\n🎯 ضربه‌ی آخر: {last_name} (پاداش ویژه)\n👥 شرکت‌کننده‌ها: {len(hits)} نفر\n{MONEY_CE} همه‌ی پاداش‌ها واریز شد!")
+    await _boss_edit(bot, chat_id, "dead")
+    try:
+        await bot.send_message(chat_id, text, parse_mode="HTML", reply_to_message_id=f["msg_id"] or None)
+    except Exception:
+        try:
+            await bot.send_message(chat_id, text, parse_mode="HTML")
+        except Exception:
+            log.warning("boss kill msg failed", exc_info=True)
+
+
+async def boss_hit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    rep = msg.reply_to_message
+    if not rep:
+        return False
+    chat_id = msg.chat_id
+    f = await pool.fetchrow("SELECT * FROM boss_fights WHERE chat_id=$1", chat_id)
+    if not f or f["status"] != "active" or rep.message_id != f["msg_id"]:
+        return False
+    now = time.time()
+    if f["ends_at"] <= now or f["hp"] <= 0:
+        return True
+    row = await get_user(user.id)
+    if not row or not row["started"]:
+        await msg.reply_text(BP("اول ربات رو تو پی‌وی استارت کن بعد بیا شلیک کن!"), parse_mode="HTML")
+        return True
+    key = (chat_id, user.id)
+    wait = BOSS_HIT_CD - (now - _BOSS_LAST_HIT.get(key, 0))
+    if wait > 0:
+        if now - _BOSS_WARNED.get(key, 0) > BOSS_HIT_CD:
+            _BOSS_WARNED[key] = now
+            await msg.reply_text(B(f"{HG_CE} تفنگت داغه! {int(wait) + 1} ثانیه صبر کن."), parse_mode="HTML")
+        return True
+    en = await pool.fetchval("UPDATE users SET energy = energy - $1::double precision WHERE user_id = $2::bigint AND energy >= $1::double precision RETURNING energy", BOSS_ENERGY_COST, user.id)
+    if en is None:
+        await msg.reply_text(B(f"{ce('energy', 1, '⚡')} انرژیت تموم شده! با بغل، بوس یا هدیه انرژی بگیر."), parse_mode="HTML")
+        return True
+    _BOSS_LAST_HIT[key] = now
+    dmg = random.randint(120, 220) + int(row.get("hand_level", 0) or 0) * 4
+    crit = random.random() < 0.12
+    if crit:
+        dmg *= 2
+    new_hp = await pool.fetchval("UPDATE boss_fights SET hp = GREATEST(hp - $2::bigint, 0), last_hitter = $3::bigint WHERE chat_id=$1 AND status='active' AND hp > 0 RETURNING hp", chat_id, dmg, user.id)
+    if new_hp is None:
+        await pool.execute("UPDATE users SET energy = LEAST(energy + $1::double precision, $2::double precision) WHERE user_id = $3::bigint", BOSS_ENERGY_COST, ENERGY_MAX, user.id)
+        return True
+    await pool.execute("INSERT INTO boss_hits (chat_id, user_id, name, damage, hits) VALUES ($1,$2,$3,$4,1) ON CONFLICT (chat_id, user_id) DO UPDATE SET damage = boss_hits.damage + $4, hits = boss_hits.hits + 1, name = $3",
+                       chat_id, user.id, user.full_name, dmg)
+    if new_hp <= 0:
+        await _boss_finish_kill(context.bot, chat_id, user.id)
+        return True
+    _BOSS_DIRTY.add(chat_id)
+    recent = [t for t in _BOSS_REPLY_TS.get(chat_id, []) if now - t < 60]
+    if len(recent) < 14:   # برای جلوگیری از لیمیت تلگرام تو گروه‌های شلوغ
+        recent.append(now)
+        _BOSS_REPLY_TS[chat_id] = recent
+        line = (f"💥 ضربه‌ی بحرانی! {dmg:,} آسیب" if crit else f"🔫 شلیک! {dmg:,} آسیب")
+        try:
+            await msg.reply_text(B(f"{line} {BOSS_SKULL_CE}"), parse_mode="HTML")
+        except Exception:
+            pass
+    return True
+
+
+async def boss_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    key = _word_key(text)
+    user, msg = update.effective_user, update.effective_message
+    if key in BOSS_SPAWN_WORDS and not msg.reply_to_message and has_perm(user.id, "panel"):
+        ok = await boss_spawn(context.bot, msg.chat_id, force=True)
+        if not ok:
+            await msg.reply_text(BP("الان یه غول فعاله!"), parse_mode="HTML")
+        return True
+    if key in BOSS_WORDS or key.startswith("شلیک"):
+        return await boss_hit(update, context)
+    return False
+
+
+async def boss_loop(app: Application):
+    """هر چند ثانیه: آپدیت پیام غول‌ها، فرار غول‌های بی‌جواب، و ظاهر شدن غول جدید تو گروه‌های فعال."""
+    tick = 0
+    while True:
+        await asyncio.sleep(BOSS_TICK)
+        tick += 1
+        try:
+            bot = app.bot
+            for cid in list(_BOSS_DIRTY):
+                _BOSS_DIRTY.discard(cid)
+                await _boss_edit(bot, cid)
+            now = time.time()
+            for r in await pool.fetch("SELECT chat_id FROM boss_fights WHERE status='active' AND ends_at <= $1::double precision", now):
+                cid = int(r["chat_id"])
+                await pool.execute("UPDATE boss_fights SET status='fled' WHERE chat_id=$1", cid)
+                await _boss_edit(bot, cid, "fled")
+            if tick % 15 == 0:   # هر ~۶۰ ثانیه زمان‌بندی ظاهر شدن رو چک کن
+                for r in await pool.fetch("SELECT chat_id FROM chats"):
+                    cid = int(r["chat_id"])
+                    s = await pool.fetchval("SELECT next_spawn FROM boss_sched WHERE chat_id=$1", cid)
+                    if s is None:   # گروه جدید: اولین غول چند دقیقه‌ی دیگه (پخش میشه که همه‌ی گروه‌ها یهو شروع نشن)
+                        await pool.execute("INSERT INTO boss_sched (chat_id, next_spawn) VALUES ($1,$2) ON CONFLICT DO NOTHING", cid, now + random.randint(600, 2400))
+                        continue
+                    if s > now:
+                        continue
+                    active = await pool.fetchval("SELECT 1 FROM group_msgs WHERE chat_id=$1 AND ts > $2::double precision LIMIT 1", cid, now - BOSS_ACTIVE_WINDOW)
+                    if not active:
+                        await pool.execute("UPDATE boss_sched SET next_spawn=$2 WHERE chat_id=$1", cid, now + 1800)
+                        continue
+                    await boss_spawn(bot, cid)
+                    await asyncio.sleep(1.5)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("boss loop failed")
 
 
 def main():
