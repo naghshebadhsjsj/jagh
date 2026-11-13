@@ -2671,7 +2671,7 @@ function GamesScreen(){
   box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),grid);
  }
  function play(k){clearInterval(cdT);
-  if(k==='crash'){if(!window.IS_STAFF){toast('این بخش غیرفعال شده',1);return}crash()} else if(k==='mines')mines();
+  if(k==='crash')crash(); else if(k==='mines')mines();
   else if(k==='poison'||k==='carrom'){
     const sc=SocialScreen({games:k});
     sc.style.cssText='position:relative;inset:auto;display:block;background:transparent;min-height:60vh';
@@ -5516,8 +5516,8 @@ async def _g_giveaway_referrals(qs, user):
 # ───────────── بازی‌های مینی‌اپ: موشک و مین با شرط واقعی (همه‌چیز سمت سرور حساب میشه) ─────────────
 MINI_MIN_BET = 50_000          # حداقل شرط موشک و مین مینی‌اپ (تومن)
 MINI_CRASH_RATE = 0.12         # ضریب = e^(RATE × ثانیه)؛ از x1.00 شروع میشه
-MINI_CRASH_EDGE = 0.95         # بخش اصلی توزیع انفجار؛ پایین‌تر = سخت‌تر
-MINI_CRASH_EARLY = 0.28        # احتمال برخورد ناگهانی با شهاب‌سنگ در ضریب پایین (x1.00 تا x1.19)
+MINI_CRASH_EDGE = 0.88         # بخش اصلی توزیع انفجار؛ پایین‌تر = سخت‌تر
+MINI_CRASH_EARLY = 0.38        # احتمال برخورد ناگهانی با شهاب‌سنگ در ضریب پایین (x1.00 تا x1.19)
 MINI_CRASH_MAX = 100.0
 MINI_CRASH_DELAY = 10.0        # ۱۰ ثانیه فرصت ثبت شرط پیش از پرواز
 MINI_MINES_CELLS = 25          # دقیقاً مثل خودِ ربات (MINES_CELLS)
@@ -5939,8 +5939,8 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
             _JOIN_OK[_gid] = time.time() + 120
     social = path.startswith("/api/social/")
     game = path.startswith("/api/game/")
-    if path.startswith("/api/game/crash/") and int(user["id"]) not in ADMIN_IDS and int(user["id"]) not in OWNER_IDS:
-        return _j({"error": "این بخش غیرفعال شده"}, 403)   # بازی انفجار/موشک فقط برای مالک و پشتیبان   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
+    if path.startswith("/api/game/crash/") and not crash_allowed(int(user["id"])):
+        return _j({"error": "این بخش غیرفعال شده"}, 403)   # همون کلید موشکِ ربات (CRASH_PUBLIC)   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
     # عکس پروفایل کاربرها (نه گروه‌ها) برای همه‌ی کاربرهای مینی‌اپ بازه؛ بدونش آواتارِ بقیه هیچ‌وقت نمی‌اومد
@@ -10563,20 +10563,23 @@ async def slot_dice_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ───── موشک (کراش): ضریب بالا می‌ره، هر لحظه ممکنه منفجر بشه ─────
-CRASH_EDGE = 0.95      # بخش اصلی توزیع (۱/u) ضرب تو این؛ سخت‌گیری اصلی از انفجارهای زودهنگامه
-CRASH_EARLY = 0.22     # ~۲۲٪ بازی‌ها زودهنگام می‌سوزن: یه جایی بین -۱٫۰۰ تا ۱٫۱۹ (حتی قبل از ۱٫۲)
+CRASH_EDGE = 0.88      # بخش اصلی توزیع (۱/u) ضرب تو این؛ سخت‌گیری اصلی از انفجارهای زودهنگامه
+CRASH_EARLY = 0.38     # ~۳۸٪ بازی‌ها زودهنگام می‌سوزن: یه جایی بین -۱٫۰۰ تا ۱٫۱۹ (حتی قبل از ۱٫۲)
 CRASH_MIN = -1.0       # ضریب از -۱ شروع میشه
 CRASH_MAX = 100.0
 CRASH_RATE = 0.20      # ضریب = e^(RATE × ثانیه) − ۲  (تو ثانیه‌ی صفر دقیقاً -۱٫۰۰)
 CRASH_TICK = 2.0       # هر چند ثانیه تصویر (با ضریب جدید) آپدیت میشه
 
 
+CRASH_PUBLIC = True    # 🔑 یه کلید برای موشکِ ربات و موشکِ مینی‌اپ: True = برای همه‌ی کاربرها باز، False = فقط مالک و پشتیبان
+
+
 def crash_allowed(uid: int) -> bool:
-    """فعلاً موشک فقط برای صاحب‌ها و پشتیبان‌هاست."""
-    return uid in OWNER_IDS or uid in STAFF
+    """موشک (هم تو ربات هم تو مینی‌اپ) فقط وقتی CRASH_PUBLIC روشن باشه برای همه بازه؛ وگرنه فقط صاحب‌ها و پشتیبان‌ها."""
+    return CRASH_PUBLIC or uid in OWNER_IDS or uid in STAFF
 
 
-CRASH_STAFF_MSG = "🛩 فعلاً موشک کاغذی فقط برای پشتیبان‌ها فعاله."
+CRASH_STAFF_MSG = "🛩 این بخش غیرفعال شده."
 
 
 def crash_point() -> float:
@@ -11842,24 +11845,52 @@ async def gw_top(gid: int, limit: int = 10):
         "ON c.inviter_id = e.user_id WHERE e.gid=$1 AND e.status='active' ORDER BY tickets DESC, e.joined_at LIMIT $2", gid, limit)
 
 
-async def gw_top_text(gid: int, staff: bool = False) -> str:
-    """staff=True (پشتیبان): اسم‌ها لینک آبیِ پروفایلن + آیدی عددی + کسی که هر نفر رو دعوت کرده."""
+async def gw_top_view(gid: int, staff: bool = False):
+    """(متن، کیبورد). پشتیبان: برای هر نفر برتر یه دکمه‌ست؛ با زدنش یوزرنیم و آیدی عددی زیرمجموعه‌هاش میاد."""
     rows = await gw_top(gid)
     if not rows:
-        return "🏆 هنوز کسی ثبت‌نام نکرده."
+        return "🏆 هنوز کسی ثبت‌نام نکرده.", None
     medals = ["🥇", "🥈", "🥉"]
-    lines = []
+    lines, kb_rows = [], []
     for i, r in enumerate(rows):
-        line = f"{medals[i] if i < 3 else str(i + 1) + '.'} {_ulink(r['user_id'], r['name'] or 'کاربر')} — {r['tickets']} {GW_TICKET_CE} ({r['invited']} دعوت)"
+        rank = medals[i] if i < 3 else str(i + 1) + "."
+        line = f"{rank} {_ulink(r['user_id'], r['name'] or 'کاربر')} — {r['tickets']} {GW_TICKET_CE} ({r['invited']} دعوت)"
         if staff:
             line += f"\n      🆔 <code>{r['user_id']}</code>"
-            if r["inviter_id"]:
-                line += f"\n      ↳ دعوت‌کننده: {_ulink(r['inviter_id'], r['inviter_name'] or 'کاربر')} (<code>{r['inviter_id']}</code>)"
-            else:
-                line += "\n      ↳ دعوت‌کننده: ندارد (ورود مستقیم)"
+            kb_rows.append([btn(f"{i + 1}. {(r['name'] or 'کاربر')[:22]} • {r['invited']} زیرمجموعه", "primary",
+                                callback_data=f"gw:refs:{gid}:{r['user_id']}")])
         lines.append(line)
     head = "برترین‌های قرعه‌کشی (نمای پشتیبانی)" if staff else "برترین‌های قرعه‌کشی"
-    return f"{GW_WIN_CE} <b>{head}</b>\n\n" + "\n".join(lines)
+    text = f"{GW_WIN_CE} <b>{head}</b>\n\n" + "\n".join(lines)
+    if staff:
+        text += "\n\n👇 روی هر نفر بزن تا یوزرنیم و آیدی عددی زیرمجموعه‌هاش رو ببینی."
+    return text, (InlineKeyboardMarkup(kb_rows) if kb_rows else None)
+
+
+async def gw_top_text(gid: int, staff: bool = False) -> str:
+    return (await gw_top_view(gid, staff))[0]
+
+
+async def gw_refs_text(gid: int, uid: int) -> list[str]:
+    """متن(های) زیرمجموعه‌های یه نفر تو یه قرعه‌کشی: اسم، یوزرنیم، آیدی عددی، وضعیت."""
+    owner = await pool.fetchrow("SELECT name FROM users WHERE user_id=$1", uid)
+    refs = await pool.fetch(
+        "SELECT e.user_id, e.status, u.name, u.username FROM giveaway_entries e LEFT JOIN users u ON u.user_id=e.user_id "
+        "WHERE e.gid=$1 AND e.inviter_id=$2 ORDER BY e.joined_at", gid, uid)
+    oname = _ulink(uid, (owner["name"] if owner else None) or "کاربر")
+    head = f"👥 <b>زیرمجموعه‌های</b> {oname} (<code>{uid}</code>)\nتعداد: <b>{len(refs)}</b>\n"
+    if not refs:
+        return [head + "\nزیرمجموعه‌ای نداره."]
+    chunks, cur = [], head
+    for i, r in enumerate(refs, 1):
+        un = f"@{html.escape(r['username'])}" if r["username"] else "یوزرنیم ندارد"
+        st = "✅ فعال" if r["status"] == "active" else "🚪 لفت داده"
+        entry = f"\n{i}. {_ulink(r['user_id'], r['name'] or 'کاربر')}\n      {un} • <code>{r['user_id']}</code> • {st}"
+        if len(cur) + len(entry) > 3800:
+            chunks.append(cur); cur = ""
+        cur += entry
+    chunks.append(cur)
+    return chunks
 
 
 def gw_post(g, bot_un: str, entries: int | None = None, plain: bool = False):
@@ -11944,17 +11975,22 @@ async def gw_join(g_id: int, uid: int, inviter: int):
                     return ("full",)
             now = time.time()
             inv_ok = None
+            was_blocked = False
             if ex:   # قبلاً لفت داده بود؛ دوباره فعال میشه و دعوت‌کننده‌ی قبلی‌ش همون می‌مونه
                 await c.execute("UPDATE giveaway_entries SET status='active', joined_at=$3, last_check=$3 WHERE gid=$1 AND user_id=$2", g_id, uid, now)
                 inv_ok = await c.fetchval("SELECT inviter_id FROM giveaway_entries WHERE gid=$1 AND user_id=$2", g_id, uid)
             else:
-                if inviter and inviter != uid and await c.fetchval(
+                prior_ref = await c.fetchval(   # قبلاً (تو هر قرعه‌کشی‌ای) زیرمجموعه‌ی کسی بوده؟
+                    "SELECT 1 FROM giveaway_entries WHERE user_id=$1 AND inviter_id IS NOT NULL LIMIT 1", uid)
+                if inviter and inviter != uid and not prior_ref and await c.fetchval(
                         "SELECT 1 FROM giveaway_entries WHERE gid=$1 AND user_id=$2 AND status='active'", g_id, inviter):
                     inv_ok = inviter
+                elif inviter and inviter != uid and prior_ref:
+                    was_blocked = True
                 await c.execute(
                     "INSERT INTO giveaway_entries (gid, user_id, inviter_id, status, joined_at, last_check) VALUES ($1,$2,$3,'active',$4,$4)",
                     g_id, uid, inv_ok, now)
-            return ("ok", inv_ok)
+            return ("ok", inv_ok, was_blocked)
 
 
 async def gw_status_view(bot, g, uid: int):
@@ -11991,7 +12027,8 @@ async def gw_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await upsert_user(user.id, user.full_name)
     if is_top:
         if g["top_public"] or has_perm(user.id, "giveaway"):
-            await msg.reply_text(await gw_top_text(gid, staff=has_perm(user.id, "giveaway")), parse_mode="HTML")
+            _t, _k = await gw_top_view(gid, staff=has_perm(user.id, "giveaway"))
+            await msg.reply_text(_t, parse_mode="HTML", reply_markup=_k)
         else:
             await msg.reply_text("لیست برترین‌ها برای این قرعه‌کشی فعال نیست.")
         return
@@ -12044,7 +12081,19 @@ async def gw_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not (g["top_public"] or has_perm(user.id, "giveaway")):
             await q.answer("لیست برترین‌ها برای این قرعه‌کشی فعال نیست.", show_alert=True); return
         await q.answer()
-        await bot.send_message(q.message.chat_id, await gw_top_text(gid, staff=has_perm(user.id, "giveaway")), parse_mode="HTML")
+        _t, _k = await gw_top_view(gid, staff=has_perm(user.id, "giveaway"))
+        await bot.send_message(q.message.chat_id, _t, parse_mode="HTML", reply_markup=_k)
+        return
+    if act == "refs":
+        if not has_perm(user.id, "giveaway"):
+            await q.answer("دسترسی دیدن زیرمجموعه‌ها رو نداری.", show_alert=True); return
+        try:
+            ruid = int(parts[3])
+        except (IndexError, ValueError):
+            await q.answer(); return
+        await q.answer()
+        for chunk in await gw_refs_text(gid, ruid):
+            await bot.send_message(q.message.chat_id, chunk, parse_mode="HTML")
         return
     if act == "me":
         ex = await pool.fetchval("SELECT status FROM giveaway_entries WHERE gid=$1 AND user_id=$2", gid, user.id)
@@ -12115,6 +12164,8 @@ async def gw_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception: pass
         text, kb = await gw_status_view(bot, g, user.id)
         await bot.send_message(q.message.chat_id, text, parse_mode="HTML", reply_markup=kb)
+        if res[0] == "ok" and len(res) > 2 and res[2]:
+            await bot.send_message(q.message.chat_id, "ℹ️ تو قبلاً زیرمجموعه‌ی یه نفر دیگه بودی؛ خودت می‌تونی تو قرعه‌کشی شرکت کنی و دوستات رو دعوت کنی، ولی دوباره زیرمجموعه‌ی کسی حساب نمی‌شی.")
         if res[0] == "ok" and res[1]:
             t, _ = await gw_tickets(gid, res[1])
             try:
@@ -12437,7 +12488,10 @@ async def gw_admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
         if not g:
             await q.edit_message_text("پیدا نشد.", reply_markup=gw_menu_kb()); return
         if sub == "top":
-            await q.edit_message_text(await gw_top_text(gid, staff=True), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:v:{gid}")]]))
+            _t, _k = await gw_top_view(gid, staff=True)
+            _rows = list(_k.inline_keyboard) if _k else []
+            _rows.append([btn("🔙 برگشت", callback_data=f"ad:gw:v:{gid}")])
+            await q.edit_message_text(_t, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(_rows))
             return
         if sub == "pt":
             await pool.execute("UPDATE giveaways SET top_public = NOT top_public WHERE id=$1", gid)
