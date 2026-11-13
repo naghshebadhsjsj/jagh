@@ -121,6 +121,7 @@ SECTIONS = {
     "energy":  ("انرژی", ["نوار پر", "نوار خالی"]),
     "jm":      ("دستگاه جق", ["نوار پر", "نوار خالی"]),
     "selfen":  ("انرژی خودم", ["نوار پر", "نوار خالی"]),   # فقط نوار انرژی پنل «خودم»
+    "level":   ("سطح", ["نوار پر", "نوار خالی"]),           # نوار سطح پنل «خودم»
 }
 # اسم فارسی بخش‌ها هم تو دستور قبوله (مثلا /setemoji لیدربرد ...)
 ALIASES = {title: key for key, (title, _) in SECTIONS.items()}
@@ -142,6 +143,7 @@ EMOJI_IDS = {
     ("energy", 1): "5400280896311944960",  # نوار انرژی (خونه‌ی پر)
     ("selfen", 1): "5789435092589876174",  # نوار انرژی فقط تو پنل «خودم»
     ("jm", 1): "5792112815720371175",      # نوار دستگاه جق
+    ("level", 1): "6039539709774926420",   # نوار سطح
 }
 
 
@@ -7116,50 +7118,75 @@ def settings_keyboard(uid: int) -> InlineKeyboardMarkup:
     ])
 
 
-JM_CELLS = 10   # تعداد خونه‌های نوار دستگاه جق
+JM_CELLS = 10   # تعداد خونه‌های نوار دستگاه جق (جاهای دیگه‌ی ربات)
+PANEL_BAR_CELLS = 8   # تعداد خونه‌های نوارهای پنل «خودم»؛ اگه هنوز نوار میره خط بعد، کمترش کن (مثلا 6)
+
+
+def _pct_txt(p: float) -> str:
+    return f"{_fmt_en(round(p, 1))}٪"
+
+
+def _panel_bar(section: str, fill_fallback: str, empty_fallback: str, pct: float) -> str:
+    """نوار پنل: خونه‌ها + درصد، همه تو یه خط (تعداد خونه‌ها = PANEL_BAR_CELLS)."""
+    pct = max(0.0, min(100.0, float(pct or 0)))
+    filled = min(PANEL_BAR_CELLS, math.ceil(pct / 100 * PANEL_BAR_CELLS - 1e-9)) if pct > 0 else 0
+    bar = ce(section, 1, fill_fallback) * filled + ce(section, 2, empty_fallback) * (PANEL_BAR_CELLS - filled)
+    return f"{bar} {_pct_txt(pct)}"
 
 
 def self_energy_line(energy) -> str:
     """نوار انرژی پنل «خودم» (ایموجی جدا از بقیه‌ی جاها)."""
     e = max(0.0, min(ENERGY_MAX, float(energy or 0)))
-    filled = min(ENERGY_CELLS, math.ceil(e / ENERGY_MAX * ENERGY_CELLS - 1e-9)) if e > 0 else 0
-    bar = ce("selfen", 1, "🟨") * filled + ce("selfen", 2, "▫️") * (ENERGY_CELLS - filled)
-    return f"{ce('energy', 1, '⚡')} انرژی\n{bar} {_fmt_en(e / ENERGY_MAX * 100)}٪"
+    return f"{ce('energy', 1, '⚡')} انرژی\n{_panel_bar('selfen', '🟨', '▫️', e / ENERGY_MAX * 100)}"
 
 
 def jm_bar_line(amount) -> str:
-    """نوار دستگاه جق با ایموجی پرمیوم بنفش (با /setemoji دستگاه جق ست میشه؛ اسلت ۱ = پر، ۲ = خالی)."""
+    """نوار دستگاه جق (با /setemoji دستگاه جق ست میشه؛ اسلت ۱ = پر، ۲ = خالی). فقط نوار و درصد."""
     a = max(0, min(JM_CAP, int(amount or 0)))
-    filled = min(JM_CELLS, math.ceil(a / JM_CAP * JM_CELLS - 1e-9)) if a > 0 else 0
-    bar = ce("jm", 1, "🟪") * filled + ce("jm", 2, "▫️") * (JM_CELLS - filled)
-    st = "پره، بنویس «دستگاه جق»" if a >= JM_CAP else ("آماده‌ی برداشته" if a >= JM_MIN else f"حداقل برداشت {JM_MIN:,} تومن")
-    return f"{JM_CE} دستگاه جق ({st})\n{bar} {a:,} / {JM_CAP:,} تومن"
+    return f"{JM_CE} دستگاه جق\n{_panel_bar('jm', '🟪', '▫️', a / JM_CAP * 100)}"
+
+
+def level_progress_pct(lvl: int, jaghs: int, work_count: int = 0) -> float:
+    """درصد پیشرفت تا کاراکتر بعدی (همون منطق card_text)."""
+    n = len(LEVEL_THRESHOLDS)
+    if lvl >= n:
+        return 100.0
+    if lvl == n - 1 and jaghs >= LEVEL_THRESHOLDS[-1] and work_count < 1200:
+        return min(100.0, work_count / 1200 * 100)   # آخرین پله: ۱۲۰۰ کار
+    lo, hi = LEVEL_THRESHOLDS[lvl - 1], LEVEL_THRESHOLDS[lvl]
+    return max(0.0, min(100.0, (jaghs - lo) / (hi - lo) * 100))
+
+
+def level_bar_line(pct: float) -> str:
+    """نوار سطح (با /setemoji level ست میشه؛ اسلت ۱ = پر، ۲ = خالی)."""
+    return f"📊 سطح\n{_panel_bar('level', '🟪', '⬜', pct)}"
 
 
 async def self_panel_text(uid: int, name: str = "") -> str:
     row = await get_user(uid)
     total = int(row["balance"] or 0) + int(row["bank_balance"] or 0)
-    level = int(row.get("hand_level", 0) or 0)
-    cooldown = max(280, COOLDOWN_SECONDS - level * 5)
-    remaining = cooldown - (time.time() - float(row["last_ts"] or 0))
-    jagh_t = "آماده‌ست ✅" if remaining <= 0 else f"{_duration_fa(int(remaining) + 1)} مونده"
+    jaghs = int(row["jaghs"] or 0)
+    work_count = int(row["work_count"] or 0)
     g = row["gender"]
+    lvl_pct = 0.0
     if g in JOBS:
-        job = current_job(g, int(row["jaghs"] or 0), int(row["work_count"] or 0))
-        lvl = JOBS[g][job[0]][1] if job else level_for(int(row["jaghs"] or 0))
+        job = current_job(g, jaghs, work_count)
+        lvl = JOBS[g][job[0]][1] if job else level_for(jaghs)
         char_name = CHARACTERS[g][lvl - 1][0]
         job_name = job[1] if job else "بیکار"
+        lvl_pct = level_progress_pct(lvl, jaghs, work_count)
+        sk = await special_current(uid)
+        if sk in SPECIALS:   # کاراکتر ویژه‌ی فعال (مثل محبوبیت) جای اسم کاراکتر میاد
+            char_name = SPECIALS[sk]["name"]
     else:
         char_name, job_name = "جنسیت انتخاب نشده (تنظیمات ← تغییر جنسیت)", "—"
     return B(
-        f"{ce('me', 1, '🎖')} {html.escape(name or row['name'] or 'کاربر')}\n\n"
-        f"کاراکتر: {html.escape(char_name)}\n"
+        f"{ce('me', 1, '🎖')} {html.escape(char_name)}\n\n"
         f"💼 شغل: {html.escape(job_name)}\n"
-        f"{MONEY_CE} دارایی کل: {total:,} تومان\n"
-        f"{HG_CE} زمان جق: {jagh_t} (هر {_duration_fa(cooldown)})\n"
-        f"{jm_bar_line(row.get('jagh_machine', 0))}\n\n"
+        f"{MONEY_CE} دارایی کل: {total:,} تومان\n\n"
         f"{self_energy_line(row.get('energy', 0))}\n\n"
-        "یکی از بخش‌ها رو انتخاب کن:"
+        f"{jm_bar_line(row.get('jagh_machine', 0))}\n\n"
+        f"{level_bar_line(lvl_pct)}"
     )
 
 
