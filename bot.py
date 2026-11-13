@@ -7127,32 +7127,34 @@ def _pct_txt(p: float) -> str:
     return f"{_fmt_en(round(p, 1))}٪"
 
 
-# سرِ چپ و ته راستِ نوارها (ایموجی پرمیوم). هر کدوم: (دوتا ایموجی سمت چپ، یه ایموجی سمت راست)
-# "empty" = وقتی نوار کاملاً خالیه (۰٪) برای انرژی/دستگاه جق/سطح؛ بقیه = وقتی نوار یه مقدار پر داره.
-BAR_CAPS = {
-    "empty":  (("6019209950230749253", "6019341045517525436"), "6019410357699749692"),
-    "level":  (("6019611795960897325", "6019417805173039520"), "6019492937035947689"),
-    "jm":     (("6019552920549204941", "6019365402277061626"), "6019267704655977508"),
-    "energy": (("6019417633374348025", "6019616808187733402"), "6019314957886168728"),
+# هر نوار از سه تیکه ساخته میشه: (شروع، بدنه، ته). فقط از همین ایموجی‌ها استفاده میشه (ایموجی‌های قدیمی نوار دیگه نیستن).
+# BAR_SETS = تیکه‌های قسمت پُر هر نوار | BAR_EMPTY = تیکه‌های قسمت خالی (برای هر سه نوار یکسان)
+BAR_SETS = {
+    "level":  ("6019611795960897325", "6019417805173039520", "6019492937035947689"),
+    "jm":     ("6019552920549204941", "6019365402277061626", "6019267704655977508"),
+    "energy": ("6019417633374348025", "6019616808187733402", "6019314957886168728"),
 }
+BAR_EMPTY = ("6019528104228166791", "6019602149464350917", "6019103233178345190")
 BAR_CAP_KEY = {"selfen": "energy", "energy": "energy", "jm": "jm", "level": "level"}
 
 
-def _bar_caps(section: str, pct: float):
-    """(سر چپ, ته راست) برای نوار؛ اگه خالی بود از کپ‌های «خالی» استفاده میشه."""
-    key = "empty" if not pct or float(pct) <= 0 else BAR_CAP_KEY.get(section, "empty")
-    left, right = BAR_CAPS[key]
-    tg = lambda i: f'<tg-emoji emoji-id="{i}">▫️</tg-emoji>'
-    return "".join(tg(i) for i in left), tg(right)
+def _custom_bar(section: str, pct: float, cells: int) -> str:
+    """نوار بدون فاصله: خونه‌ی اول=شروع، آخر=ته، بقیه=بدنه؛ خونه‌های پُر از ست نوار، خالی‌ها از BAR_EMPTY."""
+    pct = max(0.0, min(100.0, float(pct or 0)))
+    filled = min(cells, math.ceil(pct / 100 * cells - 1e-9)) if pct > 0 else 0
+    fset = BAR_SETS[BAR_CAP_KEY.get(section, "energy")]
+    out = []
+    for i in range(cells):
+        part = 0 if i == 0 else (2 if i == cells - 1 else 1)
+        eid = (fset if i < filled else BAR_EMPTY)[part]
+        out.append(f'<tg-emoji emoji-id="{eid}">▫️</tg-emoji>')
+    return "".join(out)
 
 
 def _panel_bar(section: str, fill_fallback: str, empty_fallback: str, pct: float) -> str:
-    """نوار پنل: سر چپ + خونه‌ها + ته راست (بدون فاصله) + درصد، همه تو یه خط."""
+    """نوار پنل + درصد، همه تو یه خط (تعداد خونه‌ها = PANEL_BAR_CELLS)."""
     pct = max(0.0, min(100.0, float(pct or 0)))
-    filled = min(PANEL_BAR_CELLS, math.ceil(pct / 100 * PANEL_BAR_CELLS - 1e-9)) if pct > 0 else 0
-    cells = ce(section, 1, fill_fallback) * filled + ce(section, 2, empty_fallback) * (PANEL_BAR_CELLS - filled)
-    left, right = _bar_caps(section, pct)
-    return f"{left}{cells}{right} {_pct_txt(pct)}"
+    return f"{_custom_bar(section, pct, PANEL_BAR_CELLS)} {_pct_txt(pct)}"
 
 
 def self_energy_line(energy) -> str:
@@ -15311,10 +15313,7 @@ def _fmt_en(x) -> str:
 
 def energy_bar(energy) -> str:
     e = max(0.0, min(ENERGY_MAX, float(energy or 0)))
-    filled = min(ENERGY_CELLS, math.ceil(e / ENERGY_MAX * ENERGY_CELLS - 1e-9)) if e > 0 else 0
-    cells = ce("energy", 1, "⚡") * filled + ce("energy", 2, "▫️") * (ENERGY_CELLS - filled)
-    left, right = _bar_caps("energy", e / ENERGY_MAX * 100)
-    return f"{left}{cells}{right}"
+    return _custom_bar("energy", e / ENERGY_MAX * 100, ENERGY_CELLS)
 
 
 def energy_line(energy) -> str:
