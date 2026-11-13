@@ -7120,7 +7120,7 @@ def settings_keyboard(uid: int) -> InlineKeyboardMarkup:
 
 
 JM_CELLS = 10   # تعداد خونه‌های نوار دستگاه جق (جاهای دیگه‌ی ربات)
-PANEL_BAR_CELLS = 8   # تعداد خونه‌های نوارهای پنل «خودم»؛ اگه هنوز نوار میره خط بعد، کمترش کن (مثلا 6)
+PANEL_BAR_CELLS = 6   # تعداد خونه‌های نوارهای پنل «خودم»؛ اگه هنوز نوار میره خط بعد، کمترش کن (مثلا 6)
 
 
 def _pct_txt(p: float) -> str:
@@ -7134,7 +7134,7 @@ BAR_SETS = {
     "jm":     ("6019552920549204941", "6019365402277061626", "6019267704655977508"),
     "energy": ("6019417633374348025", "6019616808187733402", "6019314957886168728"),
 }
-BAR_EMPTY = ("6019528104228166791", "6019602149464350917", "6019103233178345190")
+BAR_EMPTY = ("6019528104228166791", "6019341045517525436", "6019103233178345190")
 BAR_CAP_KEY = {"selfen": "energy", "energy": "energy", "jm": "jm", "level": "level"}
 
 
@@ -8790,7 +8790,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(B(f'دستت هنوز خستس<tg-emoji emoji-id="5443048677406940863">🥱</tg-emoji>\nصبر کن {m} دقیقه و {s} ثانیه بعد... دوباره می‌تونی جق بزنی'), parse_mode="HTML")
         return
 
-    text = pick_reply(amount, base_amount) + "\n\n" + energy_line(row.get("energy", 0))
+    text = pick_reply(amount, base_amount) + "\n\n" + energy_pct_line(row.get("energy", 0))
     if _sp:
         text += f"\n\n👑 قدرت «{SPECIAL_NAME}»: ۱۰۰٪ پاداش بیشتر گرفتی!"
     if low_en:
@@ -15314,6 +15314,12 @@ def _fmt_en(x) -> str:
 def energy_bar(energy) -> str:
     e = max(0.0, min(ENERGY_MAX, float(energy or 0)))
     return _custom_bar("energy", e / ENERGY_MAX * 100, ENERGY_CELLS)
+
+
+def energy_pct_line(energy) -> str:
+    """فقط درصد انرژی (بدون نوار) — برای پیام جق زدن."""
+    e = max(0.0, min(ENERGY_MAX, float(energy or 0)))
+    return f"{ce('energy', 1, '⚡')} انرژی: {_fmt_en(e / ENERGY_MAX * 100)}٪"
 
 
 def energy_line(energy) -> str:
