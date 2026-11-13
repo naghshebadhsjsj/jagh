@@ -16958,12 +16958,12 @@ BOSS_TICK = 4                  # هر چند ثانیه یه بار پیام غ�
 BOSS_WORDS = {"شلیک", "شلیککن", "شلیکنابودش", "شلیکنابودکن"}
 BOSS_SPAWN_WORDS = {"باس", "غول", "باسفایت", "شروعباس"}   # فقط پشتیبان‌ها: ظاهر کردن فوری غول
 BOSSES = [   # file = ویدیوی انیمیشنی غول (کنار bot.py)
-    {"file": "boss_milk.mp4",      "name": "پاکت شیر نابودگر", "hp": 35_000,  "pool": 500_000},
-    {"file": "boss_banana.mp4",    "name": "موزِ زورگو",        "hp": 45_000,  "pool": 1_000_000},
-    {"file": "boss_ice.mp4",       "name": "غول یخی",           "hp": 60_000,  "pool": 1_500_000},
-    {"file": "boss_lava.mp4",      "name": "غول گدازه",         "hp": 80_000,  "pool": 2_200_000},
-    {"file": "boss_lightning.mp4", "name": "غول رعد و برق",     "hp": 100_000, "pool": 2_800_000},
-    {"file": "boss_shadow.mp4",    "name": "هیولای سایه",       "hp": 130_000, "pool": 3_500_000},
+    {"file": "boss_milk.mp4",      "name": "پاکت شیر نابودگر", "hp": 6_000,  "pool": 500_000},
+    {"file": "boss_banana.mp4",    "name": "موزِ زورگو",        "hp": 8_000,  "pool": 1_000_000},
+    {"file": "boss_ice.mp4",       "name": "غول یخی",           "hp": 11_000,  "pool": 1_500_000},
+    {"file": "boss_lava.mp4",      "name": "غول گدازه",         "hp": 14_000,  "pool": 2_200_000},
+    {"file": "boss_lightning.mp4", "name": "غول رعد و برق",     "hp": 18_000, "pool": 2_800_000},
+    {"file": "boss_shadow.mp4",    "name": "هیولای سایه",       "hp": 24_000, "pool": 3_500_000},
 ]
 # نوار جون غول از ست‌های نوار دستگاه جق ساخته میشه؛ ست قرمز خواستی این خط رو عوض کن
 BAR_SETS["boss"] = BAR_SETS["jm"]
@@ -17155,12 +17155,17 @@ async def boss_hit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         return True
     _BOSS_DIRTY.add(chat_id)
     recent = [t for t in _BOSS_REPLY_TS.get(chat_id, []) if now - t < 60]
-    if len(recent) < 14:   # برای جلوگیری از لیمیت تلگرام تو گروه‌های شلوغ
+    if len(recent) < 18:   # سقف پیام تو دقیقه تا تلگرام گروه رو محدود نکنه
         recent.append(now)
         _BOSS_REPLY_TS[chat_id] = recent
-        line = (f"💥 ضربه‌ی بحرانی! {dmg:,} آسیب" if crit else f"🔫 شلیک! {dmg:,} آسیب")
+        boss_name = html.escape(BOSSES[f["idx"]]["name"])
+        crit_txt = " (ضربه‌ی بحرانی!)" if crit else ""
         try:
-            await msg.reply_text(B(f"{line} {BOSS_SKULL_CE}"), parse_mode="HTML")
+            await msg.reply_text(
+                B(f"{html.escape(user.full_name)} به {boss_name} شلیک کرد "
+                  f'<tg-emoji emoji-id="5307744619033795130">💥</tg-emoji> {dmg:,} آسیب زد{crit_txt}\n'
+                  f'<tg-emoji emoji-id="5255751656208875797">❤️</tg-emoji> جان باقی مانده باس: {int(new_hp):,}'),
+                parse_mode="HTML")
         except Exception:
             pass
     return True
