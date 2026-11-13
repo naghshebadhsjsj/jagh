@@ -121,7 +121,7 @@ SECTIONS = {
     "energy":  ("انرژی", ["نوار پر", "نوار خالی"]),
     "jm":      ("دستگاه جق", ["نوار پر", "نوار خالی"]),
     "selfen":  ("انرژی خودم", ["نوار پر", "نوار خالی"]),   # فقط نوار انرژی پنل «خودم»
-    "level":   ("سطح", ["نوار پر", "نوار خالی"]),           # نوار سطح پنل «خودم»
+    "level":   ("سطح", ["نوار پر", "نوار خالی", "آیکن عنوان"]),   # نوار و عنوان سطح پنل «خودم»
 }
 # اسم فارسی بخش‌ها هم تو دستور قبوله (مثلا /setemoji لیدربرد ...)
 ALIASES = {title: key for key, (title, _) in SECTIONS.items()}
@@ -144,6 +144,7 @@ EMOJI_IDS = {
     ("selfen", 1): "5789435092589876174",  # نوار انرژی فقط تو پنل «خودم»
     ("jm", 1): "5792112815720371175",      # نوار دستگاه جق
     ("level", 1): "6039539709774926420",   # نوار سطح
+    ("level", 3): "5231200819986047254",   # آیکن کنار عنوان «سطح»
 }
 
 
@@ -7126,12 +7127,32 @@ def _pct_txt(p: float) -> str:
     return f"{_fmt_en(round(p, 1))}٪"
 
 
+# سرِ چپ و ته راستِ نوارها (ایموجی پرمیوم). هر کدوم: (دوتا ایموجی سمت چپ، یه ایموجی سمت راست)
+# "empty" = وقتی نوار کاملاً خالیه (۰٪) برای انرژی/دستگاه جق/سطح؛ بقیه = وقتی نوار یه مقدار پر داره.
+BAR_CAPS = {
+    "empty":  (("6019209950230749253", "6019341045517525436"), "6019410357699749692"),
+    "level":  (("6019611795960897325", "6019417805173039520"), "6019492937035947689"),
+    "jm":     (("6019552920549204941", "6019365402277061626"), "6019267704655977508"),
+    "energy": (("6019417633374348025", "6019616808187733402"), "6019314957886168728"),
+}
+BAR_CAP_KEY = {"selfen": "energy", "energy": "energy", "jm": "jm", "level": "level"}
+
+
+def _bar_caps(section: str, pct: float):
+    """(سر چپ, ته راست) برای نوار؛ اگه خالی بود از کپ‌های «خالی» استفاده میشه."""
+    key = "empty" if not pct or float(pct) <= 0 else BAR_CAP_KEY.get(section, "empty")
+    left, right = BAR_CAPS[key]
+    tg = lambda i: f'<tg-emoji emoji-id="{i}">▫️</tg-emoji>'
+    return "".join(tg(i) for i in left), tg(right)
+
+
 def _panel_bar(section: str, fill_fallback: str, empty_fallback: str, pct: float) -> str:
-    """نوار پنل: خونه‌ها + درصد، همه تو یه خط (تعداد خونه‌ها = PANEL_BAR_CELLS)."""
+    """نوار پنل: سر چپ + خونه‌ها + ته راست (بدون فاصله) + درصد، همه تو یه خط."""
     pct = max(0.0, min(100.0, float(pct or 0)))
     filled = min(PANEL_BAR_CELLS, math.ceil(pct / 100 * PANEL_BAR_CELLS - 1e-9)) if pct > 0 else 0
-    bar = ce(section, 1, fill_fallback) * filled + ce(section, 2, empty_fallback) * (PANEL_BAR_CELLS - filled)
-    return f"{bar} {_pct_txt(pct)}"
+    cells = ce(section, 1, fill_fallback) * filled + ce(section, 2, empty_fallback) * (PANEL_BAR_CELLS - filled)
+    left, right = _bar_caps(section, pct)
+    return f"{left}{cells}{right} {_pct_txt(pct)}"
 
 
 def self_energy_line(energy) -> str:
@@ -7159,7 +7180,7 @@ def level_progress_pct(lvl: int, jaghs: int, work_count: int = 0) -> float:
 
 def level_bar_line(pct: float) -> str:
     """نوار سطح (با /setemoji level ست میشه؛ اسلت ۱ = پر، ۲ = خالی)."""
-    return f"📊 سطح\n{_panel_bar('level', '🟪', '⬜', pct)}"
+    return f"{ce('level', 3, '📊')} سطح\n{_panel_bar('level', '🟪', '⬜', pct)}"
 
 
 async def self_panel_text(uid: int, name: str = "") -> str:
@@ -10332,6 +10353,25 @@ async def show_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(_strip_te(text), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
 
 
+SHIFT_EMOJI_PAY = "5386757680679377085"   # اول خط حقوق شیفت
+SKIN_SEP = "٠"
+
+
+def short_money(n: int) -> str:
+    """۱۲۰۰۰۰۰ ← «1.2 میل»، ۸۰۰۰۰۰ ← «800 هزار»."""
+    n = int(n)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".") + " میل"
+    if n >= 1_000:
+        return f"{n / 1_000:.2f}".rstrip("0").rstrip(".") + " هزار"
+    return f"{n:,}"
+
+
+def skin_tag(label: str) -> str:
+    """« ٠ اسکین درآمد» — فقط وقتی اسکین فعاله به متن اضافه میشه."""
+    return f" {SKIN_SEP} اسکین {label}"
+
+
 async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     _, uid, qi, oi = q.data.split(":")
@@ -10355,7 +10395,8 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lo, hi = (parse_pay(x) for x in JOB_PAY[idx])
     pay = random.randint(lo // 1000, hi // 1000) * 1000
     pay = int(pay * income_mult())   # ایونت درآمد
-    if await special_key_active(q.from_user.id, SPECIAL_KEY):
+    _sp = await special_key_active(q.from_user.id, SPECIAL_KEY)
+    if _sp:
         pay *= SPECIAL_WORK_MULT                     # قدرت «شاهزاده خسته»: ۱۰۰٪ درآمد بیشتر
     now = time.time()
     new_bal = await pool.fetchval(
@@ -10371,8 +10412,8 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"{shift_header(name)}\n\n"
         f"<blockquote><b>{html.escape(done)}\n\n"
-        f"{html.escape(shift_pick(SHIFT_OUTRO.get(name, []), q.from_user.id, 'outro', name))}\n\n"
-        f"{_te(SHIFT_EMOJI_DONE, '💰')} {html.escape(shift_pick(SHIFT_PAY_LINES, q.from_user.id, 'pay', '')).replace('{pay}', f'{pay:,}')}</b></blockquote>"
+        f"{html.escape(shift_pick(SHIFT_OUTRO.get(name, []), q.from_user.id, 'outro', name))}</b></blockquote>\n"
+        f"<b>{_te(SHIFT_EMOJI_PAY, '💰')} {short_money(pay)}{skin_tag('درآمد') if _sp else ''}</b>"
     )
     if (_eb := event_banner()):
         text += f"<b>{_eb}</b>"
@@ -14340,7 +14381,7 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_html(q, B(text), view_kb); return
     if success:
         result = (f"{TROPHY_CE} <b>عملیات {html.escape(cfg['op'])} موفق بود!</b>\n\n<blockquote>{html.escape(cfg['win_text'])}</blockquote>\n\n"
-                  f"{MONEY_CE} غنیمت: <b>+{payout:,} تومان</b>\nموجودی جدید: <b>{new_balance:,} تومان</b>\n"
+                  f"{MONEY_CE} غنیمت: <b>+{payout:,} تومان</b>{skin_tag('خلاف') if _spk in SPECIAL_CRIME_KEYS else ''}\nموجودی جدید: <b>{new_balance:,} تومان</b>\n"
                   f"{HG_CE} قفل مشترک تمام خلاف‌ها: <b>{_duration_fa(cfg['cooldown'])}</b>\nرد خلاف: <b>{new_trace}٪</b>\n\n"
                   f"ردِ خودت رو پاک کن تا لو نری!")
         if new_trace >= ROBBERY_TRACE_LIMIT:
@@ -15271,7 +15312,9 @@ def _fmt_en(x) -> str:
 def energy_bar(energy) -> str:
     e = max(0.0, min(ENERGY_MAX, float(energy or 0)))
     filled = min(ENERGY_CELLS, math.ceil(e / ENERGY_MAX * ENERGY_CELLS - 1e-9)) if e > 0 else 0
-    return ce("energy", 1, "⚡") * filled + ce("energy", 2, "▫️") * (ENERGY_CELLS - filled)
+    cells = ce("energy", 1, "⚡") * filled + ce("energy", 2, "▫️") * (ENERGY_CELLS - filled)
+    left, right = _bar_caps("energy", e / ENERGY_MAX * 100)
+    return f"{left}{cells}{right}"
 
 
 def energy_line(energy) -> str:
@@ -15721,8 +15764,9 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
         affair=True; cheater_id=user.id; spouse_id=int(me['spouse_id'])
     poach=bool(them['spouse_id']) and int(them['spouse_id'])!=user.id   # طرف مقابل همسر دارد (و همسرش خود بوس‌کننده نیست)
     energy_gain=2.0 if married else round(random.uniform(*HUG_ENERGY),1)
-    gain_u=SPECIAL_HUG_ENERGY if await special_key_active(user.id,SPECIAL_HUG_KEYS) else energy_gain      # کاراکتر ویژه: ۲۰ انرژی
-    gain_t=SPECIAL_HUG_ENERGY if await special_key_active(target.id,SPECIAL_HUG_KEYS) else energy_gain
+    sk_u=await special_key_active(user.id,SPECIAL_HUG_KEYS); sk_t=await special_key_active(target.id,SPECIAL_HUG_KEYS)
+    gain_u=SPECIAL_HUG_ENERGY if sk_u else energy_gain      # کاراکتر ویژه: ۲۰ انرژی
+    gain_t=SPECIAL_HUG_ENERGY if sk_t else energy_gain
     money=random.randint(*HUG_MONEY)
     async with pool.acquire() as c:
         async with c.transaction():
@@ -15741,7 +15785,8 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     line=RLM+random.choice(HUG_LINES[kind]).format(a=a,b=b)
     en=RLM+random.choice(HUG_ENERGY_LINES).format(ea=pct(s_en),eb=pct(t_en))
     mn=RLM+random.choice(HUG_MONEY_LINES).format(m=f"{GIFT_MONEY_CE}{GIFT_MONEY_CE}",n=f"{money:,}")
-    text=f"<b>{line}\n\n{en}\n\n{mn}{rel_note}</b>"
+    sk_lines="".join(f"\n{RLM}{nm}: +{_fmt_en(g)} انرژی{skin_tag('محبوبیت')}" for nm,g,on in ((a,gain_u,sk_u),(b,gain_t,sk_t)) if on)   # فقط برای کسی که اسکین محبوبیت فعال داره
+    text=f"<b>{line}\n\n{en}{sk_lines}\n\n{mn}{rel_note}</b>"
     await msg.reply_text(text,parse_mode="HTML")
     await task_event(context.bot, msg.chat_id, user.id, "hug", name=user.full_name)
     act_past="بغل کرد" if kind=="hug" else "بوسید"      # کی کیو چیکار کرد
