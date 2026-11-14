@@ -8662,11 +8662,135 @@ async def jagsal_private_custom(update: Update, context: ContextTypes.DEFAULT_TY
     await msg.reply_text(f"کاربر برای {max(0.1,min(hours,720)):g} ساعت محروم شد.")
     return True
 
+# ───────────────────────── تگ شغل کاربرا تو گروه ─────────────────────────
+# وقتی ربات تو گروه ادمین باشه (با دسترسی «مدیریت تگ‌ها»)، شغل هر کسی که تو گروه پیام می‌ده رو به‌عنوان تگ عضو می‌ذاره.
+# کسی که شغل نداره تگش «بیکار» میشه. تگ‌ها حداکثر ۱۶ حرف و بدون ایموجی‌ان؛ روی ادمین/مالک گروه تگ گذاشته نمیشه.
+JOBTAG_ENABLED = True
+JOBTAG_UNEMPLOYED = "بیکار"
+JOBTAG_CHECK_EVERY = 90         # هر کاربر حداکثر هر ۹۰ ثانیه یه بار چک میشه
+JOBTAG_CHAT_COOLDOWN = 600      # ربات ادمین نبود یا دسترسی نداشت: ۱۰ دقیقه بعد دوباره امتحان می‌کنه
+JOBTAG_USER_SKIP = 3600         # کسی که تگش قابل تغییر نیست (مثلاً ادمین): یه ساعت رد میشه
+_JOBTAG_LAST: dict[tuple, str] = {}
+_JOBTAG_CHECKED: dict[tuple, float] = {}
+_JOBTAG_SKIP_UNTIL: dict[tuple, float] = {}
+_JOBTAG_CHAT_OFF: dict[int, float] = {}
+_JOBTAG_CHAT_FAILS: dict[int, int] = {}
+_JOBTAG_BOT_ADMIN: dict[int, tuple] = {}
+_JOBTAG_TASKS: set = set()
+_JOBTAG_SEM = None
+_JOBTAG_EMOJI_RE = re.compile("[\U0001F000-\U0001FFFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\u20E3]")
+
+
+def _jobtag_clean(t: str) -> str:
+    t = _JOBTAG_EMOJI_RE.sub("", t or "").strip()
+    return t[:16].strip()
+
+
+def _jobtag_for_row(row) -> str:
+    try:
+        g = row["gender"] if row else None
+        if g in JOBS:
+            job = current_job(g, int(row["jaghs"] or 0), int(row["work_count"] or 0))
+            if job:
+                return _jobtag_clean(job[1]) or JOBTAG_UNEMPLOYED
+    except Exception:
+        pass
+    return JOBTAG_UNEMPLOYED
+
+
+async def _set_member_tag(bot, chat_id: int, user_id: int, tag: str):
+    fn = getattr(bot, "set_chat_member_tag", None)          # نسخه‌های جدید python-telegram-bot
+    if fn:
+        return await fn(chat_id, user_id, tag)
+    dar = getattr(bot, "do_api_request", None)
+    if dar:
+        return await dar("setChatMemberTag", api_kwargs={"chat_id": chat_id, "user_id": user_id, "tag": tag})
+
+    def _call():                                              # آخرین راه: درخواست مستقیم به API تلگرام
+        import urllib.request, urllib.parse, urllib.error
+        data = urllib.parse.urlencode({"chat_id": chat_id, "user_id": user_id, "tag": tag}).encode()
+        try:
+            with urllib.request.urlopen(f"https://api.telegram.org/bot{BOT_TOKEN}/setChatMemberTag", data=data, timeout=15) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            try:
+                d = json.loads(e.read().decode()).get("description")
+            except Exception:
+                d = str(e)
+            raise RuntimeError(d)
+    return await asyncio.to_thread(_call)
+
+
+async def _jobtag_bot_is_admin(bot, chat_id: int) -> bool:
+    now = time.time()
+    hit = _JOBTAG_BOT_ADMIN.get(chat_id)
+    if hit and now - hit[0] < JOBTAG_CHAT_COOLDOWN:
+        return hit[1]
+    try:
+        me = await bot.get_chat_member(chat_id, bot.id)
+        ok = getattr(me, "status", "") in ("administrator", "creator")
+    except Exception:
+        ok = False
+    _JOBTAG_BOT_ADMIN[chat_id] = (now, ok)
+    return ok
+
+
+async def _jobtag_sync(bot, chat_id: int, user_id: int):
+    global _JOBTAG_SEM
+    key = (chat_id, user_id)
+    now = time.time()
+    try:
+        if not await _jobtag_bot_is_admin(bot, chat_id):
+            _JOBTAG_CHAT_OFF[chat_id] = now + JOBTAG_CHAT_COOLDOWN
+            return
+        tag = _jobtag_for_row(await get_user(user_id))
+        if _JOBTAG_LAST.get(key) == tag:
+            return
+        if _JOBTAG_SEM is None:
+            _JOBTAG_SEM = asyncio.Semaphore(2)
+        async with _JOBTAG_SEM:
+            await _set_member_tag(bot, chat_id, user_id, tag)
+        _JOBTAG_LAST[key] = tag
+        _JOBTAG_CHAT_FAILS[chat_id] = 0
+    except RetryAfter as e:
+        ra = getattr(e, "retry_after", 30)
+        ra = ra.total_seconds() if hasattr(ra, "total_seconds") else float(ra)
+        _JOBTAG_CHAT_OFF[chat_id] = now + ra + 1
+    except Exception as e:
+        _JOBTAG_SKIP_UNTIL[key] = now + JOBTAG_USER_SKIP
+        n = _JOBTAG_CHAT_FAILS.get(chat_id, 0) + 1
+        _JOBTAG_CHAT_FAILS[chat_id] = n
+        if n >= 5:    # پنج بار پشت‌سرهم شکست = احتمالاً ربات دسترسی «مدیریت تگ‌ها» رو نداره
+            _JOBTAG_CHAT_OFF[chat_id] = now + JOBTAG_CHAT_COOLDOWN
+            _JOBTAG_CHAT_FAILS[chat_id] = 0
+        log.info("jobtag failed chat=%s user=%s: %s", chat_id, user_id, e)
+
+
+def jobtag_touch(bot, chat_id: int, user_id: int):
+    """از on_group_text صدا زده میشه؛ سبکه و کار اصلی تو پس‌زمینه انجام میشه."""
+    if not JOBTAG_ENABLED:
+        return
+    now = time.time()
+    key = (chat_id, user_id)
+    if now - _JOBTAG_CHECKED.get(key, 0) < JOBTAG_CHECK_EVERY:
+        return
+    if _JOBTAG_SKIP_UNTIL.get(key, 0) > now or _JOBTAG_CHAT_OFF.get(chat_id, 0) > now:
+        return
+    if len(_JOBTAG_CHECKED) > 20000:
+        _JOBTAG_CHECKED.clear()
+    _JOBTAG_CHECKED[key] = now
+    t = asyncio.create_task(_jobtag_sync(bot, chat_id, user_id))
+    _JOBTAG_TASKS.add(t)
+    t.add_done_callback(_JOBTAG_TASKS.discard)
+
+
 async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     user = update.effective_user
     if not msg or not msg.text or not user or user.is_bot:
         return
+    if not msg.sender_chat:
+        jobtag_touch(context.bot, msg.chat_id, user.id)   # تگ شغل (فقط وقتی ربات ادمین باشه)
     # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
     text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
     log.info("group text from %s: %r", user.id, msg.text)
