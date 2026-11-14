@@ -16957,13 +16957,17 @@ BOSS_ACTIVE_WINDOW = 6 * 3600  # فقط گروه‌هایی که تو این م�
 BOSS_TICK = 4                  # هر چند ثانیه یه بار پیام غول آپدیت میشه (جلوگیری از لیمیت تلگرام)
 BOSS_WORDS = {"شلیک", "شلیککن", "شلیکنابودش", "شلیکنابودکن"}
 BOSS_SPAWN_WORDS = {"باس", "غول", "باسفایت", "شروعباس"}   # فقط پشتیبان‌ها: ظاهر کردن فوری غول
-BOSSES = [   # file = ویدیوی انیمیشنی غول (کنار bot.py)
-    {"file": "boss_milk.mp4",      "name": "پاکت شیر نابودگر", "hp": 6_000,  "pool": 500_000},
-    {"file": "boss_banana.mp4",    "name": "موزِ زورگو",        "hp": 8_000,  "pool": 1_000_000},
-    {"file": "boss_ice.mp4",       "name": "غول یخی",           "hp": 11_000,  "pool": 1_500_000},
-    {"file": "boss_lava.mp4",      "name": "غول گدازه",         "hp": 14_000,  "pool": 2_200_000},
-    {"file": "boss_lightning.mp4", "name": "غول رعد و برق",     "hp": 18_000, "pool": 2_800_000},
-    {"file": "boss_shadow.mp4",    "name": "هیولای سایه",       "hp": 24_000, "pool": 3_500_000},
+BOSSES = [   # file = ویدیوی انیمیشنی یا عکس غول (کنار bot.py یا تو پوشه‌ی boss_media) — از ضعیف به قوی؛ آخری قوی‌ترینه
+    {"file": "boss_milk.mp4",      "name": "پاکت شیر نابودگر",       "hp": 2_000, "pool": 500_000},
+    {"file": "boss_banana.mp4",    "name": "موزِ زورگو",              "hp": 2_800, "pool": 1_000_000},
+    {"file": "boss_ice.mp4",       "name": "غول یخی",                 "hp": 3_500, "pool": 1_500_000},
+    {"file": "boss_lava.mp4",      "name": "غول گدازه",               "hp": 4_200, "pool": 2_000_000},
+    {"file": "boss_lightning.mp4", "name": "غول رعد و برق",           "hp": 5_000, "pool": 2_500_000},
+    {"file": "boss_golem.jpg",     "name": "غول صخره‌ای",             "hp": 5_800, "pool": 3_000_000},
+    {"file": "boss_titan.jpg",     "name": "پادشاه تندیس باستانی",    "hp": 6_700, "pool": 3_500_000},
+    {"file": "boss_shadow.mp4",    "name": "هیولای سایه",             "hp": 7_800, "pool": 4_200_000},
+    {"file": "boss_bloodmoon.jpg", "name": "ارباب ماه خونین",        "hp": 8_800, "pool": 4_800_000},
+    {"file": "boss_dragon.jpg",    "name": "اژدهای سه‌سر",            "hp": 10_000, "pool": 5_500_000},   # آخرین باس
 ]
 # نوار جون غول از ست‌های نوار دستگاه جق ساخته میشه؛ ست قرمز خواستی این خط رو عوض کن
 BAR_SETS["boss"] = BAR_SETS["jm"]
@@ -16975,6 +16979,30 @@ _BOSS_LAST_HIT: dict[tuple, float] = {}
 _BOSS_WARNED: dict[tuple, float] = {}
 _BOSS_REPLY_TS: dict[int, list] = {}
 _BOSS_DIRTY: set[int] = set()
+BOSS_MIN_MEMBERS = 21          # غول فقط تو گروه‌هایی میاد که حداقل این‌قدر عضو دارن (۲۱ هم شاملش میشه)
+BOSS_MEMBERS_TTL = 600         # تعداد اعضا هر ۱۰ دقیقه یه بار از تلگرام پرسیده میشه
+_BOSS_MEMBERS: dict[int, tuple] = {}   # chat_id -> (زمان چک, تعداد اعضا)
+
+
+async def _boss_member_count(bot, chat_id: int) -> int:
+    """تعداد اعضای گروه (کش‌شده). اگه تلگرام جواب نده و قبلاً هم چیزی ثبت نشده باشه 0 برمی‌گردونه تا غول نیاد."""
+    now = time.time()
+    hit = _BOSS_MEMBERS.get(chat_id)
+    if hit and now - hit[0] < BOSS_MEMBERS_TTL:
+        return hit[1]
+    try:
+        n = int(await bot.get_chat_member_count(chat_id))
+    except Exception as e:
+        log.warning("boss member count failed in %s: %s", chat_id, e)
+        return hit[1] if hit else 0
+    _BOSS_MEMBERS[chat_id] = (now, n)
+    return n
+
+
+async def boss_group_allowed(bot, chat_id: int) -> bool:
+    return await _boss_member_count(bot, chat_id) >= BOSS_MIN_MEMBERS
+
+
 def _boss_path(fname: str):
     here = Path(__file__).resolve().parent
     for p in (here / fname, here / "boss_media" / fname, here / "assets" / fname):
@@ -16983,10 +17011,16 @@ def _boss_path(fname: str):
     return None
 
 
+_BOSS_IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
+
+
 async def _boss_media(bot, chat_id: int, fname: str, caption: str):
-    """ویدیوی غول رو می‌فرسته؛ بار اول از فایل، بعدش با file_id (سریع). فایل نبود فقط متن میره."""
+    """مدیای غول (ویدیوی انیمیشنی یا عکس) رو می‌فرسته؛ بار اول از فایل، بعدش با file_id (سریع). فایل نبود فقط متن میره."""
+    is_img = fname.lower().endswith(_BOSS_IMG_EXT)
     if fname in _BOSS_FILE_ID:
         try:
+            if is_img:
+                return await bot.send_photo(chat_id, _BOSS_FILE_ID[fname], caption=caption, parse_mode="HTML")
             return await bot.send_animation(chat_id, _BOSS_FILE_ID[fname], caption=caption, parse_mode="HTML")
         except Exception:
             _BOSS_FILE_ID.pop(fname, None)
@@ -16995,6 +17029,13 @@ async def _boss_media(bot, chat_id: int, fname: str, caption: str):
         log.warning("boss media missing: %s", fname)
         return await bot.send_message(chat_id, caption, parse_mode="HTML")
     bio = BytesIO(p.read_bytes()); bio.name = fname
+    if is_img:
+        m = await bot.send_photo(chat_id, bio, caption=caption, parse_mode="HTML")
+        try:
+            _BOSS_FILE_ID[fname] = m.photo[-1].file_id
+        except Exception:
+            pass
+        return m
     m = await bot.send_animation(chat_id, bio, caption=caption, parse_mode="HTML", width=480, height=720)
     try:
         _BOSS_FILE_ID[fname] = m.animation.file_id
@@ -17038,6 +17079,8 @@ async def _boss_caption(chat_id: int, f, state: str = "active", extra: str = "")
 
 async def boss_spawn(bot, chat_id: int, force: bool = False) -> bool:
     now = time.time()
+    if not await boss_group_allowed(bot, chat_id):   # گروه زیر ۲۱ عضو: اصلاً غول نمیاد
+        return False
     cur = await pool.fetchrow("SELECT status, ends_at FROM boss_fights WHERE chat_id=$1", chat_id)
     if cur and cur["status"] == "active" and cur["ends_at"] > now:
         return False
@@ -17175,6 +17218,9 @@ async def boss_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: st
     key = _word_key(text)
     user, msg = update.effective_user, update.effective_message
     if key in BOSS_SPAWN_WORDS and not msg.reply_to_message and has_perm(user.id, "panel"):
+        if not await boss_group_allowed(context.bot, msg.chat_id):
+            await msg.reply_text(BP(f"غول فقط تو گروه‌های {BOSS_MIN_MEMBERS} عضو به بالا میاد؛ این گروه کمتر از اینه."), parse_mode="HTML")
+            return True
         ok = await boss_spawn(context.bot, msg.chat_id, force=True)
         if not ok:
             await msg.reply_text(BP("الان یه غول فعاله!"), parse_mode="HTML")
@@ -17211,6 +17257,9 @@ async def boss_loop(app: Application):
                         continue
                     active = await pool.fetchval("SELECT 1 FROM group_msgs WHERE chat_id=$1 AND ts > $2::double precision LIMIT 1", cid, now - BOSS_ACTIVE_WINDOW)
                     if not active:
+                        await pool.execute("UPDATE boss_sched SET next_spawn=$2 WHERE chat_id=$1", cid, now + 1800)
+                        continue
+                    if not await boss_group_allowed(bot, cid):   # گروه کوچیک (زیر ۲۱ عضو): بعداً دوباره چک میشه
                         await pool.execute("UPDATE boss_sched SET next_spawn=$2 WHERE chat_id=$1", cid, now + 1800)
                         continue
                     await boss_spawn(bot, cid)
