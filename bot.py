@@ -119,7 +119,7 @@ SECTIONS = {
     "job":     ("ایموجی‌شغل", ["شغل۱", "شغل۲", "شغل۳", "شغل۴", "شغل۵", "شغل۶", "شغل۷", "شغل۸", "شغل۹", "شغل۱۰"]),
     "lock":    ("قفل", ["قفل بسته", "قفل باز"]),
     "energy":  ("انرژی", ["نوار پر", "نوار خالی"]),
-    "jm":      ("دستگاه جق", ["نوار پر", "نوار خالی"]),
+    "jm":      ("پروفیت", ["نوار پر", "نوار خالی"]),
     "selfen":  ("انرژی خودم", ["نوار پر", "نوار خالی"]),   # فقط نوار انرژی پنل «خودم»
     "level":   ("سطح", ["نوار پر", "نوار خالی", "آیکن عنوان"]),   # نوار و عنوان سطح پنل «خودم»
 }
@@ -142,7 +142,7 @@ EMOJI_IDS = {
     ("lock", 2): "6034962180875490251",  # قفل باز (شغلی که کاربر داره)
     ("energy", 1): "5400280896311944960",  # نوار انرژی (خونه‌ی پر)
     ("selfen", 1): "5789435092589876174",  # نوار انرژی فقط تو پنل «خودم»
-    ("jm", 1): "5792112815720371175",      # نوار دستگاه جق
+    ("jm", 1): "5792112815720371175",      # نوار پروفیت
     ("level", 1): "6039539709774926420",   # نوار سطح
     ("level", 3): "5231200819986047254",   # آیکن کنار عنوان «سطح»
 }
@@ -155,7 +155,7 @@ EID_VS = "6213060666320754449"
 EID_MONEY = "6233367447789899509"
 EID_SWORDS = "5431421337648256443"
 EID_BACK = "5816895683256390576"
-EID_HAND = "5388881284309195257"
+EID_HAND = "5359395543548178633"
 EID_HAND_DONE = "5204118276635892650"
 HG_CE = f'<tg-emoji emoji-id="{EID_HOURGLASS}">⏳</tg-emoji>'
 TROPHY_CE = f'<tg-emoji emoji-id="{EID_TROPHY}">🏆</tg-emoji>'
@@ -436,6 +436,16 @@ async def init_db(app: Application):
                 "UPDATE users SET job_level = $1::int - 1 WHERE job_level = $1::int AND work_count < 1200 AND jaghs >= $2::int AND edu_degree = 0 AND edu_units = 0",
                 _n_jobs, LEVEL_THRESHOLDS[-1])
             await c.execute("INSERT INTO bot_migrations(name) VALUES('job_level_from_jaghs') ON CONFLICT DO NOTHING")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS job_sel INT NOT NULL DEFAULT 0")          # شغل فعالِ انتخاب‌شده (۰ = بالاترین شغل)
+        # مهاجرت یک‌باره: کسی که قبلاً با جق به شغلی رسیده، مدرک (و واحد) همون شغل رو هم داره و باید شغل‌های پایین‌ترش هم باز بمونه.
+        if not await c.fetchval("SELECT 1 FROM bot_migrations WHERE name='degree_from_jobs'"):
+            await c.execute(
+                """UPDATE users SET
+                       edu_degree = GREATEST(edu_degree, ($1::int[])[job_level]),
+                       edu_units  = GREATEST(edu_units, COALESCE(($2::int[])[($1::int[])[job_level]], 0))
+                   WHERE job_level BETWEEN 1 AND $3::int""",
+                JOB_DEGREE_NEED, [u for _n, u, _f in EDU_DEGREES], len(JOB_DEGREE_NEED))
+            await c.execute("INSERT INTO bot_migrations(name) VALUES('degree_from_jobs') ON CONFLICT DO NOTHING")
         await c.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS energy DOUBLE PRECISION NOT NULL DEFAULT {ENERGY_START}")
         await c.execute(f"ALTER TABLE users ALTER COLUMN energy SET DEFAULT {ENERGY_START}")
         await c.execute("CREATE TABLE IF NOT EXISTS rifts (user_lo BIGINT NOT NULL, user_hi BIGINT NOT NULL, ends_at DOUBLE PRECISION NOT NULL, PRIMARY KEY (user_lo, user_hi))")
@@ -469,6 +479,9 @@ async def init_db(app: Application):
             for _per, _met, _tg, _rw in TASK_DEFAULTS:
                 await c.execute("INSERT INTO tasks(period,title,metric,target,reward,is_default) VALUES($1,$2,$3,$4,$5,TRUE)",
                                 _per, task_auto_title(_met, _tg), _met, _tg, _rw)
+        if not await c.fetchval("SELECT 1 FROM bot_migrations WHERE name='tasks_no_jagh'"):
+            await c.execute("UPDATE tasks SET active = FALSE WHERE metric = 'jagh'")   # تسک «جق بزن» دیگه قابل انجام نیست
+            await c.execute("INSERT INTO bot_migrations(name) VALUES('tasks_no_jagh') ON CONFLICT DO NOTHING")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_duel DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS chats (chat_id BIGINT PRIMARY KEY, title TEXT)")
         await c.execute("CREATE TABLE IF NOT EXISTS group_msgs (chat_id BIGINT NOT NULL, msg_id BIGINT NOT NULL, user_id BIGINT NOT NULL, name TEXT, username TEXT, text TEXT, ts DOUBLE PRECISION NOT NULL, PRIMARY KEY (chat_id, msg_id))")
@@ -3127,7 +3140,7 @@ function GamesScreen(){
 }
 function MyselfScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});let data=null;
- const E={money:'6233367447789899509',bank:'5805331874653932911',cars:'5323272789824654613',powers:'5204118276635892650',spy:'5805161437466726782',theft:'5316700038162817675',hand:'5388881284309195257',back:'5816895683256390576',trophy:'5413566144986503832',jm:'5190526908462292507',vs:'6213060666320754449',wallet:'5334806881548379091',engine:'5775888804392996347',body:'5037414171923186776',tires:'5377521684221815300',glass:'5037614751190879049',energy:'5400280896311944960',hg:'5787432469598835099',special:'5244933196230972438'};
+ const E={money:'6233367447789899509',bank:'5805331874653932911',cars:'5323272789824654613',powers:'5204118276635892650',spy:'5805161437466726782',theft:'5316700038162817675',hand:'5359395543548178633',back:'5816895683256390576',trophy:'5413566144986503832',jm:'5190526908462292507',vs:'6213060666320754449',wallet:'5334806881548379091',engine:'5775888804392996347',body:'5037414171923186776',tires:'5377521684221815300',glass:'5037614751190879049',energy:'5400280896311944960',hg:'5787432469598835099',special:'5244933196230972438'};
  const pb=(label,fn,cls,icon)=>h('button',{class:'pb '+(cls||''),onclick:fn},icon?(icon.nodeType?icon:ceI(icon,24)):null,h('span',{},label));
  const title=t=>h('div',{class:'ghead'},t);
  const mbar=(label,v,max,cls,txt)=>h('div',{class:'mbar'},h('div',{class:'mbar-t'},h('span',{},label),h('b',{},txt)),h('div',{class:'mbar-tr'},h('i',{class:'mbar-f '+cls,style:'width:'+Math.max(v>0?3:0,Math.min(100,v/max*100)).toFixed(1)+'%'})));
@@ -3142,9 +3155,9 @@ function MyselfScreen(){
    h('div',{class:'selfhero'},avBox,h('div',{},h('div',{class:'gtitle'},data.character,data.premium?h('span',{class:'premium-mark'},'✦ ویژه'):null),h('div',{class:'gdesc'},data.name+' • سطح '+data.level+(data.job?' • '+data.job:'')))),
    h('div',{class:'gstats'},st.map(([ic,k,v])=>h('div',{class:'gstat'},h('div',{class:'gk'},ceI(ic,18),h('span',{class:'gdesc'},k)),h('b',{},v)))),
    mbar('انرژی',Number(data.energy)||0,100,'y',num(Math.round(Number(data.energy)||0))+'٪'),
-   mbar('دستگاه جق',Number(data.jagh_machine)||0,1200000,'p',num(data.jagh_machine)+' / ۱٬۲۰۰٬۰۰۰ تومان')),
+   mbar('پروفیت',Number(data.jagh_machine)||0,12000000,'p',num(data.jagh_machine)+' / ۱۲٬۰۰۰٬۰۰۰ تومان')),
    h('div',{class:'self-grid'},pb('بانک',bank,'',E.bank),pb('ماشین من',()=>cars(),'gold',E.cars),pb('قدرت‌ها',powers,'green',E.powers),pb('کاراکترهای ویژه',special,'pink',E.special),pb('تنظیمات',settings,'dark',svgIc('gear',22)),
-    pb('برداشت دستگاه جق · ۲ برابر',machine,'pink wide')));
+    pb('برداشت پروفیت · ۲ برابر',machine,'pink wide')));
  }
  function bank(){
   const amount=moneyInput('مبلغ به تومان');
@@ -3216,9 +3229,9 @@ function MyselfScreen(){
  }
  function powers(){box.replaceChildren(title('قدرت‌ها'),h('div',{class:'gcard'},
   h('div',{class:'gk'},ceI(E.spy,22),h('div',{class:'gtitle'},'جاسوسی')),h('div',{class:'gdesc'},'با خرید قابلیت جاسوسی، اطلاعات و فعالیت کاربر را در گروه بررسی کن.'),
-  h('div',{class:'gk',style:'margin-top:12px'},ceI(E.hand,22),h('div',{class:'gtitle'},'قدرت دست')),h('div',{class:'gdesc'},'دستت را تا ۵ سطح ارتقا بده تا زمان انتظار جق کمتر شود.'),
+  h('div',{class:'gk',style:'margin-top:12px'},ceI(E.hand,22),h('div',{class:'gtitle'},'قدرت هوش')),h('div',{class:'gdesc'},'هوشت را تا ۵ سطح ارتقا بده تا زمان انتظار درس کمتر شود.'),
   h('div',{class:'gk',style:'margin-top:12px'},ceI(E.theft,22),h('div',{class:'gtitle'},'دزدی')),h('div',{class:'gdesc'},'در گروه روی پیام کاربر ریپلای کن و «دزدی» را بفرست.'),
-  pb('کپی دستور خرید جاسوسی',()=>copy('خرید جاسوسی'),'blue',E.spy),pb('کپی دستور دست',()=>copy('دست'),'green',E.hand),pb('کپی دستور دزدی',()=>copy('دزدی'),'red',E.theft),pb('برگشت',home,'dark',E.back)))}
+  pb('کپی دستور خرید جاسوسی',()=>copy('خرید جاسوسی'),'blue',E.spy),pb('کپی دستور هوش',()=>copy('هوش'),'green',E.hand),pb('کپی دستور دزدی',()=>copy('دزدی'),'red',E.theft),pb('برگشت',home,'dark',E.back)))}
  function settings(){box.replaceChildren(title('تنظیمات'),h('div',{class:'gcard'},h('div',{class:'gtitle'},'انتخاب جنسیت کاراکتر'),
   pb('مرد',()=>gender('m'),'blue'),pb('زن',()=>gender('f'),'pink'),h('div',{class:'gdivider'}),
   pb('راهنما',()=>toast('راهنمای کامل در بخش راهنمای ربات موجود است'),'green',svgIc('gear',22)),pb('برگشت',home,'dark',E.back)))}
@@ -6367,11 +6380,11 @@ def join_keyboard(missing: list[str]) -> InlineKeyboardMarkup:
 
 def welcome_ok() -> str:
     return B(
-        "🔥 جق بزن و پولدار شو! 🔥\n\n"
-        "اینجا هر پیام می‌تونه شروع یه امپراتوری باشه؛ جق بزن، پول جمع کن، خلاف کن، ماشین بخر و رکورد بزن!\n\n"
-        f"💸 هر ۵ دقیقه یک‌بار توی گروه «{TRIGGER_WORD}» رو بنویس و جایزه بگیر.\n"
+        "🔥 درس بخون، کار کن و پولدار شو! 🔥\n\n"
+        "اینجا هر پیام می‌تونه شروع یه امپراتوری باشه؛ مدرک بگیر، شغل بخر، کار کن، خلاف کن، ماشین بخر و رکورد بزن!\n\n"
+        "🎓 برای درس و مدرک بنویس «تحصیل» و برای شغل‌ها بنویس «شغل».\n"
         f"👤 برای دیدن کاراکترت بنویس «{ME_WORD}».\n"
-        "🎮 برای بانک، خلاف، ماشین، دست، کازینو و تنظیمات بنویس «خودم».\n\n"
+        "🎮 برای بانک، خلاف، ماشین، هوش، کازینو و تنظیمات بنویس «خودم».\n\n"
         "🚀 آماده‌ای؟ ربات رو به گروهت ببر و بازی رو شروع کن!"
     )
 
@@ -6397,26 +6410,26 @@ def _gq(title: str, body: str) -> str:
 
 def _guide_sections() -> list:
     return [
-        _gq("🤛 جق", "<code>جق</code>\nهر ۵ دقیقه یه بار جایزه می‌گیری (با ارتقای دست تا ۴ دقیقه و ۴۰ ثانیه کم میشه). پولش میره تو دستگاه جق. اگه انرژیت کم باشه پولش نصفه."),
-        _gq(f"{JM_CE} دستگاه جق", f"<code>دستگاه جق</code>\nپول جق، بوس و بغل میره تو دستگاه (ظرفیت {JM_CAP:,} تومن). با نوشتن این کلمه همه‌ش میره تو کیف پولت؛ حداقل {JM_MIN:,} تومن باید توش باشه. وقتی پر بشه پول جدید جا نمیشه، پس به موقع برداشت کن. وضعیتش تو پنل «خودم» هم دیده میشه."),
+        _gq("🎓 تحصیل و درس", "<code>تحصیل</code> جدول مدرک‌ها\n<code>درس</code> هر ۶ دقیقه و ۴۵ ثانیه یه سوال از تاریخ، ریاضی و هوش، ادبیات یا علم و دانش؛ هر جواب ۲ تا ۴ واحد داره و جواب اشتباه ۱ واحد."),
+        _gq(f"{JM_CE} پروفیت", f"<code>پروفیت</code>\nدرآمد شیفت کاری (کار)، بوس و بغل میره تو پروفیت (ظرفیت {JM_CAP:,} تومن). با نوشتن این کلمه همه‌ش میره تو کیف پولت؛ حداقل {JM_MIN:,} تومن باید توش باشه. وقتی پر بشه پول جدید جا نمیشه، پس به موقع برداشت کن. وضعیتش تو پنل «خودم» هم دیده میشه."),
         _gq("🎖 پنل شخصی", "<code>خودم</code>\nبانک، خلاف، ماشینم، کازینو، قدرت‌ها و تنظیمات (تغییر جنسیت، راهنما، انتقال اکانت) رو از اینجا باز می‌کنی. کاراکتر و شغل و دارایی‌ت هم همین‌جا نوشته میشه."),
-        _gq(f"{POWERS_CE} قدرت‌ها", "از پنل «خودم» ← قدرت‌ها: جاسوسی، دست و دزدی."),
-        _gq(f"{HAND_CE} دست", "<code>دست</code>\n۵ سطح ارتقا داره و هر سطح ۵ ثانیه از زمان انتظار جق کم می‌کنه."),
+        _gq(f"{POWERS_CE} قدرت‌ها", "از پنل «خودم» ← قدرت‌ها: جاسوسی، هوش و دزدی."),
+        _gq(f"{HAND_CE} هوش", "<code>هوش</code>\n۵ سطح ارتقا داره و هر سطح ۵ ثانیه از زمان انتظار درس کم می‌کنه."),
         _gq(f"{SPY_CE} جاسوسی", f"<code>خرید جاسوسی</code>\nقیمت: {SPY_PRICE:,} تومن. بعدش روی پیام کاربر ریپلای کن و بنویس <code>جاسوسی</code> تا پول، بانک، شغل و فعالیت‌هاش رو ببینی. روزی {SPY_DAILY_LIMIT} بار."),
         _gq(f"{THEFT_CE} دزدی", f"روی پیام کاربر ریپلای کن و بنویس <code>دزدی</code>\nهر ۳ ساعت یه بار بین {THEFT_MIN:,} تا {THEFT_MAX:,} تومن از جیبش برمی‌داری. پولی که تو بانکه امنه؛ اگه جیبش خالی باشه فقط می‌فهمی بدبخته."),
         _gq("🏦 بانک", f"<code>بانک</code>\n<code>واریز 100m</code> (کارمزد {BANK_FEE:,} تومن)\n<code>برداشت 100m</code> (بدون کارمزد)\n{BANK_INTEREST_RATE_PCT}٪ سود هر ۱۲ ساعت روی موجودی بانک؛ مقدار سود بعدی تو پنل بانک نوشته میشه."),
         _gq("👛 دارایی", "<code>دارایی</code>\nپول جیب، بانک و مجموع دارایی‌ت."),
-        _gq("💼 شغل و شیفت", "<code>شغل</code> لیست شغل‌ها و جق لازم برای هر کدوم\n<code>کار</code> شیفت کاری (هر ۲۰ دقیقه یه بار) و گرفتن حقوق."),
+        _gq("💼 شغل و شیفت", "<code>شغل</code> جدول شغل‌ها (مدرک و هزینه‌ی هر کدوم) + دکمه‌ی انتخاب شغل فعال و خرید شغل بعدی\n<code>کار</code> شیفت کاری (هر ۲۰ دقیقه یه بار) و گرفتن حقوق."),
         _gq("🎖 کاراکتر", "<code>کاراکتر</code>\nکاراکتر و سطحت رو می‌بینی؛ با جق زدن بیشتر سطحت بالا میره."),
         _gq("🚗 ماشین و گاراژ", f"<code>ماشینم</code> پنل ماشین\n<code>گاراژ</code> جدول ماشین‌ها\nماشین‌ها به ترتیب خریده میشن. هر ۴ قطعه (موتور، بدنه، لاستیک، شیشه و رینگ) تا سطح {CAR_MAX_LEVEL} ارتقا می‌خوره و رنگ ماشین {CAR_COLOR_PRICE:,} تومنه. درآمد ساعتی میره تو صندوق (سقف {CAR_VAULT_CAP:,} تومن برای هر ماشین) و با دکمه «جمع کن» برداشت میشه."),
         _gq("🏠 خونه", "<code>خونه</code>\nخرید و تعمیر خونه و وسایلش و جمع کردن درآمدش."),
-        _gq("🤗 بوس و بغل", f"روی پیام کاربر ریپلای کن و بنویس <code>بوس</code> یا <code>بغل</code>\nهر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد. به هر دو نفر انرژی و {HUG_MONEY[0]} تا {HUG_MONEY[1]} تومن (تو دستگاه جق) می‌رسه. بوس و بغل روی همسر بقیه ۳ انرژی منفی داره."),
+        _gq("🤗 بوس و بغل", f"روی پیام کاربر ریپلای کن و بنویس <code>بوس</code> یا <code>بغل</code>\nهر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد. به هر دو نفر انرژی و {HUG_MONEY[0]} تا {HUG_MONEY[1]} تومن (تو پروفیت) می‌رسه. بوس و بغل روی همسر بقیه ۳ انرژی منفی داره."),
         _gq("🎁 هدیه", "<code>هدیه</code> لیست هدیه‌ها و قیمتشون\nریپلای + <code>هدیه گل</code>\nهدیه به طرف مقابل انرژی میده."),
         _gq("⚡ انرژی", "انرژی زیر ۳۰٪ یعنی پول جق نصف، درآمد ماشین ۲۵٪ کمتر و شانس گیر افتادن تو خلاف بیشتر. با بغل، بوس و هدیه بالا میره."),
         _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code>\n<code>همسرم</code> اطلاعات همسر و میزان رابطه\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
         _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
-        _gq("⚔️ دوئل جقی", "ریپلای + <code>دوئل جقی</code>\nطرف مقابل باید قبول کنه؛ هر ۵ دقیقه یه بار."),
+        _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ یه سوال درسی میاد و اولین نفری که درست جواب بده برنده‌ست (جواب اشتباه = حذف). هر ۵ دقیقه یه بار."),
         _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه و بعد از هر بازی ۱۵ ثانیه استراحت داری."),
         _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
@@ -7145,7 +7158,7 @@ def settings_keyboard(uid: int) -> InlineKeyboardMarkup:
     ])
 
 
-JM_CELLS = 10   # تعداد خونه‌های نوار دستگاه جق (جاهای دیگه‌ی ربات)
+JM_CELLS = 10   # تعداد خونه‌های نوار پروفیت (جاهای دیگه‌ی ربات)
 PANEL_BAR_CELLS = 6   # تعداد خونه‌های نوارهای پنل «خودم»؛ اگه هنوز نوار میره خط بعد، کمترش کن (مثلا 6)
 
 
@@ -7160,8 +7173,9 @@ BAR_SETS = {
     "jm":     ("6019552920549204941", "6019365402277061626", "6019267704655977508"),
     "energy": ("6019417633374348025", "6019616808187733402", "6019314957886168728"),
 }
+BAR_SETS["edu"] = ("6023742313254100760", "6021691754133069784", "6021757003276230454")   # نوار واحد تا مدرک بعدی
 BAR_EMPTY = ("6019528104228166791", "6019341045517525436", "6019103233178345190")
-BAR_CAP_KEY = {"selfen": "energy", "energy": "energy", "jm": "jm", "level": "level"}
+BAR_CAP_KEY = {"selfen": "energy", "energy": "energy", "jm": "jm", "level": "level", "edu": "edu"}
 
 
 def _custom_bar(section: str, pct: float, cells: int) -> str:
@@ -7190,9 +7204,9 @@ def self_energy_line(energy) -> str:
 
 
 def jm_bar_line(amount) -> str:
-    """نوار دستگاه جق (با /setemoji دستگاه جق ست میشه؛ اسلت ۱ = پر، ۲ = خالی). فقط نوار و درصد."""
+    """نوار پروفیت (با /setemoji پروفیت ست میشه؛ اسلت ۱ = پر، ۲ = خالی). فقط نوار و درصد."""
     a = max(0, min(JM_CAP, int(amount or 0)))
-    return f"{JM_CE} دستگاه جق\n{_panel_bar('jm', '🟪', '▫️', a / JM_CAP * 100)}"
+    return f"{JM_CE} پروفیت\n{_panel_bar('jm', '🟪', '▫️', a / JM_CAP * 100)}"
 
 
 def level_progress_pct(lvl: int, jaghs: int, work_count: int = 0) -> float:
@@ -7415,7 +7429,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     back_powers = [[btn("🔙 برگشت به قدرت‌ها", "primary", icon=EID_BACK, callback_data=f"sp:powers:{uid}")]]
     if action == "powers":
         rows = [[btn("جاسوسی", "primary", icon=SPY_EID, callback_data=f"sp:spy:{uid}"), btn("دزدی", "danger", icon=THEFT_EID, callback_data=f"sp:theft:{uid}")],
-                [btn("دست", "success", icon=EID_HAND, callback_data=f"sp:hand:{uid}")]] + back
+                [btn("هوش", "success", icon=EID_HAND, callback_data=f"sp:hand:{uid}")]] + back
         await _sp_edit_text(q, B(f"{POWERS_CE} قدرت‌ها\n\nیکی از قدرت‌هات رو انتخاب کن:"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows)); return
     if action == "spy":
         row = await get_user(uid)
@@ -7432,8 +7446,8 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"پولی که تو بانکه امنه. هر {_duration_fa(THEFT_COOLDOWN)} یه بار می‌تونی استفاده کنی.")
         await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_powers)); return
     if action == "hand":
-        row=await get_user(uid); level=int(row.get('hand_level',0) or 0); cooldown=COOLDOWN_SECONDS-level*5
-        lines=[f"{HAND_CE} <b>ارتقای دست</b>","\nبا هر ارتقا، ۵ ثانیه از زمان انتظار جق کم می‌شه.",f"سطح فعلی: <b>{level}/5</b>",f"زمان فعلی: <b>{_duration_fa(cooldown)}</b>","\n<b>فروشگاه ارتقاها</b>"]
+        row=await get_user(uid); level=int(row.get('hand_level',0) or 0); cooldown=EDU_COOLDOWN-level*5
+        lines=[f"{HAND_CE} <b>ارتقای هوش</b>","\nبا هر ارتقا، ۵ ثانیه از زمان انتظار درس کم می‌شه.",f"سطح فعلی: <b>{level}/5</b>",f"زمان فعلی: <b>{_duration_fa(cooldown)}</b>","\n<b>فروشگاه ارتقاها</b>"]
         rows=[]
         for i,(cost,reduce) in enumerate(HAND_UPGRADES,1):
             status="✅ خریداری شده" if level>=i else (f"{cost:,} تومان" if level==i-1 else "🔒 ابتدا سطح قبلی")
@@ -7459,7 +7473,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _sp_edit_text(q, 
             B("🔁 انتقال اکانت\n\nآیدی عددی اکانت مقصد رو بفرست.\n\n"
               "• اکانت مقصد باید قبلاً ربات رو استارت کرده باشه و کاملاً تازه و خالی باشه.\n"
-              "• همه‌ی پول، بانک، جق‌ها، ماشین‌ها، خونه‌ها و سطح دست به اون اکانت منتقل میشه و اکانت فعلی خالی میشه.\n"
+              "• همه‌ی پول، بانک، جق‌ها، ماشین‌ها، خونه‌ها و سطح هوش به اون اکانت منتقل میشه و اکانت فعلی خالی میشه.\n"
               "• اکانت مقصد هم باید انتقال رو تایید کنه.\n\n"
               "برای لغو بنویس «لغو»."),
             parse_mode="HTML",
@@ -7487,7 +7501,7 @@ async def _transfer_target_error(src: int, dst: int) -> str | None:
     if not d or not d["started"]:
         return "این آیدی پیدا نشد یا هنوز ربات رو استارت نکرده. از اکانت مقصد تو پی‌وی ربات /start بزن و دوباره امتحان کن."
     if any(int(d[c] or 0) for c in ("balance", "bank_balance", "jaghs", "hand_level", "work_count")):
-        return "اکانت مقصد باید تازه و خالی باشه (پول، جق، دست یا شغلش صفر نیست)."
+        return "اکانت مقصد باید تازه و خالی باشه (پول، جق، هوش یا شغلش صفر نیست)."
     extra = await pool.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM user_house WHERE user_id=$1)", dst)
     if extra:
         return "اکانت مقصد باید تازه و خالی باشه (ماشین یا خونه داره)."
@@ -7524,7 +7538,7 @@ async def account_transfer_input(update: Update, context: ContextTypes.DEFAULT_T
         btn("❌ لغو", "danger", callback_data=f"at:no:{user.id}:{dst}"),
     ]])
     await msg.reply_text(
-        B(f"⚠️ مطمئنی؟\n\nهمه‌ی اطلاعات اکانت فعلیت (پول، بانک، جق‌ها، ماشین‌ها، خونه‌ها، سطح دست و ...) به اکانت "
+        B(f"⚠️ مطمئنی؟\n\nهمه‌ی اطلاعات اکانت فعلیت (پول، بانک، جق‌ها، ماشین‌ها، خونه‌ها، سطح هوش و ...) به اکانت "
           f"{html.escape(d['name'] or 'کاربر')} ({dst}) منتقل میشه و اکانت فعلیت خالی میشه.\n"
           "این کار برگشت‌پذیر نیست و اکانت مقصد هم باید تایید کنه."),
         parse_mode="HTML", reply_markup=kb,
@@ -7546,12 +7560,12 @@ async def _do_account_transfer(src: int, dst: int) -> str | None:
             if await conn.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM user_house WHERE user_id=$1)", dst):
                 return "اکانت مقصد دیگه خالی نیست."
             await conn.execute(
-                "UPDATE users SET balance=$2, bank_balance=$3, jaghs=$4, hand_level=$5, work_count=$6, gender=COALESCE($7, gender), job_level=$8, edu_units=$9, edu_degree=$10 WHERE user_id=$1",
+                "UPDATE users SET balance=$2, bank_balance=$3, jaghs=$4, hand_level=$5, work_count=$6, gender=COALESCE($7, gender), job_level=$8, edu_units=$9, edu_degree=$10, job_sel=$11 WHERE user_id=$1",
                 dst, int(s_row["balance"] or 0), int(s_row["bank_balance"] or 0), int(s_row["jaghs"] or 0),
                 int(s_row["hand_level"] or 0), int(s_row["work_count"] or 0), s_row["gender"],
-                int(s_row["job_level"] or 0), int(s_row["edu_units"] or 0), int(s_row["edu_degree"] or 0),
+                int(s_row["job_level"] or 0), int(s_row["edu_units"] or 0), int(s_row["edu_degree"] or 0), int(s_row["job_sel"] or 0),
             )
-            await conn.execute("UPDATE users SET balance=0, bank_balance=0, jaghs=0, hand_level=0, work_count=0, gender=NULL, job_level=0, edu_units=0, edu_degree=0 WHERE user_id=$1", src)
+            await conn.execute("UPDATE users SET balance=0, bank_balance=0, jaghs=0, hand_level=0, work_count=0, gender=NULL, job_level=0, job_sel=0, edu_units=0, edu_degree=0 WHERE user_id=$1", src)
             await conn.execute("UPDATE cars SET user_id=$2 WHERE user_id=$1", src, dst)
             await conn.execute("UPDATE user_house SET user_id=$2 WHERE user_id=$1", src, dst)
             # وضعیت خلاف (بازداشت/ردگیری/کول‌داون) هم همراه اکانت میره تا انتقال راه فرار نباشه
@@ -7594,7 +7608,7 @@ async def account_transfer_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             await context.bot.send_message(
                 dst,
-                B(f"🔁 درخواست انتقال اکانت\n\n{html.escape(s_row['name'] or 'کاربر')} ({src}) می‌خواد همه‌ی اطلاعات اکانتش (پول، بانک، جق‌ها، ماشین‌ها، خونه‌ها، سطح دست) "
+                B(f"🔁 درخواست انتقال اکانت\n\n{html.escape(s_row['name'] or 'کاربر')} ({src}) می‌خواد همه‌ی اطلاعات اکانتش (پول، بانک، جق‌ها، ماشین‌ها، خونه‌ها، سطح هوش) "
                   "رو به این اکانت منتقل کنه.\nاگه خودت درخواست دادی قبول کن؛ وگرنه رد کن.\n(این درخواست ۱۰ دقیقه اعتبار داره)"),
                 parse_mode="HTML", reply_markup=kb,
             )
@@ -7656,9 +7670,9 @@ async def hand_upgrade_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if int(row['balance'])<cost:
                 await q.answer(f"موجودی جیبت کافی نیست؛ {cost:,} تومان نیاز داری.",show_alert=True); return
             await conn.execute("UPDATE users SET balance=balance-$1, hand_level=hand_level+1 WHERE user_id=$2",cost,uid)
-    await q.answer("ارتقای دست با موفقیت خریداری شد!",show_alert=True)
-    row=await get_user(uid); level=int(row.get('hand_level',0) or 0); cooldown=COOLDOWN_SECONDS-level*5
-    lines=[f"{HAND_CE} <b>ارتقای دست</b>", "\nبا هر ارتقا، ۵ ثانیه از زمان انتظار جق کم می‌شه.", f"سطح فعلی: <b>{level}/5</b>", f"زمان فعلی: <b>{_duration_fa(cooldown)}</b>", "\n<b>فروشگاه ارتقاها</b>"]
+    await q.answer("ارتقای هوش با موفقیت خریداری شد!",show_alert=True)
+    row=await get_user(uid); level=int(row.get('hand_level',0) or 0); cooldown=EDU_COOLDOWN-level*5
+    lines=[f"{HAND_CE} <b>ارتقای هوش</b>", "\nبا هر ارتقا، ۵ ثانیه از زمان انتظار درس کم می‌شه.", f"سطح فعلی: <b>{level}/5</b>", f"زمان فعلی: <b>{_duration_fa(cooldown)}</b>", "\n<b>فروشگاه ارتقاها</b>"]
     rows=[]
     for i,(price,reduce) in enumerate(HAND_UPGRADES,1):
         status="✅ خریداری شده" if level>=i else (f"{price:,} تومان" if level==i-1 else "🔒 ابتدا سطح قبلی")
@@ -7905,7 +7919,7 @@ TASK_METRICS = {
     "work":        ("شیفت کاری",          "count", "{n} شیفت کاری انجام بده",             lambda: MAX_LEVEL_CE),
     "hug":         ("بوس و بغل",          "count", "{n} بار کسی رو بوس یا بغل کن",       lambda: ce("energy", 1, "⚡")),
     "gift":        ("هدیه فرستادن",       "count", "{n} هدیه برای بقیه بفرست",           lambda: GIFT_MONEY_CE),
-    "duel_win":    ("بردن دوئل",          "count", "{n} دوئل جقی رو ببر",                lambda: SWORDS_CE),
+    "duel_win":    ("بردن دوئل",          "count", "{n} دوئل درسی رو ببر",                lambda: SWORDS_CE),
     "casino":      ("بازی کازینو",        "count", "{n} بار تو کازینو بازی کن",          lambda: DICE_CE),
     "bank":        ("واریز به بانک",      "money", "{n} تومن به حساب بانکی واریز کن",   lambda: BANK_CE),
     "robbery":     ("خلاف موفق",          "count", "{n} خلاف موفق انجام بده",            lambda: SPY_CE),
@@ -7916,13 +7930,11 @@ TASK_METRICS = {
 
 # تسک‌های پیش‌فرض: (دوره, معیار, تعداد هدف, جایزه به تومن) — روزانه‌ها ۳۰۰ هزار تا ۱ میلیون، هفتگی‌ها سخت‌تر تا ۵ میلیون
 TASK_DEFAULTS = [
-    ("daily", "jagh", 10, 300_000),
     ("daily", "msg", 30, 300_000),
     ("daily", "work", 2, 400_000),
     ("daily", "hug", 3, 500_000),
     ("daily", "duel_win", 1, 700_000),
     ("daily", "robbery", 1, 1_000_000),
-    ("weekly", "jagh", 150, 1_500_000),
     ("weekly", "work", 12, 2_000_000),
     ("weekly", "gift", 5, 2_500_000),
     ("weekly", "car_up", 3, 2_500_000),
@@ -8996,7 +9008,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if panel_key in ("خودمایناروببین", "خودم", "پنلمن", "پنلشخصی") or panel_key.startswith("خودمایناروببین"):
         await show_self_panel(update, context)
         return
-    if _word_key(text) == "دست":
+    if _word_key(text) in ("دست", "هوش"):
         await show_self_panel(update, context)
         return
     if _word_key(text) == "بانک":
@@ -9020,7 +9032,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if norm_word(text).startswith("انتقال"):
         await on_transfer_request(update, context, text)
         return
-    if _word_key(text) in ("دوئلجقی", "دوئلجق"):
+    if _word_key(text) in ("دوئلدرسی", "دوئلدرس", "دوئلجقی", "دوئلجق"):
         await duel_request(update, context)
         return
     if await casino_text(update, context, text):
@@ -9030,83 +9042,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _word_key(text) in ("خلاف", "دزدی", "سرقت"):
         await show_robbery_menu(update, context)
         return
-    if text != TRIGGER_WORD:
-        return
-
-    await upsert_user(user.id, user.full_name)
-    row = await get_user(user.id)
-    bot_username = (await context.bot.get_me()).username
-
-    # باید قبلاً /start زده و عضو کانال‌ها شده باشه
-    if not row["started"]:
-        kb = InlineKeyboardMarkup(
-            [[btn("▶️ استارت ربات", "success", url=f"https://t.me/{bot_username}?start=go")]]
-        )
-        await msg.reply_text(BP("اول ربات رو استارت کن و توی کانال‌ها عضو شو 👇"), parse_mode="HTML", reply_markup=kb)
-        return
-
-    # هر بار عضویت دوباره چک میشه (اگه لفت داده باشه دیگه پول نمی‌گیره)
-    missing = await missing_channels(context.bot, user.id)
-    if missing:
-        kb = InlineKeyboardMarkup(
-            [[btn("📢 عضویت در کانال‌ها", "primary", url=f"https://t.me/{bot_username}?start=go")]]
-        )
-        await msg.reply_text(BP("از کانال‌ها خارج شدی! دوباره عضو شو 👇"), parse_mode="HTML", reply_markup=kb)
-        return
-
-    now = time.time()
-    hand_level = int(row.get("hand_level", 0) or 0)
-    user_cooldown = max(280, COOLDOWN_SECONDS - hand_level * 5)
-    amount = random.randint(MIN_REWARD, MAX_REWARD)
-    low_en = float(row.get("energy", 0) or 0) < ENERGY_LOW
-    if low_en:  # انرژی کم = پول کمتر
-        amount = max(1, int(amount * JAGH_LOW_MULT))
-    base_amount = amount
-    amount = max(1, int(amount * income_mult()))   # ایونت درآمد
-    _sp = await special_key_active(user.id, SPECIAL_KEY)
-    if _sp:
-        amount *= SPECIAL_WORK_MULT                # قدرت «شاهزاده خسته»: ۱۰۰٪ درآمد بیشتر
-
-    # آپدیت اتمیک: فقط اگه ۵ دقیقه گذشته باشه پول اضافه میشه
-    updated = await pool.fetchrow(
-        "WITH o AS (SELECT jagh_machine AS old_m FROM users WHERE user_id = $3::bigint FOR UPDATE) "
-        "UPDATE users SET jagh_machine = LEAST(o.old_m + $1::bigint, $5::bigint), jaghs = jaghs + 1, last_ts = $2::double precision "
-        "FROM o WHERE user_id = $3::bigint AND last_ts <= $2::double precision - $4::double precision "
-        "RETURNING balance, jaghs, jagh_machine, o.old_m",
-        amount,
-        now,
-        user.id,
-        float(user_cooldown),
-        JM_CAP,
-    )
-    if updated is None:
-        row = await get_user(user.id)
-        remaining = user_cooldown - (now - row["last_ts"])
-        m, s = divmod(int(max(remaining, 0)) + 1, 60)
-        await msg.reply_text(B(f'دستت هنوز خستس<tg-emoji emoji-id="5443048677406940863">🥱</tg-emoji>\nصبر کن {m} دقیقه و {s} ثانیه بعد... دوباره می‌تونی جق بزنی'), parse_mode="HTML")
-        return
-
-    text = pick_reply(amount, base_amount) + "\n\n" + energy_pct_line(row.get("energy", 0))
-    if _sp:
-        text += f"\n\n👑 قدرت «{SPECIAL_NAME}»: ۱۰۰٪ پاداش بیشتر گرفتی!"
-    if low_en:
-        text += "\n⚠️ انرژیت کمه؛ پول جق کمتر شد! با بغل، بوس یا هدیه انرژی بگیر."
-    _jm_new = int(updated["jagh_machine"]); _jm_added = _jm_new - int(updated["old_m"])
-    if _jm_added <= 0:
-        text += f"\n\n{JM_CE} دستگاه جق پره و پولی بهش اضافه نشد! بنویس «دستگاه جق» تا برداشت کنی."
-    else:
-        text += f"\n\n{JM_CE} {_jm_added:,} تومن رفت تو دستگاه جق"
-        if _jm_new >= JM_MIN:
-            text += " — آماده‌ی برداشته ✅"
-    text += event_banner()
-    new_bal = updated["balance"]
-    gender = row["gender"]
-    new_jaghs = updated["jaghs"]
-    if gender in CHARACTERS and level_for(new_jaghs) > level_for(new_jaghs - 1):
-        title = html.escape(CHARACTERS[gender][level_for(new_jaghs) - 1][0])
-        text += f"\n\n{ce('me', 1, '🎖')} ارتقا گرفتی! حالا «{title}» هستی. برای دیدنش بنویس «{ME_WORD}»"
-    await msg.reply_text(B(text), parse_mode="HTML")
-    await task_event(context.bot, msg.chat_id, user.id, "jagh", name=user.full_name)
+    # «جق» زدن حذف شد؛ دیگه هیچ پاداشی نداره و ربات به این کلمه جواب نمیده.
+    return
 
 
 async def debug_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9147,6 +9084,34 @@ async def show_emojis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         blocks.append(f"{title} ({key})\n" + "\n".join(rows))
     await update.message.reply_text(B("\n\n".join(blocks)), parse_mode="HTML")
+
+
+async def emoji_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/eid — توی پی‌وی: «/eid 😀😀» رو با ایموجی‌های پرمیوم بفرست، یا روی پیامی که ایموجی پرمیوم داره ریپلای کن و /eid بزن؛ آیدی‌ها رو میده."""
+    msg = update.effective_message
+    ids = []
+    for m in (msg, msg.reply_to_message):
+        if not m:
+            continue
+        for e in list(m.entities or []) + list(m.caption_entities or []):
+            if e.type == "custom_emoji" and e.custom_emoji_id and e.custom_emoji_id not in ids:
+                ids.append(e.custom_emoji_id)
+    if not ids:
+        await msg.reply_text("بعد از /eid ایموجی پرمیوم بفرست (مثلاً /eid ⭐️ با ایموجی پرمیوم)، یا روی پیامی که ایموجی پرمیوم داره ریپلای کن و /eid بزن.")
+        return
+    lines = [f'<tg-emoji emoji-id="{i}">▫️</tg-emoji> <code>{i}</code>' for i in ids[:40]]
+    try:
+        await msg.reply_text("\n".join(lines), parse_mode="HTML")
+    except Exception:
+        await msg.reply_text("\n".join(ids[:40]))
+
+
+async def emoji_ids_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هر پیام پی‌وی که ایموجی پرمیوم داره (حتی فورواردشده از پیام‌های ذخیره‌شده) رو فوری با آیدی‌ها جواب میده."""
+    ud = context.user_data or {}
+    if any(k in ud for k in ("await_jobs", "adm", "support_add_wait", "bank_action", "buy_wait", "gift_order", "acc_transfer")):
+        return   # وسط یه جریان دیگه‌ست؛ دخالت نکن
+    await emoji_ids(update, context)
 
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9470,8 +9435,8 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 _PM_BLOCK_WORDS = {
-    "خونه", "خانه", "املاک", "دست", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جاسوسی",
-    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلجقی", "دوئلجق",
+    "خونه", "خانه", "املاک", "دست", "هوش", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جاسوسی",
+    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس", "دوئلجقی", "دوئلجق",
     "فروشگاه", "سکس", "موشک", "کراش",
 }
 
@@ -9545,7 +9510,7 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await top(update, context)
     elif msg and msg.text and (_word_key(msg.text) in ("خودمایناروببین", "خودم", "پنلمن", "پنلشخصی") or _word_key(msg.text).startswith("خودمایناروببین")):
         await show_self_panel(update, context)
-    elif msg and msg.text and _word_key(msg.text) == "دست":
+    elif msg and msg.text and _word_key(msg.text) in ("دست", "هوش"):
         await show_self_panel(update, context)
     elif msg and msg.text and _word_key(msg.text) == "بانک":
         await show_bank(update, context)
@@ -9950,6 +9915,16 @@ def _jlvl(row) -> int:
         return 0
 
 
+def _jsel(row) -> int:
+    """شمارهٔ شغل فعالِ انتخاب‌شده (۱..job_level)؛ اگه انتخابی نباشه بالاترین شغلی که گرفته."""
+    jl = _jlvl(row)
+    try:
+        s = int(row["job_sel"] or 0)
+    except Exception:
+        s = 0
+    return s if 1 <= s <= jl else jl
+
+
 def _edeg(row) -> int:
     try:
         return max(0, min(int(row["edu_degree"] or 0), len(EDU_DEGREES)))
@@ -9966,6 +9941,52 @@ def _eunits(row) -> int:
 
 def _deg_name(d: int) -> str:
     return EDU_DEGREES[d - 1][0] if 1 <= d <= len(EDU_DEGREES) else "بدون مدرک"
+
+
+EDU_SUBJ = {   # کلید: (اسم، آیدی ایموجی پرمیوم، ایموجی جایگزین)
+    "history": ("تاریخ", "5965124797166784534", "📜"),
+    "lit":     ("ادبیات", "5285311227457708296", "📖"),
+    "math":    ("ریاضی و هوش", "5366380461746563803", "🧮"),
+    "sci":     ("علم و دانش", "5422440204550027756", "🔬"),
+}
+EDU_PRAISE = [
+    "مغزت داره دود می‌کنه، آفرین! 🧠🔥",
+    "استاد دانشگاه هم جلوت کم میاره! 🎓",
+    "انیشتین از اون بالا داره برات دست می‌زنه 👏",
+    "اینو که حتی گوگل هم باید دو بار فکر کنه! 😎",
+    "نابغه‌ی گروه یعنی تو! 💎",
+    "ای جانم، این شد جواب! کتابخونه کنارت کم میاره 📚",
+    "هوشت تو سطح پروفسوریه، بی‌شوخی! 🏆",
+    "سوال رو خورد کردی، اصلاً انگار نه انگار سخت بود 💪",
+    "دمت گرم! یه واحد دیگه هم رفت تو حسابت ✨",
+    "اینجوری بری یه روزی رئیس دانشگاه میشی 😏",
+]
+
+
+def _edu_cd(row) -> float:
+    """زمان انتظار درس؛ هر سطح «هوش» ۵ ثانیه کم می‌کنه."""
+    try:
+        lv = max(0, min(int(row["hand_level"] or 0), 5))
+    except Exception:
+        lv = 0
+    return float(EDU_COOLDOWN - lv * 5)
+
+
+def _subj_label(key: str) -> str:
+    nm, eid, fb = EDU_SUBJ[key]
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji> {nm}'
+
+
+def edu_bar_line(row) -> str:
+    """نوار واحد تا مدرک بعدی (مثل نوار سطح)."""
+    deg, units = _edeg(row), _eunits(row)
+    if deg >= len(EDU_DEGREES):
+        pct = 100.0
+    else:
+        lo = EDU_DEGREES[deg - 1][1] if deg >= 1 else 0
+        hi = EDU_DEGREES[deg][1]
+        pct = max(0.0, min(100.0, (units - lo) / max(1, hi - lo) * 100))
+    return f"📚 واحد تا مدرک بعدی\n{_panel_bar('edu', '🟪', '⬜', pct)}"
 
 
 def edu_rich_html(row) -> str:
@@ -9996,8 +10017,8 @@ def edu_text(row) -> str:
 def edu_panel(row, uid: int):
     """(متن، کیبورد) خلاصه‌ی تحصیل با دکمه‌های درس / گرفتن مدرک / شغل."""
     deg, units = _edeg(row), _eunits(row)
-    lines = [f"📚 واحدهای تو: <b>{units:,}</b>", f"🎓 مدرک فعلی: <b>{html.escape(_deg_name(deg))}</b>"]
-    rows = [[btn("📚 درس بخون", "primary", callback_data=f"ed:lessons:{uid}")]]
+    lines = [f"📚 واحدهای تو: <b>{units:,}</b>", f"🎓 مدرک فعلی: <b>{html.escape(_deg_name(deg))}</b>", edu_bar_line(row)]
+    rows = [[btn("📚 درس بخون", None, callback_data=f"ed:lessons:{uid}")]]
     if deg < len(EDU_DEGREES):
         name, need, fee = EDU_DEGREES[deg]
         left = max(0, need - units)
@@ -10023,33 +10044,62 @@ def jobs_rows(gender: str, row):
     return rows
 
 
+def _tg(eid, fb: str) -> str:
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
+
+
+def _job_eid(gender: str, i: int):
+    """آیدی ایموجی پرمیومِ شغل شماره‌ی i (از /setemoji job یا جدول فورواردشده)."""
+    eid = EMOJI_IDS.get(("job", i + 1))
+    if not eid:
+        learned = (CUSTOM_JOBS.get(gender) or {}).get("job_emojis") or []
+        if i < len(learned):
+            eid = learned[i]
+    return eid
+
+
 def jobs_panel(row, uid: int):
-    """(متن، کیبورد) شغل فعلی + شغل بعدی با دکمه‌ی گرفتن."""
+    """(متن، کیبورد) شغل فعال + دکمه‌ی انتخاب بین شغل‌هایی که داره (فقط یکی فعاله) + دکمه‌ی خرید شغل بعدی."""
     g = row["gender"]
-    jl, deg = _jlvl(row), _edeg(row)
-    cur = JOBS[g][jl - 1][0] if 1 <= jl <= len(JOBS[g]) else "بیکار"
-    lines = [f"💼 شغل فعلی: <b>{html.escape(cur)}</b>", f"🎓 مدرک: <b>{html.escape(_deg_name(deg))}</b>"]
+    jl, deg, sel = _jlvl(row), _edeg(row), _jsel(row)
+    cur = JOBS[g][sel - 1][0] if sel >= 1 else "بیکار"
+    lines = [f"{ce('me', 1, '🎖')} شغل فعال: <b>{html.escape(cur)}</b>",
+             f"{_tg(EID_TROPHY, '🏆')} مدرک: <b>{html.escape(_deg_name(deg))}</b>"]
     rows = []
+    if jl:
+        lines.append(f"{lock_open()} شغلی که می‌خوای باهاش «کار» کنی رو انتخاب کن (فقط یکی فعاله):")
+        btns = []
+        for i in range(jl):
+            on = (i + 1 == sel)
+            btns.append(btn(("✅ " if on else "") + JOBS[g][i][0], "success" if on else "primary",
+                            icon=_job_eid(g, i) or LOCK_OPEN_ID, callback_data=f"jb:sel:{uid}:{i + 1}"))
+        for k in range(0, len(btns), 2):
+            rows.append(btns[k:k + 2])
     if jl < len(JOBS[g]):
         nm, need, fee = JOBS[g][jl][0], JOB_DEGREE_NEED[jl], JOB_FEES[jl]
         need_txt = _deg_name(need) if need else "بدون مدرک"
-        lines.append(f"⬆️ شغل بعدی: <b>{html.escape(nm)}</b>\nمدرک لازم: {need_txt} · هزینه: {_m_fa(fee)}")
+        lines.append(f"{ce('me', 2, '⬆️')} شغل بعدی: <b>{html.escape(nm)}</b> — مدرک: {need_txt} · هزینه: {_m_fa(fee)}")
         if deg >= need:
-            rows.append([btn(f"گرفتن شغل {nm} · {_m_fa(fee)}", "success", callback_data=f"jb:take:{uid}")])
+            rows.append([btn(f"گرفتن شغل {nm} · {_m_fa(fee)}", "success", icon=EID_MONEY, callback_data=f"jb:take:{uid}")])
         else:
-            lines.append("🔒 مدرکش رو نداری؛ از «تحصیل» درس بخون و مدرکش رو بگیر.")
+            lines.append(f"{lock_closed()} مدرکش رو نداری؛ از «تحصیل» درس بخون و مدرکش رو بگیر.")
     else:
-        lines.append("👑 همه‌ی شغل‌ها رو داری!")
-    rows.append([btn("🎓 تحصیل و درس", "primary", callback_data=f"ed:menu:{uid}")])
+        lines.append(f"{_tg(EID_TROPHY, '👑')} همه‌ی شغل‌ها رو داری!")
+    rows.append([btn("تحصیل و درس", "primary", callback_data=f"ed:menu:{uid}")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
 def jobs_rich_html(gender: str, row) -> str:
-    """جدول واقعی (Rich Message تلگرام)، شخصی برای هر کاربر: قفل باز برای شغل‌هایی که گرفته."""
-    jl = _jlvl(row)
+    """جدول واقعی (Rich Message تلگرام)، شخصی برای هر کاربر: قفل باز برای شغل‌هایی که گرفته، «فعال» برای شغل انتخاب‌شده."""
+    jl, sel = _jlvl(row), _jsel(row)
     out = ["<table><tr><th>شغل</th><th>حقوق</th><th>مدرک</th><th>هزینه</th><th>وضعیت</th></tr>"]
     for i, (glyph, name, pay, need, fee) in enumerate(jobs_rows(gender, row)):
-        st = f"{lock_open()} داری" if i < jl else f"{lock_closed()}"
+        if i + 1 == sel:
+            st = f"{lock_open()} <b>فعال ✅</b>"
+        elif i < jl:
+            st = f"{lock_open()} داری"
+        else:
+            st = f"{lock_closed()}"
         out.append(f"<tr><td>{job_glyph(gender, i, name)} {html.escape(name)}</td><td>{pay}</td><td>{need}</td><td>{fee}</td><td>{st}</td></tr>")
     out.append("</table>")
     return "".join(out)
@@ -10057,10 +10107,10 @@ def jobs_rich_html(gender: str, row) -> str:
 
 def jobs_text(gender: str, row) -> str:
     """نسخه‌ی جایگزین: جدول مونواسپیس داخل <pre> (اگه Rich Message کار نکرد)."""
-    jl = _jlvl(row)
+    jl, sel = _jlvl(row), _jsel(row)
     cells = [("شغل", "حقوق", "مدرک", "هزینه", "وضعیت")]
     for i, (glyph, name, pay, need, fee) in enumerate(jobs_rows(gender, row)):
-        cells.append((name, pay, need, fee, "داری ✅" if i < jl else "🔒"))
+        cells.append((name, pay, need, fee, "فعال ✅" if i + 1 == sel else ("داری 🔓" if i < jl else "🔒")))
     w = [max(_w(r[c]) for r in cells) for c in range(5)]
     sep = "─┼─".join("─" * w[c] for c in range(5))
     lines = []
@@ -10071,23 +10121,25 @@ def jobs_text(gender: str, row) -> str:
     return f"{ce('me', 1, '🎖')} <b>شغل‌ها</b>\n<pre>{html.escape(chr(10).join(lines))}</pre>"
 
 
+def _rich_panel(rich_html: str, panel_text: str) -> str:
+    """جدول + خط‌های وضعیت، همه تو یه پیام."""
+    return rich_html + "".join(f"<p>{ln}</p>" for ln in panel_text.split("\n") if ln.strip())
+
+
 async def _send_table(context, msg, rich_html: str, fallback_text: str, panel_text: str, kb):
-    """اول جدول واقعی تلگرام + پیام دکمه‌ها؛ اگه نشد جدول مونواسپیس + دکمه‌ها تو همون پیام."""
+    """جدول واقعی تلگرام + دکمه‌ها همه تو یه پیام. اگه Rich کار نکرد جدول مونواسپیس + دکمه‌ها تو یه پیام معمولی."""
     rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
-    sent = False
     try:
         await context.bot._post("sendRichMessage", {
             "chat_id": msg.chat_id,
-            "rich_message": {"html": rich_html},
+            "rich_message": {"html": _rich_panel(rich_html, panel_text)},
             "reply_parameters": rp.to_dict(),
+            "reply_markup": kb.to_dict(),
         })
-        sent = True
+        return
     except Exception:
         log.warning("sendRichMessage failed, using <pre> table", exc_info=True)
-    if sent:
-        text = panel_text
-    else:
-        text = fallback_text + "\n\n" + panel_text
+    text = fallback_text + "\n\n" + panel_text
     try:
         await msg.reply_text(B(text), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
     except Exception:
@@ -10095,31 +10147,46 @@ async def _send_table(context, msg, rich_html: str, fallback_text: str, panel_te
         await msg.reply_text(_strip_te(B(text)), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
 
 
+async def _table_edit(q, rich_html: str, fallback_text: str, panel_text: str, kb):
+    """همون پیامِ جدول رو (با دکمه‌هاش) آپدیت می‌کنه؛ پیام جدید نمیاره."""
+    try:
+        await q.get_bot()._post("editMessageText", {
+            "chat_id": q.message.chat_id, "message_id": q.message.message_id,
+            "rich_message": {"html": _rich_panel(rich_html, panel_text)},
+            "reply_markup": kb.to_dict(),
+        })
+        return
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            return
+        log.info("rich edit failed, falling back to text edit: %s", e)
+    await _edu_edit(q, fallback_text + "\n\n" + panel_text, kb)
+
+
+async def _jobs_view(q, row, uid: int, head: str = ""):
+    text, kb = jobs_panel(row, uid)
+    await _table_edit(q, jobs_rich_html(row["gender"], row), jobs_text(row["gender"], row), (head + "\n" if head else "") + text, kb)
+
+
+async def _edu_view(q, row, uid: int, head: str = ""):
+    text, kb = edu_panel(row, uid)
+    await _table_edit(q, edu_rich_html(row), edu_text(row), (head + "\n" if head else "") + text, kb)
+
+
 async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/jobs یا نوشتن «شغل» / «شغل ها» — جدول شغل‌ها (مدرک + هزینه‌ی هر شغل) و دکمه‌ی گرفتن شغل بعدی."""
+    """/jobs یا نوشتن «شغل» / «شغل ها» — جدول شغل‌ها + دکمه‌های انتخاب شغل فعال و گرفتن شغل بعدی، همه تو یه پیام."""
     msg, user = update.effective_message, update.effective_user
     await upsert_user(user.id, user.full_name)
     row = await get_user(user.id)
     if not row["gender"]:
         await ask_gender(update, context)
         return
-    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
     panel_text, kb = jobs_panel(row, user.id)
-    # اگه پشتیبان با /setjobs جدول ساخته باشه، همون برای همه نشون داده میشه
-    custom = CUSTOM_JOBS.get(row["gender"])
-    personal = (not custom) or custom.get("job_emojis") or any(k[0] == "job" for k in EMOJI_IDS)
-    if custom and not personal:
-        try:
-            await send_custom_jobs(context.bot, custom, msg.chat_id, rp)
-            await msg.reply_text(B(panel_text), parse_mode="HTML", reply_markup=kb)
-            return
-        except Exception:
-            log.exception("custom jobs failed, falling back to default table")
     await _send_table(context, msg, jobs_rich_html(row["gender"], row), jobs_text(row["gender"], row), panel_text, kb)
 
 
 async def show_edu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """«تحصیل» / «مدرک» — جدول مدرک‌ها (واحد، شهریه، وضعیت) + دکمه‌ی درس و گرفتن مدرک."""
+    """«تحصیل» / «مدرک» — جدول مدرک‌ها (واحد، شهریه، وضعیت) + دکمه‌ی درس و گرفتن مدرک تو همون پیام."""
     msg, user = update.effective_message, update.effective_user
     await upsert_user(user.id, user.full_name)
     row = await get_user(user.id)
@@ -10131,14 +10198,15 @@ async def show_edu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _lesson_kb(uid: int) -> InlineKeyboardMarkup:
-    rows = [[btn(label, "primary", callback_data=f"ed:subj:{uid}:{key}")] for key, (label, _qs) in EDU_SUBJECTS.items()]
-    rows.append([btn("🔙 تحصیل", "primary", callback_data=f"ed:menu:{uid}")])
+    btns = [btn(EDU_SUBJ[key][0], None, icon=EDU_SUBJ[key][1], callback_data=f"ed:subj:{uid}:{key}") for key in EDU_SUBJECTS]
+    rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+    rows.append([btn("🔙 تحصیل", None, callback_data=f"ed:menu:{uid}")])
     return InlineKeyboardMarkup(rows)
 
 
 def _lesson_text(row) -> str:
-    left = EDU_COOLDOWN - (time.time() - float(row["edu_last"] or 0))
-    t = f"📚 <b>درس</b>\nموضوع درس رو انتخاب کن؛ هر سوال ۲ تا ۴ واحد داره (جواب اشتباه = {EDU_WRONG_UNITS} واحد).\n\n📚 واحدهای تو: <b>{_eunits(row):,}</b>"
+    left = _edu_cd(row) - (time.time() - float(row["edu_last"] or 0))
+    t = f"📚 <b>درس</b>\nموضوع درس رو انتخاب کن؛ هر سوال ۲ تا ۴ واحد داره (جواب اشتباه = {EDU_WRONG_UNITS} واحد).\n\n📚 واحدهای تو: <b>{_eunits(row):,}</b>\n{edu_bar_line(row)}"
     if left > 0:
         t += f"\n⏳ درس بعدی: <b>{_duration_fa(left)}</b> دیگه"
     return t
@@ -10157,13 +10225,28 @@ async def show_lessons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _edu_edit(q, text: str, kb=None):
-    try:
-        await q.edit_message_text(B(text), parse_mode="HTML", reply_markup=kb)
-    except Exception:
+    """پیام فعلی رو ادیت می‌کنه (متن معمولی ← بدون ایموجی پرمیوم ← پیام Rich)؛ فقط اگه همه شکست خورد پیام جدید میده."""
+    for t_ in (B(text), _strip_te(B(text))):
         try:
-            await q.edit_message_text(_strip_te(B(text)), parse_mode="HTML", reply_markup=kb)
-        except Exception:
-            log.warning("edu edit failed", exc_info=True)
+            await q.edit_message_text(t_, parse_mode="HTML", reply_markup=kb)
+            return
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                return
+    try:
+        paras = "".join(f"<p>{ln}</p>" for ln in text.split("\n") if ln.strip())
+        await q.get_bot()._post("editMessageText", {
+            "chat_id": q.message.chat_id, "message_id": q.message.message_id,
+            "rich_message": {"html": paras}, "reply_markup": kb.to_dict() if kb else None,
+        })
+        return
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            return
+    try:
+        await q.message.reply_text(B(text), parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        log.warning("edu edit failed", exc_info=True)
 
 
 async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -10181,8 +10264,7 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = time.time()
     if act == "menu":
         await q.answer()
-        text, kb = edu_panel(row, uid)
-        await _edu_edit(q, "🎓 <b>تحصیلات</b>\n" + text, kb)
+        await _edu_view(q, row, uid)
     elif act == "lessons":
         await q.answer()
         await _edu_edit(q, _lesson_text(row), _lesson_kb(uid))
@@ -10199,9 +10281,9 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok = await pool.fetchval(
             "UPDATE users SET edu_last=$2::double precision, edu_pending=$3 WHERE user_id=$1 "
             "AND edu_last <= $2::double precision - $4::double precision RETURNING 1",
-            uid, now, f"{key}:{qi}", float(EDU_COOLDOWN))
+            uid, now, f"{key}:{qi}", _edu_cd(row))
         if not ok:
-            left = EDU_COOLDOWN - (now - float(row["edu_last"] or 0))
+            left = _edu_cd(row) - (now - float(row["edu_last"] or 0))
             await q.answer(f"درس بعدی: {_duration_fa(max(left, 1))} دیگه", show_alert=True); return
         _EDU_SEEN[(uid, key)] = (seen + [qi])[-len(qs):]
         if len(_EDU_SEEN) > 20000:
@@ -10209,13 +10291,16 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         question, options, _right, units = qs[qi]
         order = list(range(len(options)))
         random.shuffle(order)
-        kb = InlineKeyboardMarkup([[btn(options[o], "primary", callback_data=f"ed:ans:{uid}:{key}:{qi}:{o}")] for o in order])
+        _ob = [btn(options[o], None, callback_data=f"ed:ans:{uid}:{key}:{qi}:{o}") for o in order]
+        kb = InlineKeyboardMarkup([_ob[i:i + 2] for i in range(0, len(_ob), 2)])
         await q.answer()
+        label = _subj_label(key)
         await _edu_edit(q, f"{label}\n\n<b>{html.escape(question)}</b>\n\n💎 ارزش سوال: <b>{units} واحد</b> (اشتباه = {EDU_WRONG_UNITS} واحد)", kb)
     elif act == "ans":
         try:
             key, qi, oi = p[3], int(p[4]), int(p[5])
             label, qs = EDU_SUBJECTS[key]
+            label = _subj_label(key)
             question, options, right, units = qs[qi]
             options[oi]
         except Exception:
@@ -10228,9 +10313,9 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if new_units is None:
             await q.answer("این سوال دیگه معتبر نیست.", show_alert=True); return
         await q.answer()
-        left = max(0, EDU_COOLDOWN - (time.time() - float(row["edu_last"] or now)))
+        left = max(0, _edu_cd(row) - (time.time() - float(row["edu_last"] or now)))
         if correct:
-            head = f"✅ <b>آفرین، درست بود!</b>\n💎 +{gain} واحد"
+            head = f"✅ <b>{random.choice(EDU_PRAISE)}</b>\n💎 +{gain} واحد"
         else:
             head = f"❌ <b>اشتباه بود!</b>\nجواب درست: <b>{html.escape(options[right])}</b>\n💎 +{gain} واحد (دلداری)"
         deg = _edeg(row)
@@ -10241,9 +10326,10 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 extra = f"\n🎓 واحدهات برای <b>{html.escape(nm)}</b> کافیه! شهریه: {_m_fa(fee)}"
             else:
                 extra = f"\n⬆️ تا «{html.escape(nm)}»: {need - new_units:,} واحد دیگه"
-        kb = InlineKeyboardMarkup([[btn("📚 درس بعدی", "primary", callback_data=f"ed:lessons:{uid}"),
-                                    btn("🎓 تحصیل", "success", callback_data=f"ed:menu:{uid}")]])
-        await _edu_edit(q, f"{label}\n\n<blockquote>{html.escape(question)}</blockquote>\n\n{head}\n📚 مجموع واحدها: <b>{new_units:,}</b>{extra}\n⏳ درس بعدی: {_duration_fa(left)} دیگه", kb)
+        kb = InlineKeyboardMarkup([[btn("📚 درس بعدی", None, callback_data=f"ed:lessons:{uid}"),
+                                    btn("🎓 تحصیل", None, callback_data=f"ed:menu:{uid}")]])
+        _r2 = dict(row); _r2["edu_units"] = new_units
+        await _edu_edit(q, f"{label}\n\n<blockquote>{html.escape(question)}</blockquote>\n\n{head}\n📚 مجموع واحدها: <b>{new_units:,}</b>{extra}\n{edu_bar_line(_r2)}\n⏳ درس بعدی: {_duration_fa(left)} دیگه", kb)
     elif act == "deg":
         msg_alert = None
         res = None
@@ -10266,8 +10352,7 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer(msg_alert, show_alert=True); return
         await q.answer("مدرک گرفتی! 🎓", show_alert=True)
         row = await get_user(uid)
-        text, kb = edu_panel(row, uid)
-        await _edu_edit(q, f"🎓 <b>مدرک {html.escape(res[0])} گرفتی!</b> 🎉\n<blockquote>شهریه‌ی پرداختی: {res[1]:,} تومان</blockquote>\n\n" + text, kb)
+        await _edu_view(q, row, uid, f"{_tg(EID_TROPHY, '🎓')} <b>مدرک {html.escape(res[0])} گرفتی!</b> 🎉 شهریه‌ی پرداختی: {res[1]:,} تومان")
     else:
         await q.answer()
 
@@ -10287,8 +10372,21 @@ async def job_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g = row["gender"]
     if act == "menu":
         await q.answer()
-        text, kb = jobs_panel(row, uid)
-        await _edu_edit(q, "💼 <b>شغل‌ها</b>\n" + text, kb)
+        await _jobs_view(q, row, uid)
+    elif act == "sel":
+        try:
+            n = int(p[3])
+        except (IndexError, ValueError):
+            await q.answer(); return
+        jl = _jlvl(row)
+        if not 1 <= n <= jl:
+            await q.answer("این شغل رو هنوز نگرفتی.", show_alert=True); return
+        if n == _jsel(row):
+            await q.answer("همین شغل فعاله ✅"); return
+        await pool.execute("UPDATE users SET job_sel=$2 WHERE user_id=$1 AND job_level >= $2", uid, n)
+        await q.answer(f"شغل فعالت شد: {JOBS[g][n - 1][0]} ✅")
+        row = await get_user(uid)
+        await _jobs_view(q, row, uid)
     elif act == "take":
         alert = None; res = None
         async with pool.acquire() as conn:
@@ -10306,15 +10404,14 @@ async def job_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     else:
                         if fee:
                             await conn.execute("UPDATE users SET balance=balance-$2 WHERE user_id=$1", uid, fee)
-                        await conn.execute("UPDATE users SET job_level=$2 WHERE user_id=$1", uid, jl + 1)
+                        await conn.execute("UPDATE users SET job_level=$2, job_sel=$2 WHERE user_id=$1", uid, jl + 1)
                         res = (name, fee, JOB_PAY[jl][0])
         if alert:
             await q.answer(alert, show_alert=True); return
         await q.answer("شغل جدید گرفتی! 💼", show_alert=True)
         row = await get_user(uid)
-        text, kb = jobs_panel(row, uid)
         cost = f"هزینه: {res[1]:,} تومان" if res[1] else "رایگان بود"
-        await _edu_edit(q, f"💼 <b>شغل «{html.escape(res[0])}» رو گرفتی!</b> 🎉\n<blockquote>{cost}\nحقوق هر شیفت: {res[2]}</blockquote>\n\nبنویس «کار» تا شیفتت رو شروع کنی.\n\n" + text, kb)
+        await _jobs_view(q, row, uid, f"{ce('me', 1, '🎖')} <b>شغل «{html.escape(res[0])}» رو گرفتی!</b> 🎉 {cost} · حقوق هر شیفت: {res[2]} (شغل فعالت شد؛ بنویس «کار»)")
     else:
         await q.answer()
 
@@ -11003,7 +11100,7 @@ async def show_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML", reply_parameters=rp,
         )
         return
-    job = current_job(row["gender"], row["jaghs"], row["work_count"], _jlvl(row))
+    job = current_job(row["gender"], row["jaghs"], row["work_count"], _jsel(row))
     if job is None:
         await msg.reply_text(
             B(f"{ce('me', 1, '🎖')} هنوز شغلی نداری! بنویس «شغل» و اولین شغلت رو (رایگانه) بگیر."),
@@ -11065,7 +11162,7 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not row or not row["gender"]:
         await q.answer()
         return
-    job = current_job(row["gender"], row["jaghs"], row["work_count"], _jlvl(row))
+    job = current_job(row["gender"], row["jaghs"], row["work_count"], _jsel(row))
     if job is None:
         await q.answer("هنوز شغلی نداری!", show_alert=True)
         return
@@ -11082,12 +11179,17 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _sp:
         pay *= SPECIAL_WORK_MULT                     # قدرت «شاهزاده خسته»: ۱۰۰٪ درآمد بیشتر
     now = time.time()
-    new_bal = await pool.fetchval(
-        "UPDATE users SET balance = balance + $1::bigint, last_shift = $2::double precision, work_count = work_count + 1 "
+    # درآمد شیفت میره تو «پروفیت»؛ اگه جا نبود، باقیش مستقیم میره تو کیف پول
+    _r = await pool.fetchrow(
+        "WITH o AS (SELECT jagh_machine AS old_m FROM users WHERE user_id = $3::bigint FOR UPDATE) "
+        "UPDATE users SET jagh_machine = LEAST(o.old_m + $1::bigint, $5::bigint), "
+        "balance = balance + GREATEST(o.old_m + $1::bigint - $5::bigint, 0), "
+        "last_shift = $2::double precision, work_count = work_count + 1 FROM o "
         "WHERE user_id = $3::bigint AND last_shift <= $2::double precision - $4::double precision "
-        "RETURNING balance",
-        pay, now, q.from_user.id, float(SHIFT_COOLDOWN),
+        "RETURNING jagh_machine, o.old_m",
+        pay, now, q.from_user.id, float(SHIFT_COOLDOWN), JM_CAP,
     )
+    new_bal = None if _r is None else 1
     if new_bal is None:
         await q.answer("هنوز وقت شیفت بعدیت نرسیده!", show_alert=True)
         return
@@ -11096,7 +11198,9 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{shift_header(name)}\n\n"
         f"<blockquote><b>{html.escape(done)}\n\n"
         f"{html.escape(shift_pick(SHIFT_OUTRO.get(name, []), q.from_user.id, 'outro', name))}</b></blockquote>\n"
-        f"<b>{_te(SHIFT_EMOJI_PAY, '💰')} {short_money(pay)}{skin_tag('درآمد') if _sp else ''}</b>"
+        f"<b>{_te(SHIFT_EMOJI_PAY, '💰')} {short_money(pay)}{skin_tag('درآمد') if _sp else ''}</b>\n"
+        f"<b>{JM_CE} {short_money(int(_r['jagh_machine']) - int(_r['old_m']))} رفت تو پروفیت — بنویس «پروفیت» تا برداشت کنی"
+        + (f" (باقیش، {short_money(pay - (int(_r['jagh_machine']) - int(_r['old_m'])))}، چون پروفیت پر بود مستقیم رفت تو کیف پولت)" if int(_r['jagh_machine']) - int(_r['old_m']) < pay else "") + "</b>"
     )
     if (_eb := event_banner()):
         text += f"<b>{_eb}</b>"
@@ -12580,19 +12684,21 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     return False
 
 
-# ───────────────────────── دوئل جقی ─────────────────────────
-# روی پیام یه کاربر ریپلای کن و بنویس «دوئل جقی»؛ اگه قبول کنه بعد ۵ ثانیه برنده اعلام میشه و ۱۰۰ تومن می‌گیره.
+# ───────────────────────── دوئل درسی ─────────────────────────
+# روی پیام یه کاربر ریپلای کن و بنویس «دوئل درسی»؛ اگه قبول کنه یه سوال درسی میاد و اولین جواب درست برنده‌ست.
 # هر کاربر هر ۵ دقیقه فقط یه دوئل می‌تونه بکنه.
 DUEL_PRIZE = 100
 DUEL_COOLDOWN = 5 * 60
 DUEL_WAIT = 5
+DQ_TIME = 40          # ثانیه برای جواب دادن به سوال دوئل درسی
+DQ_UNITS = 5          # واحد درسیِ جایزه‌ی برنده
 DUEL_TTL = 300
 DUEL_LINES = [
-    "با یه حرکت برقی حریف رو زمین زد 💦",
-    "دستش از همه سریع‌تر بود 🤛",
-    "تا آخرش دووم آورد و حریف نفس کم آورد 😮‍💨",
-    "با یه ضربه‌ی آخر کار رو تموم کرد 🔥",
-    "حریف وسط راه خسته شد و تسلیم شد 🏳️",
+    "مغزش از همه سریع‌تر بود 🧠",
+    "حریف رو با دانشش زمین زد 📚",
+    "قبل از اینکه حریف سوال رو تموم کنه جوابش رو داشت ⚡",
+    "استاد همه‌ی استادها، بی‌رقیب! 🎓",
+    "دمش گرم، همه‌ی درس‌ها رو خورده بود 🔥",
 ]
 
 
@@ -12628,11 +12734,11 @@ def _cd_text(left: float) -> str:
 async def duel_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg, user = update.effective_message, update.effective_user
     if msg.chat_id > 0:
-        await msg.reply_text(BP("دوئل جقی فقط تو گروه ممکنه."), parse_mode="HTML")
+        await msg.reply_text(BP("دوئل درسی فقط تو گروه ممکنه."), parse_mode="HTML")
         return
     target = msg.reply_to_message.from_user if msg.reply_to_message else None
     if target is None:
-        await msg.reply_text(BP("برای دوئل، روی پیام حریفت ریپلای کن و بنویس: دوئل جقی"), parse_mode="HTML")
+        await msg.reply_text(BP("برای دوئل، روی پیام حریفت ریپلای کن و بنویس: دوئل درسی"), parse_mode="HTML")
         return
     if target.is_bot or target.id == user.id:
         await msg.reply_text(BP("نمی‌تونی با خودت یا ربات دوئل کنی 😅"), parse_mode="HTML")
@@ -12661,8 +12767,8 @@ async def duel_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]])
     _duel_hold(context, user.id, target.id, DUEL_TTL + 30)
     await msg.reply_text(
-        f'<b>{SWORDS_CE} دوئل جقی!\n\n{_ulink(user.id, user.full_name)} {_ulink(target.id, target.full_name)} رو به دوئل دعوت کرد.\n'
-        f'برنده {DUEL_PRIZE:,} تومن می‌گیره. {_ulink(target.id, target.full_name)}، قبول می‌کنی؟</b>',
+        f'<b>{SWORDS_CE} دوئل درسی!\n\n{_ulink(user.id, user.full_name)} {_ulink(target.id, target.full_name)} رو به دوئل دعوت کرد.\n'
+        f'یه سوال درسی میاد؛ اولین نفری که درست جواب بده برنده‌ست و {DUEL_PRIZE:,} تومن + {DQ_UNITS} واحد می‌گیره. {_ulink(target.id, target.full_name)}، قبول می‌کنی؟</b>',
         parse_mode="HTML", reply_markup=kb,
         reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True),
     )
@@ -12739,25 +12845,101 @@ async def _duel_run(update, context, q, frm, to, act, key, done):
         return
     await q.answer("دوئل شروع شد!")
     busy.add(frm); busy.add(to)
-    _duel_hold(context, frm, to, DUEL_WAIT + 60)
+    _duel_hold(context, frm, to, DQ_TIME + 60)
     fname = await pool.fetchval("SELECT name FROM users WHERE user_id = $1", frm) or "کاربر"
     a, b = _ulink(frm, fname), _ulink(to, q.from_user.full_name)
-    try:
-        await q.edit_message_text(f"<b>{SWORDS_CE} {a} {VS_CE} {b}\n\n{HG_CE} دوئل شروع شد... نتیجه تا ۵ ثانیه‌ی دیگه!</b>", parse_mode="HTML")
-    except Exception:
-        pass
-    await asyncio.sleep(DUEL_WAIT)
-    win_id, win_link = random.choice(((frm, a), (to, b)))
-    await _give(win_id, DUEL_PRIZE)
+    skey = random.choice(list(EDU_SUBJECTS))
+    qs = EDU_SUBJECTS[skey][1]
+    qi = random.randrange(len(qs))
+    question, options, _right, units = qs[qi]
+    order = list(range(len(options)))
+    random.shuffle(order)
+    _ob = [btn(options[o], None, callback_data=f"dq:{frm}:{to}:{skey}:{qi}:{o}") for o in order]
+    kb = InlineKeyboardMarkup([_ob[i:i + 2] for i in range(0, len(_ob), 2)])
+    st = context.application.bot_data.setdefault("dq", {})
+    k = (q.message.chat_id, q.message.message_id)
+    st[k] = {"a": a, "b": b, "wrong": set(), "done": False}
     try:
         await q.edit_message_text(
-            f"<b>{SWORDS_CE} {a} {VS_CE} {b}\n\n{TROPHY_CE} برنده: {win_link}\n{random.choice(DUEL_LINES)}\n{MONEY_CE} {DUEL_PRIZE:,} تومن به حسابش رفت!</b>",
-            parse_mode="HTML",
-        )
+            f"<b>{SWORDS_CE} {a} {VS_CE} {b}\n\n{_subj_label(skey)}\n{html.escape(question)}\n\n"
+            f"{HG_CE} {DQ_TIME} ثانیه وقت دارید؛ اولین جواب درست برنده‌ست (جواب اشتباه = حذف)!</b>",
+            parse_mode="HTML", reply_markup=kb)
     except Exception:
-        log.exception("duel result edit failed")
-        await context.bot.send_message(q.message.chat_id, f"{TROPHY_CE} برنده‌ی دوئل: {win_link} (+{DUEL_PRIZE:,} تومن)", parse_mode="HTML")
-    await task_event(context.bot, q.message.chat_id, win_id, "duel_win")
+        log.exception("duel question edit failed")
+        st.pop(k, None); _duel_release(context, frm, to)
+        return
+    context.application.create_task(_dq_timeout(context, k, frm, to, question))
+
+
+async def _dq_finish(context, k, frm, to):
+    context.application.bot_data.setdefault("dq", {}).pop(k, None)
+    _duel_release(context, frm, to)
+
+
+async def _dq_timeout(context, k, frm, to, question):
+    await asyncio.sleep(DQ_TIME)
+    s = context.application.bot_data.setdefault("dq", {}).get(k)
+    if not s or s["done"]:
+        return
+    s["done"] = True
+    try:
+        await context.bot.edit_message_text(
+            f"<b>{SWORDS_CE} {s['a']} {VS_CE} {s['b']}\n\n{HG_CE} وقت تموم شد و کسی درست جواب نداد؛ دوئل مساوی شد!</b>",
+            chat_id=k[0], message_id=k[1], parse_mode="HTML")
+    except Exception:
+        log.warning("dq timeout edit failed", exc_info=True)
+    await _dq_finish(context, k, frm, to)
+
+
+async def dq_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        _, frm, to, skey, qi, oi = q.data.split(":")
+        frm, to, qi, oi = int(frm), int(to), int(qi), int(oi)
+        question, options, right, units = EDU_SUBJECTS[skey][1][qi]
+        options[oi]
+    except Exception:
+        await q.answer(); return
+    uid = q.from_user.id
+    if uid not in (frm, to):
+        await q.answer("این دوئل مال شما نیست 😅", show_alert=True); return
+    k = (q.message.chat_id, q.message.message_id)
+    st = context.application.bot_data.setdefault("dq", {})
+    s = st.get(k)
+    if not s or s["done"]:
+        await q.answer("این دوئل تموم شده", show_alert=True); return
+    if uid in s["wrong"]:
+        await q.answer("تو غلط جواب دادی و حذف شدی 😬", show_alert=True); return
+    if oi == right:
+        s["done"] = True
+        win_link = s["a"] if uid == frm else s["b"]
+        await _give(uid, DUEL_PRIZE)
+        await pool.execute("UPDATE users SET edu_units = edu_units + $2 WHERE user_id = $1", uid, DQ_UNITS)
+        await q.answer("درست بود! 🎉")
+        try:
+            await q.edit_message_text(
+                f"<b>{SWORDS_CE} {s['a']} {VS_CE} {s['b']}\n\n{_subj_label(skey)}\n<blockquote>{html.escape(question)}</blockquote>\n"
+                f"✅ جواب درست: {html.escape(options[right])}\n\n{TROPHY_CE} برنده: {win_link}\n{random.choice(DUEL_LINES)}\n"
+                f"{MONEY_CE} {DUEL_PRIZE:,} تومن + {DQ_UNITS} واحد درسی به حسابش رفت!</b>", parse_mode="HTML")
+        except Exception:
+            log.exception("dq result edit failed")
+            await context.bot.send_message(q.message.chat_id, f"{TROPHY_CE} برنده‌ی دوئل درسی: {win_link}", parse_mode="HTML")
+        await _dq_finish(context, k, frm, to)
+        await task_event(context.bot, q.message.chat_id, uid, "duel_win")
+    else:
+        s["wrong"].add(uid)
+        if len(s["wrong"]) >= 2:
+            s["done"] = True
+            await q.answer("اشتباه بود!", show_alert=True)
+            try:
+                await q.edit_message_text(
+                    f"<b>{SWORDS_CE} {s['a']} {VS_CE} {s['b']}\n\n{html.escape(question)}\n✅ جواب درست: {html.escape(options[right])}\n\n"
+                    f"هر دوتون غلط جواب دادین؛ دوئل مساوی شد 😅</b>", parse_mode="HTML")
+            except Exception:
+                pass
+            await _dq_finish(context, k, frm, to)
+        else:
+            await q.answer("اشتباه بود! حذف شدی؛ حالا فقط حریفت می‌تونه جواب بده 😬", show_alert=True)
 
 
 # ───────────────────────── قرعه‌کشی (ساخت از پنل پشتیبانی) ─────────────────────────
@@ -15242,10 +15424,10 @@ def _is_bot_text_command(text: str) -> bool:
         return True
     key = _word_key(raw)
     exact = {
-        TRIGGER_WORD, ME_WORD, "تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks",
+        ME_WORD, "تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks",
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
         "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده",
-        "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلجقی", "دوئلجق",
+        "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلدرسی", "دوئلدرس", "دوئلجقی", "دوئلجق",
         "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
@@ -16181,24 +16363,24 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
     return True
 
 
-# ───────── دستگاه جق: پول جق، بوس و بغل میره تو دستگاه؛ با نوشتن «دستگاه جق» برداشت میشه ─────────
+# ───────── پروفیت: پول جق، بوس و بغل میره تو دستگاه؛ با نوشتن «پروفیت» برداشت میشه ─────────
 JM_EID = "5190526908462292507"
 JM_CE = f'<tg-emoji emoji-id="{JM_EID}">🎰</tg-emoji>'
-JM_CAP = 1_200_000      # ظرفیت دستگاه (تومن)
+JM_CAP = 12_000_000     # ظرفیت پروفیت (تومن)
 JM_MIN = 50_000         # حداقل موجودی برای برداشت
-JM_WORDS = {"دستگاهجق", "دستگاهجقی"}
+JM_WORDS = {"پروفیت", "profit", "دستگاهجق", "دستگاهجقی"}
 
 
 def jm_status_line(amount: int) -> str:
     """وضعیت دستگاه برای پنل «خودم»."""
     amount = int(amount or 0)
     if amount >= JM_CAP:
-        st = "پره! بنویس «دستگاه جق» ✅"
+        st = "پره! بنویس «پروفیت» ✅"
     elif amount >= JM_MIN:
         st = "آماده‌ی برداشته ✅"
     else:
         st = f"هنوز آماده نیست ❌ (حداقل {JM_MIN:,} تومن)"
-    return f"{JM_CE} دستگاه جق: {amount:,} / {JM_CAP:,} تومن — {st}"
+    return f"{JM_CE} پروفیت: {amount:,} / {JM_CAP:,} تومن — {st}"
 
 
 async def jm_add(c, uid: int, amount: int):
@@ -16214,7 +16396,7 @@ async def jm_add(c, uid: int, amount: int):
 
 
 async def jagh_machine_collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """«دستگاه جق»: اگه حداقل ۵۰ هزار توش باشه، همه‌ش میره تو کیف پول."""
+    """«پروفیت»: اگه حداقل ۵۰ هزار توش باشه، همه‌ش میره تو کیف پول."""
     msg, user = update.effective_message, update.effective_user
     await upsert_user(user.id, user.full_name)
     rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
@@ -16225,12 +16407,12 @@ async def jagh_machine_collect(update: Update, context: ContextTypes.DEFAULT_TYP
                 new_bal = await c.fetchval(
                     "UPDATE users SET balance=balance+$1, jagh_machine=0 WHERE user_id=$2 RETURNING balance", cur, user.id)
     if cur < JM_MIN:
-        await msg.reply_text(B(f"{JM_CE} دستگاه جق هنوز آماده نیست!\n"
+        await msg.reply_text(B(f"{JM_CE} پروفیت هنوز آماده نیست!\n"
                                f"موجودی: {cur:,} / {JM_CAP:,} تومن\n"
                                f"حداقل {JM_MIN:,} تومن باید توش جمع بشه تا بتونی برداشت کنی."),
                              parse_mode="HTML", reply_parameters=rp)
         return
-    await msg.reply_text(B(f"{JM_CE} برداشت از دستگاه جق انجام شد!\n"
+    await msg.reply_text(B(f"{JM_CE} برداشت از پروفیت انجام شد!\n"
                            f"{MONEY_CE} {cur:,} تومن به کیف پولت اضافه شد.\n"
                            f"👛 موجودی کیف پول: {int(new_bal):,} تومن"),
                          parse_mode="HTML", reply_parameters=rp)
@@ -16297,9 +16479,9 @@ HUG_ENERGY_LINES = [
     "⚡ انرژیش {eb}، انرژی خودت {ea}",
 ]
 HUG_MONEY_LINES = [
-    "{m} {n} تومن پول، هر دوتون گرفتید! (رفت تو دستگاه جق)",
-    "{m} هر کدومتون {n} تومن جایزه گرفتید! (رفت تو دستگاه جق)",
-    "{m} {n} تومن به دستگاه جق هر دو نفرتون رفت!",
+    "{m} {n} تومن پول، هر دوتون گرفتید! (رفت تو پروفیت)",
+    "{m} هر کدومتون {n} تومن جایزه گرفتید! (رفت تو پروفیت)",
+    "{m} {n} تومن به پروفیت هر دو نفرتون رفت!",
 ]
 
 
@@ -16581,7 +16763,7 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
             await c.execute("INSERT INTO affection_cooldowns(actor_id,target_id,last_ts) VALUES($1,$2,$3) ON CONFLICT(actor_id,target_id) DO UPDATE SET last_ts=EXCLUDED.last_ts",user.id,target.id,now)
             s_en=await c.fetchval("UPDATE users SET energy=LEAST(energy+$1,$2) WHERE user_id=$3 RETURNING energy",gain_u,ENERGY_MAX,user.id)
             t_en=await c.fetchval("UPDATE users SET energy=LEAST(energy+$1,$2) WHERE user_id=$3 RETURNING energy",gain_t,ENERGY_MAX,target.id)
-            s_jm,_s_add=await jm_add(c,user.id,money)   # پول بوس/بغل میره تو دستگاه جق
+            s_jm,_s_add=await jm_add(c,user.id,money)   # پول بوس/بغل میره تو پروفیت
             t_jm,_t_add=await jm_add(c,target.id,money)
     rel_note=""
     if kind=="kiss" and me['spouse_id'] and int(me['spouse_id'])==target.id:
@@ -17000,7 +17182,7 @@ async def rift_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
     await msg.reply_text(
         f"<b>{_ltr_pair(user.id, user.full_name, target.id, target.full_name)}\n\n"
         f"{RIFT_CE} قهر کردن!\n"
-        f"تا {_duration_fa(RIFT_SECONDS)} نمی‌تونن بغل، بوس، هدیه، دوئل جقی و کازینو با هم داشته باشن.\n\n"
+        f"تا {_duration_fa(RIFT_SECONDS)} نمی‌تونن بغل، بوس، هدیه، دوئل درسی و کازینو با هم داشته باشن.\n\n"
         f"{ce('energy', 1, '⚡')} {_fmt_en(RIFT_ENERGY_COST)} انرژی از هر دو کم شد\n\n"
         f"{_bar_line(user.id, user.full_name, s_en)}\n{_bar_line(target.id, target.full_name, t_en)}\n\n"
         f"برای آشتی ریپلای کن و بنویس:</b> <code>آشتی</code>",
@@ -17768,7 +17950,7 @@ BOSSES = [   # file = ویدیوی انیمیشنی یا عکس غول (کنار
     {"file": "boss_bloodmoon.jpg", "name": "ارباب ماه خونین",        "hp": 8_800, "pool": 4_800_000},
     {"file": "boss_dragon.jpg",    "name": "اژدهای سه‌سر",            "hp": 10_000, "pool": 5_500_000},   # آخرین باس
 ]
-# نوار جون غول از ست‌های نوار دستگاه جق ساخته میشه؛ ست قرمز خواستی این خط رو عوض کن
+# نوار جون غول از ست‌های نوار پروفیت ساخته میشه؛ ست قرمز خواستی این خط رو عوض کن
 BAR_SETS["boss"] = BAR_SETS["jm"]
 BAR_CAP_KEY["boss"] = "boss"
 BOSS_BAR_CELLS = 8
@@ -18094,6 +18276,7 @@ def main():
     app.add_handler(MessageHandler(filters.Dice.SLOT_MACHINE & filters.ChatType.GROUPS, slot_dice_msg))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.TEXT & ~filters.COMMAND, jagsal_nontext))
     app.add_handler(CallbackQueryHandler(duel_answer, pattern=r"^du:(ok|no):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(dq_answer, pattern=r"^dq:\d+:\d+:\w+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
     app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\d+)$"))
     app.add_handler(CallbackQueryHandler(purchase_review_cb, pattern=r"^bp:(ok|no):\d+$"))
@@ -18131,6 +18314,10 @@ def main():
     app.add_handler(CallbackQueryHandler(set_jobs_pick, pattern=r"^sj:[mf]$"))
     app.add_handler(CallbackQueryHandler(jobs_reset_pick, pattern=r"^sr:[mfa]$"))
     app.add_handler(CommandHandler("myid", my_id, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("eid", emoji_ids, filters=filters.ChatType.PRIVATE))
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Entity("custom_emoji") | filters.CaptionEntity("custom_emoji")),
+        emoji_ids_auto), group=-1)
     app.add_handler(CommandHandler("cardcheck", card_check, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("setphoto", photo_help, filters=filters.ChatType.PRIVATE))
     app.add_handler(
