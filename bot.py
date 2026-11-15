@@ -10039,26 +10039,57 @@ EDU_SUBJ = {   # کلید: (اسم، آیدی ایموجی پرمیوم، ایم
     "math":    ("ریاضی و هوش", "5366380461746563803", "🧮"),
     "sci":     ("علم و دانش", "5422440204550027756", "🔬"),
 }
-EDU_WRONG_PRAISE = [
-    "این سؤال امروز باهات لج کرده بود؛ دفعه‌ی بعد جبرانش می‌کنی! 😅",
-    "جواب از دستت در رفت؛ حتی نابغه‌ها هم گاهی سوتی می‌دن! 🤓",
-    "این یکی رو استاد هم سخت می‌گرفت؛ ادامه بده، هنوز بازی تموم نشده! ⚡",
-    "یه لغزش کوچیک بود؛ مغزت هنوز تو حالت توربوئه! 🧠",
+EDU_WRONG_PRAISE = [   # بدون ایموجی و بدون لو دادن جواب
+    "نشد. استاد یه نگاه به تخته انداخت و گفت: دفعه‌ی بعد",
+    "این یکی از دستت در رفت. استاد فقط لبخند زد و رفت سراغ سوال بعدی",
+    "جواب درست نبود. استاد عینکش رو جا‌به‌جا کرد و گفت: هنوز وقت هست",
+    "نه، اینم نبود. تو کلاس یه نفر زیر لب خندید و استاد ساکتش کرد",
+    "اشتباه بود، ولی استاد گفت اشتباه هم جزو درس خوندنه",
+    "این سوال امروز باهات لج کرده بود. دفعه‌ی بعد جبرانش می‌کنی",
+    "جواب غلط بود. استاد قلمش رو گذاشت زمین و گفت: بیشتر بخون",
+    "نشد که بشه. ولی تو کلاس هنوز کسی از تو جلوتر نیست",
 ]
-
-
 EDU_PRAISE = [
-    "مغزت داره دود می‌کنه، آفرین! 🧠🔥",
-    "استاد دانشگاه هم جلوت کم میاره! 🎓",
-    "انیشتین از اون بالا داره برات دست می‌زنه 👏",
-    "اینو که حتی گوگل هم باید دو بار فکر کنه! 😎",
-    "نابغه‌ی گروه یعنی تو! 💎",
-    "ای جانم، این شد جواب! کتابخونه کنارت کم میاره 📚",
-    "هوشت تو سطح پروفسوریه، بی‌شوخی! 🏆",
-    "سوال رو خورد کردی، اصلاً انگار نه انگار سخت بود 💪",
-    "دمت گرم! یه واحد دیگه هم رفت تو حسابت ✨",
-    "اینجوری بری یه روزی رئیس دانشگاه میشی 😏",
+    "درست گفتی. استاد یه لحظه مکث کرد و بعد سر تکون داد",
+    "جواب درست بود. استاد از بالای عینکش نگاهت کرد و لبخند زد",
+    "دقیقاً همین بود. کلاس یه لحظه ساکت شد و بعد همه برات دست زدن",
+    "درسته. استاد تو دفترش یه ستاره کنار اسمت گذاشت",
+    "عالی بود. استاد گفت از این شاگردا کم دارم",
+    "درست زدی. کسی ته کلاس زیر لب گفت: چطور بلد بود؟",
+    "این جواب رو حتی استاد هم منتظرش نبود",
+    "جواب درست بود. استاد تخته رو پاک کرد و گفت: بریم سراغ سخت‌تر",
+    "همین بود. استاد گفت امروز بهترین جواب کلاس مال تو بود",
+    "درسته. استاد خودکارش رو برداشت و نمره‌ات رو یادداشت کرد",
 ]
+EDU_OPEN_LINES = [
+    "رفتی سراغِ کتاب‌ها و تا خودِ صبح خوندی",
+    "استاد وارد کلاس شد و همه ساکت شدن",
+    "کلاس شلوغه، ولی تو تمرکزت رو جمع کردی",
+    "استاد تخته رو پاک کرد و یه سوال نوشت",
+    "قلم رو برداشتی و نفس عمیق کشیدی",
+    "امروز استاد حال امتحان گرفتن داره",
+    "جزوه‌ها رو ورق زدی و آماده‌ی جواب دادی",
+    "همه نگاه‌ها به سمت توئه",
+]
+EDU_RESULT_EID = "5251343946021362924"   # ایموجی پرمیوم سرِ پیام نتیجه
+
+
+def _edu_diff(units: int) -> str:
+    return "آسان" if units <= 2 else ("متوسط" if units == 3 else ("سخت" if units == 4 else "خیلی سخت"))
+
+
+def _edu_progress(row, units: int):
+    """(اسم شغل بعدی، واحد فعلی، هدف یا None، متن باقی‌مانده بدون ایموجی)"""
+    jobs = JOBS.get(row["gender"], [])
+    ji = _jlvl(row)
+    if ji >= len(jobs):
+        return "شغل بعدی", units, None, "همه‌ی شغل‌ها رو گرفتی"
+    name = jobs[ji][0]
+    need = JOB_DEGREE_NEED[ji] if ji < len(JOB_DEGREE_NEED) else 0
+    if need <= 0 or _edeg(row) >= need:
+        return name, units, None, f"برای شغل «{name}» واحد اضافه‌ای لازم نیست؛ مدرک لازم رو داری"
+    target = EDU_DEGREES[need - 1][1]
+    return name, units, target, f"{max(0, target - units):,} واحد تا «{name}»"
 
 
 def _edu_cd(row) -> float:
@@ -10333,9 +10364,10 @@ async def show_lessons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text(B(_lesson_text(row)), parse_mode="HTML", reply_markup=_lesson_kb(user.id), reply_parameters=rp)
 
 
-async def _edu_edit(q, text: str, kb=None):
+async def _edu_edit(q, text: str, kb=None, bold: bool = True):
     """پیام فعلی رو ادیت می‌کنه (متن معمولی ← بدون ایموجی پرمیوم ← پیام Rich)؛ فقط اگه همه شکست خورد پیام جدید میده."""
-    for t_ in (B(text), _strip_te(B(text))):
+    _W = B if bold else (lambda x: x)
+    for t_ in (_W(text), _strip_te(_W(text))):
         try:
             await q.edit_message_text(t_, parse_mode="HTML", reply_markup=kb)
             return
@@ -10353,7 +10385,7 @@ async def _edu_edit(q, text: str, kb=None):
         if "not modified" in str(e).lower():
             return
     try:
-        await q.message.reply_text(B(text), parse_mode="HTML", reply_markup=kb)
+        await q.message.reply_text(_W(text), parse_mode="HTML", reply_markup=kb)
     except Exception:
         log.warning("edu edit failed", exc_info=True)
 
@@ -10405,7 +10437,17 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = InlineKeyboardMarkup([_ob[i:i + 2] for i in range(0, len(_ob), 2)])
         await q.answer()
         label = _subj_label(key)
-        await _edu_edit(q, f"{_edu_emoji(EDU_STUDY_EMOJI, '📚')} {label}\n\n<b>{html.escape(question)}</b>", kb)
+        _cur = _eunits(row)
+        _jn, _c, _tg_, _rem = _edu_progress(row, _cur)
+        if _tg_:
+            _pct = max(0.0, min(100.0, _c / max(1, _tg_) * 100)); _cnt = f"{_c:,}/{_tg_:,}"
+        else:
+            _pct = 100.0; _cnt = f"{_c:,}"
+        await _edu_edit(
+            q,
+            f"{label} · {_edu_diff(units)} · {units} واحد\n"
+            f"{_edu_emoji(EDU_UNIT_EMOJI, '💠')} واحدها\n{_panel_bar('edu', '🟪', '⬜', _pct)}\n{_cnt}\n"
+            f"<i>{random.choice(EDU_OPEN_LINES)}</i>\n\n<b>{html.escape(question)}</b>", kb, bold=False)
     elif act == "ans":
         try:
             key, qi, oi = p[3], int(p[4]), int(p[5])
@@ -10424,19 +10466,21 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("این سوال دیگه معتبر نیست.", show_alert=True); return
         await q.answer()
         left = max(0, EDU_COOLDOWN - (time.time() - float(row["edu_last"] or now)))
-        if correct:
-            head = f"🎉 <b>درست بود!</b>\n✨ <i>{random.choice(EDU_PRAISE)}</i>"
-        else:
-            head = f"💥 <b>این بار نشد!</b>\n🫶 <i>{random.choice(EDU_WRONG_PRAISE)}</i>\n\n✔️ جواب درست: <b>{html.escape(str(options[right]))}</b>"
+        _lead = f'<tg-emoji emoji-id="{EDU_RESULT_EID}">⭐</tg-emoji>'
+        head = f"{_lead} <b>{random.choice(EDU_PRAISE if correct else EDU_WRONG_PRAISE)}</b>"
         _r2 = dict(row); _r2["edu_units"] = new_units
-        next_job, units_left = _units_left_for_next_job(_r2, new_units)
+        _jn, _c, _tg_, _rem = _edu_progress(_r2, int(new_units))
+        if _tg_:
+            _pct = max(0.0, min(100.0, _c / max(1, _tg_) * 100)); _cnt = f"{_c:,} از {_tg_:,}"
+        else:
+            _pct = 100.0; _cnt = f"{_c:,}"
         result = (
             f"{head}\n\n"
-            f"{_edu_emoji(EDU_UNIT_EMOJI, '💠')} واحد دریافتی: <b>+{gain}</b>\n\n"
-            f"💼 واحد باقی‌مانده تا شغل بعدی «{html.escape(next_job)}»: <b>{units_left}</b>\n"
-            f"{_edu_emoji(EDU_STUDY_EMOJI, '⏳')} کلاس بعدی: <b>{_duration_fa(left)}</b>"
+            f"{_edu_emoji(EDU_UNIT_EMOJI, '💠')} <b>+{gain} واحد</b> · {_cnt}\n"
+            f"{_panel_bar('edu', '🟪', '⬜', _pct)}\n\n"
+            f"{_rem} · کلاس بعدی {_duration_fa(left)} دیگه"
         )
-        await _edu_edit(q, result)
+        await _edu_edit(q, result, bold=False)
     elif act == "deg":
         msg_alert = None
         res = None
