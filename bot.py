@@ -222,6 +222,7 @@ ADMIN_PERMS = {
     "stats": "📊 آمار",
     "broadcast": "📢 پیام همگانی",
     "giveaway": "🎁 قرعه‌کشی",
+    "quiz_add": "❓ طرح سوال درسی",
 }
 SUPPORT_PERMS.update(ADMIN_PERMS)
 # این دو تا رو فقط صاحب ربات می‌تونه بده؛ پشتیبانِ مدیر فقط می‌تونه ازشون بگیره
@@ -391,7 +392,7 @@ pool: asyncpg.Pool | None = None
 # ───────────────────────── دیتابیس (PostgreSQL) ─────────────────────────
 async def init_db(app: Application):
     global pool
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=20)   # قبلاً max=5 بود و با کار همزمان صف می‌خورد
     async with pool.acquire() as c:
         await c.execute(
             """CREATE TABLE IF NOT EXISTS users (
@@ -420,6 +421,13 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS edu_degree INT NOT NULL DEFAULT 0")      # ۰ بدون مدرک، ۱ دیپلم ... ۵ پروفسوری
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS edu_last DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS edu_pending TEXT NOT NULL DEFAULT ''")
+        await c.execute("CREATE TABLE IF NOT EXISTS edu_custom_q (id SERIAL PRIMARY KEY, subj TEXT NOT NULL, question TEXT NOT NULL, options TEXT NOT NULL, right_idx INT NOT NULL, units INT NOT NULL, created_by BIGINT, created_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        try:   # سوال‌هایی که پشتیبان‌ها طرح کردن میرن تو چرخه‌ی همون درس (قبل از اولین استفاده از EDU_SUBJECTS)
+            for r in await c.fetch("SELECT subj, question, options, right_idx, units FROM edu_custom_q ORDER BY id"):
+                if r["subj"] in EDU_SUBJECTS:
+                    EDU_SUBJECTS[r["subj"]][1].append((r["question"], json.loads(r["options"]), int(r["right_idx"]), int(r["units"])))
+        except Exception:
+            log.exception("custom edu questions load failed")
         # مهاجرت یک‌باره: شغل فعلی کاربرهای قبلی (که با امتیاز باز شده بود) ریست نشه.
         # سطح قدیمی = level_for(امتیاز)؛ پله‌ی آخر (۱۰) فقط با ۱۲۰۰ کار. فقط کسانی که هنوز با سیستم جدید کاری نکردن عوض میشن.
         await c.execute("CREATE TABLE IF NOT EXISTS bot_migrations (name TEXT PRIMARY KEY)")
@@ -454,6 +462,14 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_steal DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spouse_id BIGINT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_owned BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS grenades INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS atoms INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS eq_day TEXT NOT NULL DEFAULT ''")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gren_bought INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS atom_used INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS bg_owned BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS bg_active BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS bg_last DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_day TEXT NOT NULL DEFAULT ''")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_uses INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_affection DOUBLE PRECISION NOT NULL DEFAULT 0")
@@ -6412,7 +6428,7 @@ def _guide_sections() -> list:
         _gq("🎓 تحصیل و درس", "<code>تحصیل</code> جدول مدرک‌ها\n<code>درس</code> هر ۶ دقیقه و ۴۵ ثانیه یه سوال از تاریخ، ریاضی و هوش، ادبیات یا علم و دانش؛ هر جواب ۲ تا ۴ واحد داره و جواب اشتباه ۱ واحد."),
         _gq(f"{JM_CE} پروفیت", f"<code>پروفیت</code>\n۵٪ درآمد شیفت کاری (کار) و پول بوس و بغل میره تو پروفیت (ظرفیت {JM_CAP:,} تومن). با نوشتن این کلمه همه‌ش میره تو کیف پولت؛ حداقل {JM_MIN:,} تومن باید توش باشه. وقتی پر بشه پول جدید جا نمیشه، پس به موقع برداشت کن. وضعیتش تو پنل «خودم» هم دیده میشه."),
         _gq("🎖 پنل شخصی", "<code>خودم</code>\nبانک، خلاف، ماشینم، کازینو، قدرت‌ها و تنظیمات (تغییر جنسیت، راهنما، انتقال اکانت) رو از اینجا باز می‌کنی. کاراکتر و شغل و دارایی‌ت هم همین‌جا نوشته میشه."),
-        _gq(f"{POWERS_CE} قدرت‌ها", "از پنل «خودم» ← قدرت‌ها: جاسوسی، هوش و دزدی."),
+        _gq(f"{POWERS_CE} قدرت‌ها", "از پنل «خودم» ← قدرت‌ها: جاسوسی، هوش، دزدی، تجهیزات (نارنجک و بمب اتم برای باس: ریپلای روی باس + <code>جینگو نارنجک</code> / <code>جینگو بمب اتم</code>) و بادیگارد (<code>خرید بادیگارد</code>، قیمت ۱٫۴m؛ هر ۴ ساعت با <code>بادیگارد</code> جلوی یک دزدی رو می‌گیره)."),
         _gq(f"{HAND_CE} هوش", "<code>هوش</code>\n۵ سطح ارتقا داره و روی قدرت هوش اثر می‌ذاره؛ زمان کلاس طبق زمان‌بندی ثابت ۶:۴۵ است."),
         _gq(f"{SPY_CE} جاسوسی", f"<code>خرید جاسوسی</code>\nقیمت: {SPY_PRICE:,} تومن. بعدش روی پیام کاربر ریپلای کن و بنویس <code>جاسوسی</code> تا پول، بانک، شغل و فعالیت‌هاش رو ببینی. روزی {SPY_DAILY_LIMIT} بار."),
         _gq(f"{THEFT_CE} دزدی", f"روی پیام کاربر ریپلای کن و بنویس <code>دزدی</code>\nهر ۳ ساعت یه بار بین {THEFT_MIN:,} تا {THEFT_MAX:,} تومن از جیبش برمی‌داری. پولی که تو بانکه امنه؛ اگه جیبش خالی باشه فقط می‌فهمی بدبخته."),
@@ -6428,7 +6444,7 @@ def _guide_sections() -> list:
         _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code>\n<code>همسرم</code> اطلاعات همسر و میزان رابطه\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
         _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
-        _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. بیشترین امتیاز برنده‌ست و ۱۰۰ تومن + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
+        _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
         _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه و بعد از هر بازی ۱۵ ثانیه استراحت داری."),
         _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
@@ -7428,7 +7444,8 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     back_powers = [[btn("🔙 برگشت به قدرت‌ها", "primary", icon=EID_BACK, callback_data=f"sp:powers:{uid}")]]
     if action == "powers":
         rows = [[btn("جاسوسی", "primary", icon=SPY_EID, callback_data=f"sp:spy:{uid}"), btn("دزدی", "danger", icon=THEFT_EID, callback_data=f"sp:theft:{uid}")],
-                [btn("هوش", "success", icon=EID_HAND, callback_data=f"sp:hand:{uid}")]] + back
+                [btn("هوش", "success", icon=EID_HAND, callback_data=f"sp:hand:{uid}"), btn("🛡 بادیگارد", "primary", callback_data=f"sp:guard:{uid}")],
+                [btn("🧰 تجهیزات", "danger", callback_data=f"eq:home:{uid}")]] + back
         await _sp_edit_text(q, B(f"{POWERS_CE} قدرت‌ها\n\nیکی از قدرت‌هات رو انتخاب کن:"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows)); return
     if action == "spy":
         row = await get_user(uid)
@@ -7436,6 +7453,19 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         used = int(row["spy_uses"] or 0) if row["spy_day"] == _spy_day_key() else 0
         st = f"خریداری شده ✅\nامروز {used} از {SPY_DAILY_LIMIT} بار استفاده کردی." if owned else f"هنوز نخریدی ❌\nقیمت: {SPY_PRICE:,} تومن — بنویس <code>خرید جاسوسی</code>"
         text = (f"{SPY_CE} <b>جاسوسی</b>\n\n{st}\n\nروی پیام یه کاربر ریپلای کن و بنویس <code>جاسوسی</code> تا پول، بانک، شغل، وضعیت تأهل و فعالیت‌هاش رو ببینی.")
+        await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_powers)); return
+    if action == "guard":
+        row = await get_user(uid)
+        now_ = time.time()
+        if not row["bg_owned"]:
+            st = f"هنوز نخریدی ❌\nقیمت: {BG_PRICE:,} تومن — بنویس <code>خرید بادیگارد</code>"
+        elif _bg_armed(row["bg_active"], row["bg_last"], now_):
+            st = f"فعاله و مراقبته ✅ ({_duration_fa(int(float(row['bg_last']) + BG_COOLDOWN - now_) + 1)} دیگه)"
+        else:
+            left_ = float(row["bg_last"] or 0) + BG_COOLDOWN - now_
+            st = "آماده‌ست؛ بنویس <code>بادیگارد</code> ✅" if left_ <= 0 else f"استراحت می‌کنه؛ {_duration_fa(int(left_) + 1)} دیگه"
+        text = (f"{BG_EMOJI} <b>بادیگارد</b>\n\nوضعیت: {st}\n\nهر {_duration_fa(BG_COOLDOWN)} یه بار با نوشتن <code>بادیگارد</code> فعالش می‌کنی "
+                f"و جلوی یک دزدی از جیبت رو می‌گیره.")
         await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_powers)); return
     if action == "theft":
         row = await get_user(uid)
@@ -8147,6 +8177,50 @@ SPY_DAILY_LIMIT = 5
 def _spy_day_key():
     from zoneinfo import ZoneInfo
     return datetime.now(ZoneInfo("Asia/Tehran")).strftime("%Y-%m-%d")
+
+BG_PRICE = 1_400_000
+BG_COOLDOWN = 4 * 3600   # هر ۴ ساعت یک بار فعال میشه؛ همون ۴ ساعت هم حداکثر مدت سپره
+BG_EMOJI = "🛡"
+
+
+def _bg_armed(bg_active, bg_last, now=None) -> bool:
+    return bool(bg_active) and (now or time.time()) < float(bg_last or 0) + BG_COOLDOWN
+
+
+async def bodyguard_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """«خرید بادیگارد» (۱٫۴m) و «بادیگارد»: هر ۴ ساعت یک بار فعال میشه و جلوی یک دزدی رو می‌گیره."""
+    key = _word_key(text)
+    if key not in ("خریدبادیگارد", "بادیگارد"):
+        return False
+    msg, user = update.effective_message, update.effective_user
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    await upsert_user(user.id, user.full_name)
+    now = time.time()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            row = await c.fetchrow("SELECT balance, bg_owned, bg_active, bg_last FROM users WHERE user_id=$1 FOR UPDATE", user.id)
+            if key == "خریدبادیگارد":
+                if row["bg_owned"]:
+                    answer = f"{BG_EMOJI} بادیگارد رو قبلاً خریدی؛ برای فعال کردنش بنویس «بادیگارد»."
+                elif int(row["balance"] or 0) < BG_PRICE:
+                    answer = f"{BG_EMOJI} موجودی کافی نیست. قیمت بادیگارد: {BG_PRICE:,} تومان؛ موجودی جیب: {int(row['balance'] or 0):,} تومان."
+                else:
+                    await c.execute("UPDATE users SET balance=balance-$1, bg_owned=TRUE WHERE user_id=$2", BG_PRICE, user.id)
+                    answer = f"{BG_EMOJI} بادیگارد استخدام شد!\nهزینه: {BG_PRICE:,} تومان\nهر ۴ ساعت یک بار با نوشتن «بادیگارد» فعالش کن تا جلوی یک دزدی رو بگیره."
+            elif not row["bg_owned"]:
+                answer = f"{BG_EMOJI} اول باید بادیگارد بخری. قیمت: {BG_PRICE:,} تومان\nبرای خرید بنویس: خرید بادیگارد"
+            elif _bg_armed(row["bg_active"], row["bg_last"], now):
+                left = float(row["bg_last"]) + BG_COOLDOWN - now
+                answer = f"{BG_EMOJI} بادیگارد همین الان پای کاره و مراقبته! (تا {_duration_fa(int(left) + 1)} دیگه)"
+            elif now - float(row["bg_last"] or 0) < BG_COOLDOWN:
+                left = float(row["bg_last"]) + BG_COOLDOWN - now
+                answer = f"{BG_EMOJI} بادیگارد استراحت می‌کنه؛ {_duration_fa(int(left) + 1)} دیگه می‌تونی دوباره فعالش کنی."
+            else:
+                await c.execute("UPDATE users SET bg_active=TRUE, bg_last=$1 WHERE user_id=$2", now, user.id)
+                answer = f"{BG_EMOJI} بادیگارد فعال شد! تا ۴ ساعت جلوی اولین دزدی که سراغت بیاد رو می‌گیره."
+    await msg.reply_text(B(answer), parse_mode="HTML", reply_parameters=rp)
+    return True
+
 
 async def spy_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     msg, user = update.effective_message, update.effective_user
@@ -8965,6 +9039,10 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
     text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
     log.info("group text from %s: %r", user.id, msg.text)
+    if await duel_setup_text(update, context, text):   # مبلغ دوئل درسی
+        return
+    if await sports_custom_text(update, context, text):   # مبلغ دلخواه میز ورزشی
+        return
     if await ai_text(update, context, text):   # هوش مصنوعی: «هوش سوالت»
         return
     if await jagsal_group_text(update, context, text):
@@ -8978,6 +9056,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await boss_text(update, context, text):
         return
     if await spy_text(update, context, text):
+        return
+    if await bodyguard_text(update, context, text):
         return
     if _word_key(text) in ("تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks"):
         await show_tasks(update, context)
@@ -9434,7 +9514,7 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 _PM_BLOCK_WORDS = {
     "خونه", "خانه", "املاک", "دست", "هوش", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جاسوسی",
-    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس",
+    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس", "بادیگارد", "خریدبادیگارد",
     "فروشگاه", "سکس", "موشک", "کراش",
 }
 
@@ -9903,6 +9983,11 @@ EDU_SUBJECTS = {
     ]),
 }
 _EDU_SEEN: dict = {}
+EDU_TF = ["✅ درست", "❌ نادرست"]
+
+
+def _is_tf(options) -> bool:
+    return list(options) == EDU_TF
 
 
 def _m_fa(n: int) -> str:
@@ -10314,12 +10399,13 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _EDU_SEEN.clear()
         question, options, _right, units = qs[qi]
         order = list(range(len(options)))
-        random.shuffle(order)
+        if not _is_tf(options):   # درست/نادرست همیشه به همین ترتیب؛ بقیه قاطی میشن
+            random.shuffle(order)
         _ob = [btn(options[o], None, callback_data=f"ed:ans:{uid}:{key}:{qi}:{o}") for o in order]
         kb = InlineKeyboardMarkup([_ob[i:i + 2] for i in range(0, len(_ob), 2)])
         await q.answer()
         label = _subj_label(key)
-        await _edu_edit(q, f"{_edu_emoji(EDU_STUDY_EMOJI, '📚')} {label}\n\n<b>{html.escape(question)}</b>\n\n{_edu_emoji(EDU_UNIT_EMOJI, '💠')} ارزش سوال: <b>{units} واحد</b> (پاسخ اشتباه = {EDU_WRONG_UNITS} واحد)", kb)
+        await _edu_edit(q, f"{_edu_emoji(EDU_STUDY_EMOJI, '📚')} {label}\n\n<b>{html.escape(question)}</b>", kb)
     elif act == "ans":
         try:
             key, qi, oi = p[3], int(p[4]), int(p[5])
@@ -10339,14 +10425,14 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         left = max(0, EDU_COOLDOWN - (time.time() - float(row["edu_last"] or now)))
         if correct:
-            head = f"✅ <b>{random.choice(EDU_PRAISE)}</b>"
+            head = f"🎉 <b>درست بود!</b>\n✨ <i>{random.choice(EDU_PRAISE)}</i>"
         else:
-            head = f"❌ <b>{random.choice(EDU_WRONG_PRAISE)}</b>"
+            head = f"💥 <b>این بار نشد!</b>\n🫶 <i>{random.choice(EDU_WRONG_PRAISE)}</i>\n\n✔️ جواب درست: <b>{html.escape(str(options[right]))}</b>"
         _r2 = dict(row); _r2["edu_units"] = new_units
         next_job, units_left = _units_left_for_next_job(_r2, new_units)
         result = (
-            f"{head}\n"
-            f"{_edu_emoji(EDU_UNIT_EMOJI, '💠')} واحد دریافتی: <b>+{gain}</b>\n"
+            f"{head}\n\n"
+            f"{_edu_emoji(EDU_UNIT_EMOJI, '💠')} واحد دریافتی: <b>+{gain}</b>\n\n"
             f"💼 واحد باقی‌مانده تا شغل بعدی «{html.escape(next_job)}»: <b>{units_left}</b>\n"
             f"{_edu_emoji(EDU_STUDY_EMOJI, '⏳')} کلاس بعدی: <b>{_duration_fa(left)}</b>"
         )
@@ -11196,6 +11282,11 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lo, hi = (parse_pay(x) for x in JOB_PAY[idx])
     pay = random.randint(lo // 1000, hi // 1000) * 1000
     pay = int(pay * income_mult())   # ایونت درآمد
+    try:
+        if float(row["energy"]) < ENERGY_LOW:   # انرژی کم = درآمد کار کمتر (بدون هیچ پیامی)
+            pay = int(pay * WORK_LOW_MULT)
+    except Exception:
+        pass
     _sp = await special_key_active(q.from_user.id, SPECIAL_KEY)
     if _sp:
         pay *= SPECIAL_WORK_MULT                     # قدرت «شاهزاده خسته»: ۱۰۰٪ درآمد بیشتر
@@ -11296,8 +11387,9 @@ SLOT_SYMS = [
     '<tg-emoji emoji-id="5348476388062015170">🍋</tg-emoji>',
     '<tg-emoji emoji-id="5357158630091139922">7️⃣</tg-emoji>',
 ]
-GAME_EMOJI = {"dice": "🎲", "slot": "🎰"}  # ایموجی خودِ تلگرام برای sendDice
-GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "موشک کاغذی 🛩", "mines": f"مین {MINES_BOMB_CE}", "poison": "سم یا خوراکی ☠️"}
+GAME_EMOJI = {"dice": "🎲", "slot": "🎰", "darts": "🎯", "bowl": "🎳", "hoop": "🏀"}  # ایموجی خودِ تلگرام برای sendDice
+GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "موشک کاغذی 🛩", "mines": f"مین {MINES_BOMB_CE}", "poison": "سم یا خوراکی ☠️",
+           "darts": "دارت 🎯", "bowl": "بولینگ 🎳", "hoop": "بسکتبال 🏀"}
 
 
 async def send_html(bot, chat_id: int, text: str, **kw):
@@ -11440,7 +11532,8 @@ def panel_main(uid: int):
         btn("🎰 اسلات", "primary", callback_data=f"cz:g:{uid}:slot"),
         btn("مین", "primary", icon=MINES_BOMB_EID, callback_data=f"cz:g:{uid}:mines"),
     ], ([btn("🛩 موشک کاغذی", "success", callback_data=f"cz:g:{uid}:crash")] if crash_allowed(uid) else [])
-       + [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")]])
+       + [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")],
+       [btn("🏅 بازی‌های ورزشی", "success", callback_data=f"sg:m:{uid}")]])
     return text, kb
 
 
@@ -12591,6 +12684,335 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
     await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
 
 
+# ───────────────────────── بازی‌های ورزشی: دارت، بولینگ، بسکتبال (میز ۲ یا ۳ نفره) ─────────────────────────
+# کازینو ← «بازی‌های ورزشی» ← بازی ← ۲ یا ۳ نفره ← مبلغ ← ساخت میز ← بقیه می‌شینن ← با پر شدن میز ربات خودش ایموجی رو می‌ندازه
+# و نتیجه تو همون پنل اعلام میشه. بالاترین امتیاز کل پول رو می‌بره؛ تساوی بین نفرهای اول → دور اضافه (تا ۳ دور)، بعدش تقسیم مساوی.
+SG_GAMES = {"darts": ("🎯", "دارت", 6), "bowl": ("🎳", "بولینگ", 6), "hoop": ("🏀", "بسکتبال", 5)}   # ایموجی، اسم، بیشترین امتیاز
+SG_ROUNDS = 3
+
+
+def _sg_state(context) -> dict:
+    return context.application.bot_data.setdefault("sports", {})
+
+
+def _sg_label(game: str, v: int) -> str:
+    if game == "darts":
+        return "🎯 وسط هدف!" if v == 6 else ("خطا" if v == 1 else "روی هدف")
+    if game == "bowl":
+        return "🎳 استرایک!" if v == 6 else ("خطا" if v == 1 else "پین انداخت")
+    return "🏀 گل تمیز!" if v == 5 else ("گل" if v == 4 else ("گیر کرد تو حلقه" if v == 3 else "خطا"))
+
+
+def _sg_menu(uid: int):
+    rows = [[btn(f"{e} {n}", "primary", callback_data=f"sg:g:{uid}:{k}") for k, (e, n, _m) in SG_GAMES.items()],
+            [btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:m:{uid}")]]
+    return B("🏅 بازی‌های ورزشی\n\nیکی از بازی‌ها رو انتخاب کن 👇\nمیز ۲ یا ۳ نفره می‌سازی، بقیه میان می‌شینن و ربات خودش ایموجی رو می‌ندازه."), InlineKeyboardMarkup(rows)
+
+
+def _sg_game_panel(uid: int, game: str):
+    e, n, mx = SG_GAMES[game]
+    rules = (f"{e} {n}\n\nمیز ۲ نفره یا ۳ نفره می‌سازی و مبلغ ورودی رو تعیین می‌کنی. وقتی همه نشستن، ربات برای هر نفر {e} می‌ندازه "
+             f"و هر کی امتیاز بالاتر بیاره (۱ تا {mx}) کل پول رو می‌بره. اگه نفرهای اول مساوی بشن، همون‌ها دوباره می‌ندازن.")
+    kb = InlineKeyboardMarkup([
+        [btn("👥 ۲ نفره", "success", callback_data=f"sg:s:{uid}:{game}:2"), btn("👥 ۳ نفره", "success", callback_data=f"sg:s:{uid}:{game}:3")],
+        [btn("برگشت", None, icon=EID_BACK, callback_data=f"sg:m:{uid}")]])
+    return B(rules), kb
+
+
+def _sg_amounts(uid: int, game: str, size: int):
+    e, n, _m = SG_GAMES[game]
+    rows, row = [], []
+    for amt in BET_CHOICES:
+        row.append(btn(_fa_bet(amt), "primary", callback_data=f"sg:b:{uid}:{game}:{size}:{amt}"))
+        if len(row) == 3:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    rows.append([btn("✏️ مبلغ دلخواه", "success", callback_data=f"sg:c:{uid}:{game}:{size}")])
+    rows.append([btn("برگشت", None, icon=EID_BACK, callback_data=f"sg:g:{uid}:{game}")])
+    return B(f"{e} {n} — میز {size} نفره\n\nمبلغ ورودی هر نفر رو انتخاب کن (تومن):\n(یا مبلغ دلخواه رو وارد کن)"), InlineKeyboardMarkup(rows)
+
+
+def _sg_confirm(uid: int, game: str, size: int, amt: int):
+    e, n, _m = SG_GAMES[game]
+    kb = InlineKeyboardMarkup([[btn("🏗 ساخت میز", "success", callback_data=f"sg:mk:{uid}:{game}:{size}:{amt}")],
+                               [btn("برگشت", None, icon=EID_BACK, callback_data=f"sg:s:{uid}:{game}:{size}")]])
+    return B(f"{e} {n} — میز {size} نفره\n\nمبلغ ورودی هر نفر: {amt:,} تومن\nبرنده کل {amt * size:,} تومن رو می‌بره.\n\nآماده‌ای میز رو بسازی؟"), kb
+
+
+def _sg_table_text(t: dict) -> str:
+    e, n, _m = SG_GAMES[t["game"]]
+    lines = "\n".join(f"{i + 1}. {_ulink(uid, name)}" for i, (uid, name) in enumerate(t["players"]))
+    return (f"<b>{e} {n} — میز {t['size']} نفره\n\n{lines}\n\n{MONEY_CE} ورودی هر نفر: {t['bet']:,} تومن\n"
+            f"👥 ظرفیت: {len(t['players'])}/{t['size']}\nبرنده کل {t['bet'] * t['size']:,} تومن رو می‌بره\n\nمنتظر بقیه... ⏳</b>")
+
+
+def _sg_table_kb(tid: int, owner: int):
+    return InlineKeyboardMarkup([[btn("✅ می‌شینم", "success", callback_data=f"sg:j:{tid}"),
+                                  btn("❌ بستن میز", "danger", callback_data=f"sg:x:{tid}")]])
+
+
+async def _sg_edit(bot, t: dict, text: str, kb=None):
+    try:
+        await bot.edit_message_text(text, chat_id=t["chat"], message_id=t["msg"], parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            return
+        try:
+            await bot.edit_message_text(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), chat_id=t["chat"], message_id=t["msg"],
+                                        parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            log.exception("sports edit failed")
+
+
+def _sg_in_waiting(context, uid: int) -> bool:
+    return any(t["status"] == "waiting" and any(u == uid for u, _ in t["players"]) for t in _sg_state(context).values())
+
+
+async def _sg_expire(bot, context, tid: int):
+    await asyncio.sleep(TABLE_TTL)
+    t = _sg_state(context).get(tid)
+    if t and t["status"] == "waiting":
+        _sg_state(context).pop(tid, None)
+        t["status"] = "closed"
+        await _sg_edit(bot, t, "⌛ میز منقضی شد.")
+
+
+async def sports_custom_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """مبلغ دلخواه میز ورزشی (بعد از زدن «✏️ مبلغ دلخواه»)."""
+    ch = context.user_data.get("sports_custom")
+    if not ch:
+        return False
+    msg, user = update.effective_message, update.effective_user
+    if _word_key(text) == "لغو":
+        context.user_data.pop("sports_custom", None)
+        await msg.reply_text(BP("لغو شد."), parse_mode="HTML")
+        return True
+    amt = parse_amount(norm_word(text).translate(_DIG))
+    if amt <= 0:
+        return False
+    game, size = ch
+    if amt < CASINO_MIN_BET or amt > CASINO_MAX_BET:
+        await msg.reply_text(BP(f"مبلغ معتبر نیست؛ حداقل {CASINO_MIN_BET:,} و حداکثر {CASINO_MAX_BET:,} تومنه. دوباره بفرست."), parse_mode="HTML")
+        return True
+    context.user_data.pop("sports_custom", None)
+    tx, kb = _sg_confirm(user.id, game, size, amt)
+    await send_html(context.bot, msg.chat_id, tx, reply_markup=kb,
+                    reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+    return True
+
+
+async def sports_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    bot = context.bot
+    parts = q.data.split(":")
+    act = parts[1]
+    user = q.from_user
+    if not CASINO_OPEN:
+        await q.answer(CASINO_CLOSED_TEXT, show_alert=True); return
+    if act in ("j", "x"):
+        await _sg_table_cb(update, context, parts); return
+    try:
+        uid = int(parts[2])
+    except (IndexError, ValueError):
+        await q.answer(); return
+    if user.id != uid:
+        await q.answer("این پنل مال تو نیست؛ خودت بنویس «کازینو» 😅", show_alert=True); return
+    game = parts[3] if len(parts) > 3 else ""
+    if act != "m" and game not in SG_GAMES:
+        await q.answer(); return
+    size = int(parts[4]) if len(parts) > 4 and parts[4] in ("2", "3") else 0
+    if act == "m":
+        await q.answer(); context.user_data.pop("sports_custom", None)
+        tx, kb = _sg_menu(uid); await edit_html(q, tx, kb)
+    elif act == "g":
+        await q.answer(); context.user_data.pop("sports_custom", None)
+        tx, kb = _sg_game_panel(uid, game); await edit_html(q, tx, kb)
+    elif act == "s" and size:
+        await q.answer(); context.user_data.pop("sports_custom", None)
+        tx, kb = _sg_amounts(uid, game, size); await edit_html(q, tx, kb)
+    elif act == "c" and size:
+        await q.answer()
+        context.user_data["sports_custom"] = (game, size)
+        await edit_html(q, B("مبلغ ورودی دلخواه رو به تومان بفرست. مثال: 250000 یا ۲۵۰ هزار"),
+                        InlineKeyboardMarkup([[btn("لغو", None, callback_data=f"sg:s:{uid}:{game}:{size}")]]))
+    elif act in ("b", "mk") and size and len(parts) > 5:
+        amt = int(parts[5])
+        if amt < CASINO_MIN_BET or amt > CASINO_MAX_BET:
+            await q.answer(f"مبلغ باید بین {CASINO_MIN_BET:,} و {CASINO_MAX_BET:,} تومن باشه.", show_alert=True); return
+        if act == "b":
+            await q.answer(); tx, kb = _sg_confirm(uid, game, size, amt); await edit_html(q, tx, kb); return
+        await _sg_create(bot, context, q, user, game, size, amt)
+    else:
+        await q.answer()
+
+
+async def _sg_create(bot, context, q, user, game: str, size: int, bet: int):
+    chat_id = q.message.chat_id
+    if chat_id > 0:
+        await q.answer("بازی‌های ورزشی فقط تو گروه ممکنه.", show_alert=True); return
+    if user.id in _busy(context) or _sg_in_waiting(context, user.id):
+        await q.answer("اول کاری که دستته (بازی یا میز) رو تموم کن 😅", show_alert=True); return
+    await upsert_user(user.id, user.full_name)
+    row = await get_user(user.id)
+    if int(row["balance"] or 0) < bet:
+        await q.answer(f"دارایی‌ت کافی نیست! موجودی: {int(row['balance'] or 0):,} تومن", show_alert=True); return
+    await q.answer()
+    st = _sg_state(context)
+    tid = max(st, default=0) + 1
+    t = {"chat": chat_id, "msg": q.message.message_id, "game": game, "size": size, "bet": bet,
+         "owner": user.id, "players": [(user.id, user.full_name)], "status": "waiting", "lock": asyncio.Lock()}
+    st[tid] = t
+    await edit_html(q, _sg_table_text(t), _sg_table_kb(tid, user.id))
+    _tk = asyncio.create_task(_sg_expire(bot, context, tid))
+    _BG_TASKS.add(_tk); _tk.add_done_callback(_BG_TASKS.discard)
+
+
+async def _sg_table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list):
+    q = update.callback_query
+    bot = context.bot
+    user = q.from_user
+    try:
+        tid = int(parts[2])
+    except (IndexError, ValueError):
+        await q.answer(); return
+    t = _sg_state(context).get(tid)
+    if not t or t["status"] != "waiting" or t["msg"] != q.message.message_id:
+        await q.answer("این میز دیگه فعال نیست", show_alert=True); return
+    if parts[1] == "x":
+        if user.id != t["owner"] and user.id not in ADMIN_IDS:
+            await q.answer("فقط صاحب میز می‌تونه ببنده", show_alert=True); return
+        async with t["lock"]:
+            if t["status"] != "waiting":
+                await q.answer("این میز دیگه فعال نیست", show_alert=True); return
+            t["status"] = "closed"
+            _sg_state(context).pop(tid, None)
+        await q.answer()
+        await edit_html(q, "❌ میز بسته شد.")
+        return
+    # نشستن
+    if any(u == user.id for u, _ in t["players"]):
+        await q.answer("تو الان سر این میز نشستی 😅", show_alert=True); return
+    if user.id in _busy(context) or _sg_in_waiting(context, user.id):
+        await q.answer("اول کاری که دستته (بازی یا میز) رو تموم کن 😅", show_alert=True); return
+    for pid, _n in t["players"]:
+        if await rift_left(user.id, pid) > 0:
+            await q.answer("با یکی از نشسته‌های این میز قهری!", show_alert=True); return
+    await upsert_user(user.id, user.full_name)
+    row = await get_user(user.id)
+    if int(row["balance"] or 0) < t["bet"]:
+        await q.answer("دارایی‌ت برای این ورودی کافی نیست!", show_alert=True); return
+    full = False
+    async with t["lock"]:
+        if t["status"] != "waiting" or len(t["players"]) >= t["size"]:
+            await q.answer("این میز دیگه فعال نیست", show_alert=True); return
+        t["players"].append((user.id, user.full_name))
+        if len(t["players"]) >= t["size"]:
+            t["status"] = "playing"; full = True
+    await q.answer("نشستی! 🎉" if not full else "میز پر شد، بازی شروع میشه!")
+    if not full:
+        await edit_html(q, _sg_table_text(t), _sg_table_kb(tid, t["owner"]))
+        return
+    try:
+        await _sg_play(bot, context, tid, t)
+    finally:
+        if t["status"] != "waiting":   # اگه یه نفر به‌خاطر کمبود پول رفت، میز دوباره منتظر میمونه
+            _sg_state(context).pop(tid, None)
+
+
+async def _sg_play(bot, context, tid: int, t: dict):
+    game, bet = t["game"], t["bet"]
+    emoji, gname, _mx = SG_GAMES[game]
+    players = list(t["players"])
+    pot = bet * len(players)
+
+    class _Broke(Exception):
+        pass
+
+    try:   # ورودی از همه با هم کم میشه؛ اگه یکی نداشت چیزی کم نمیشه
+        async with pool.acquire() as c:
+            async with c.transaction():
+                for uid, _n in players:
+                    ok = await c.fetchval("UPDATE users SET balance = balance - $1::bigint WHERE user_id = $2::bigint AND balance >= $1::bigint RETURNING 1", bet, uid)
+                    if not ok:
+                        raise _Broke(str(uid))
+    except _Broke as e:
+        broke = int(str(e))
+        if broke == t["owner"]:
+            t["status"] = "closed"
+            await _sg_edit(bot, t, "❌ دارایی صاحب میز کم شده؛ میز بسته شد.")
+        else:
+            t["players"] = [p for p in players if p[0] != broke]
+            t["status"] = "waiting"
+            _sg_state(context)[tid] = t
+            await _sg_edit(bot, t, _sg_table_text(t) + "\n<b>(یکی از نفرها دارایی کافی نداشت و از میز رفت)</b>", _sg_table_kb(tid, t["owner"]))
+        return
+    except Exception:
+        log.exception("sports take failed")
+        t["status"] = "closed"
+        await _sg_edit(bot, t, "❌ خطا تو شروع بازی؛ میز بسته شد.")
+        return
+
+    busy = _busy(context)
+    for uid, _n in players:
+        busy.add(uid)
+    ids_to_delete: list[int] = []
+    try:
+        names = {uid: _ulink(uid, n) for uid, n in players}
+        head = f"<b>{emoji} {gname} — بازی شروع شد!\n\n" + " " + f" {VS_CE} ".join(names[u] for u, _ in players) + f"\n{MONEY_CE} ورودی هر نفر: {bet:,} تومن</b>"
+        await _sg_edit(bot, t, head)
+        rp = ReplyParameters(message_id=t["msg"], allow_sending_without_reply=True)
+        contenders = list(players)
+        history: list[str] = []
+        top = contenders
+        for rnd in range(1, SG_ROUNDS + 1):
+            throws: dict[int, int] = {}
+            try:
+                for uid, _n in contenders:
+                    m = await bot.send_dice(t["chat"], emoji=emoji, reply_parameters=rp)
+                    throws[uid] = m.dice.value
+                    ids_to_delete.append(m.message_id)
+            except Exception:
+                log.exception("sports dice failed, refunding")
+                for uid, _n in players:
+                    await _give(uid, bet)
+                await _sg_edit(bot, t, "❌ خطا تو انداختن؛ پول همه برگشت.")
+                return
+            await asyncio.sleep(CASINO_WAIT)
+            best = max(throws.values())
+            top = [p for p in contenders if throws[p[0]] == best]
+            line = " | ".join(f"{names[u]}: {emoji} <b>{throws[u]}</b> ({_sg_label(game, throws[u])})" for u, _n in contenders)
+            history.append(f"دور {rnd}:\n{line}" if (rnd > 1 or len(top) > 1) else line)
+            if len(top) == 1:
+                break
+            if rnd < SG_ROUNDS:
+                await _sg_edit(bot, t, f"<b>{emoji} {gname}\n\n" + "\n\n".join(history) +
+                               f"\n\n🔁 بین {' و '.join(names[u] for u, _n in top)} مساوی شد؛ دور بعد!</b>")
+                await asyncio.sleep(2)
+                contenders = top
+        if len(top) == 1:
+            win_id = top[0][0]
+            await _give(win_id, pot)
+            win_name = next(n for u, n in players if u == win_id)
+            rec_user = type("CasinoUser", (), {"id": win_id, "full_name": win_name})()
+            record_line = await update_group_record(t["chat"], game, rec_user, pot)
+            wrow = await get_user(win_id)
+            result = f"{TROPHY_CE} برنده: {names[win_id]}{win_lines(pot - bet, pot, wrow['balance'] if wrow else 0)}" + (f"\n{record_line}" if record_line else "")
+        else:
+            share = pot // len(top)
+            for i, (u, _n) in enumerate(top):
+                await _give(u, share + (pot - share * len(top) if i == 0 else 0))
+            result = f"🤝 تساوی تا آخر! کل پول بین {' و '.join(names[u] for u, _n in top)} تقسیم شد ({share:,} تومن برای هر نفر)."
+        await _sg_edit(bot, t, f"<b>{emoji} {gname} — نتیجه\n\n" + "\n\n".join(history) + f"\n\n{result}</b>")
+        for uid, n in players:
+            await task_event(bot, t["chat"], uid, "casino", name=n)
+        delete_later(bot, t["chat"], ids_to_delete)
+    finally:
+        for uid, _n in players:
+            busy.discard(uid)
+        t["status"] = "done"
+
+
 async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     """متن‌های کازینو رو تشخیص میده. True = مصرف شد."""
     msg, user = update.effective_message, update.effective_user
@@ -12710,7 +13132,8 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
 DUEL_PRIZE = 100
 DUEL_COOLDOWN = 5 * 60
 DUEL_WAIT = 5
-DQ_TIME = 40
+DQ_TIME = 15
+DUEL_MIN_BET = 100
 DQ_UNITS = 5
 DUEL_QUESTIONS = 10
 DUEL_TTL = 300
@@ -12760,6 +13183,8 @@ def _duel_release(context, frm: int, to: int):
     for cid, ent in list(chats.items()):
         if ent and ent[1] == pair:
             chats.pop(cid, None)
+            context.application.bot_data.setdefault("duel_setup", {}).pop(cid, None)
+    context.application.bot_data.setdefault("duel_cfg", {}).pop(pair, None)
     busy = _busy(context)
     busy.discard(frm); busy.discard(to)
 
@@ -12810,17 +13235,79 @@ async def duel_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _duel_release(context, user.id, target.id)
         await msg.reply_text(B(f"{HG_CE} دوئل بعدیت {_cd_text(left)} دیگه‌ست."), parse_mode="HTML")
         return
-    kb = InlineKeyboardMarkup([[
-        btn("✅ قبول", "success", callback_data=f"du:ok:{user.id}:{target.id}"),
-        btn("❌ رد", "danger", callback_data=f"du:no:{user.id}:{target.id}"),
-    ]])
     _duel_hold(context, user.id, target.id, DUEL_TTL + 30, msg.chat_id)
+    context.application.bot_data.setdefault("duel_setup", {})[msg.chat_id] = {
+        "frm": user.id, "to": target.id, "frm_name": user.full_name, "to_name": target.full_name,
+        "stage": "amount", "ts": time.time()}
     await msg.reply_text(
-        f'<b>{SWORDS_CE} دوئل درسیِ ۱۰ سؤالی!\n\n{_ulink(user.id, user.full_name)} {_ulink(target.id, target.full_name)} رو به رقابت دعوت کرد.\n'
-        f'هر پاسخ درست یک امتیاز داره؛ برنده ۱۰۰ تومن و ۵ واحد درسی می‌گیره. {_ulink(target.id, target.full_name)}، آماده‌ای؟</b>',
-        parse_mode="HTML", reply_markup=kb,
+        f'<b>{SWORDS_CE} دوئل درسیِ ۱۰ سؤالی!\n\n{_ulink(user.id, user.full_name)}، اول مبلغ دوئل رو بنویس '
+        f'(هر کدوم از شما همین مبلغ رو می‌ذاره؛ حداقل {DUEL_MIN_BET:,} تومن، مثلاً 500 یا 5k).\nبرای لغو بنویس «لغو».</b>',
+        parse_mode="HTML",
         reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True),
     )
+
+
+async def duel_setup_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """مرحله‌ی تعیین مبلغ دوئل: فقط از طرف دعوت‌کننده، تو همون گروه."""
+    msg, user = update.effective_message, update.effective_user
+    setup = context.application.bot_data.setdefault("duel_setup", {})
+    st = setup.get(msg.chat_id)
+    if not st or st["stage"] != "amount" or st["frm"] != user.id:
+        return False
+    if time.time() - st["ts"] > DUEL_TTL:
+        setup.pop(msg.chat_id, None)
+        _duel_release(context, st["frm"], st["to"])
+        return False
+    if _word_key(text) == "لغو":
+        setup.pop(msg.chat_id, None)
+        _duel_release(context, st["frm"], st["to"])
+        await msg.reply_text(BP("دوئل لغو شد."), parse_mode="HTML")
+        return True
+    amount = parse_amount(text)
+    if amount <= 0:
+        return False
+    if amount < DUEL_MIN_BET:
+        await msg.reply_text(BP(f"حداقل مبلغ دوئل {DUEL_MIN_BET:,} تومنه."), parse_mode="HTML"); return True
+    r1 = await get_user(st["frm"]); r2 = await get_user(st["to"])
+    if int(r1["balance"] or 0) < amount:
+        await msg.reply_text(BP(f"موجودی جیبت کافی نیست؛ یه مبلغ کمتر بنویس (موجودی: {int(r1['balance'] or 0):,} تومن)."), parse_mode="HTML"); return True
+    if not r2 or int(r2["balance"] or 0) < amount:
+        await msg.reply_text(BP("موجودی جیب حریفت برای این مبلغ کافی نیست؛ یه مبلغ کمتر بنویس."), parse_mode="HTML"); return True
+    st.update(stage="subject", amount=amount, ts=time.time())
+    kb = InlineKeyboardMarkup([[btn(EDU_SUBJ[k][0], "primary", callback_data=f"dus:{st['frm']}:{st['to']}:{k}") for k in list(EDU_SUBJECTS)[i:i + 2]]
+                               for i in range(0, len(EDU_SUBJECTS), 2)])
+    await msg.reply_text(BP(f"مبلغ دوئل: {amount:,} تومن ✅\nحالا موضوع سوال‌ها رو انتخاب کن 👇"), parse_mode="HTML", reply_markup=kb,
+                         reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+    return True
+
+
+async def duel_subject_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        _, frm, to, key = q.data.split(":")
+        frm, to = int(frm), int(to)
+    except Exception:
+        await q.answer(); return
+    if q.from_user.id != frm:
+        await q.answer("انتخاب موضوع با دعوت‌کننده‌ست 😅", show_alert=True); return
+    setup = context.application.bot_data.setdefault("duel_setup", {})
+    st = setup.get(q.message.chat_id)
+    if not st or st["stage"] != "subject" or st["frm"] != frm or st["to"] != to or key not in EDU_SUBJECTS:
+        await q.answer("این مرحله دیگه فعال نیست.", show_alert=True); return
+    setup.pop(q.message.chat_id, None)
+    amount = int(st["amount"])
+    context.application.bot_data.setdefault("duel_cfg", {})[(frm, to)] = {"amount": amount, "subj": key}
+    await q.answer()
+    kb = InlineKeyboardMarkup([[
+        btn("✅ قبول", "success", callback_data=f"du:ok:{frm}:{to}"),
+        btn("❌ رد", "danger", callback_data=f"du:no:{frm}:{to}"),
+    ]])
+    _duel_hold(context, frm, to, DUEL_TTL + 30, q.message.chat_id)
+    await q.edit_message_text(
+        f'<b>{SWORDS_CE} دوئل درسیِ ۱۰ سؤالی!\n\n{_ulink(frm, st["frm_name"])} {_ulink(to, st["to_name"])} رو به رقابت دعوت کرد.\n'
+        f'{EDU_SUBJ[key][2]} موضوع: {html.escape(EDU_SUBJ[key][0])}\n{MONEY_CE} مبلغ هر نفر: {amount:,} تومن\n'
+        f'برنده {amount * 2:,} تومن + {DQ_UNITS} واحد درسی می‌گیره (تساوی = پس گرفتن پول). {_ulink(to, st["to_name"])}، آماده‌ای؟</b>',
+        parse_mode="HTML", reply_markup=kb)
 
 
 async def duel_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -12843,6 +13330,12 @@ async def _duel_run(update, context, q, frm, to, act, key, done):
     if act == "no":
         await q.answer()
         await q.edit_message_text("❌ دعوت دوئل رد شد.", reply_markup=None)
+        _duel_release(context, frm, to)
+        return
+    cfg = context.application.bot_data.setdefault("duel_cfg", {}).get((frm, to))
+    if not cfg:
+        await q.answer("این دعوت دیگه معتبر نیست.", show_alert=True)
+        await q.edit_message_text("⌛ دعوت دوئل منقضی شد.", reply_markup=None)
         _duel_release(context, frm, to)
         return
     if await rift_left(frm, to) > 0:
@@ -12870,6 +13363,9 @@ async def _duel_run(update, context, q, frm, to, act, key, done):
     class _CD(Exception):
         pass
 
+    class _Poor(Exception):
+        pass
+
     try:
         async with pool.acquire() as c:
             async with c.transaction():
@@ -12881,6 +13377,18 @@ async def _duel_run(update, context, q, frm, to, act, key, done):
                     )
                     if not ok:
                         raise _CD(str(uid))
+                for uid in (frm, to):   # مبلغ شرط از هر دو کم میشه (اگه یکی نداشت، همه‌چی برمی‌گرده)
+                    ok = await c.fetchval(
+                        "UPDATE users SET balance = balance - $1::bigint WHERE user_id = $2::bigint "
+                        "AND balance >= $1::bigint RETURNING 1", int(cfg["amount"]), uid)
+                    if not ok:
+                        raise _Poor(str(uid))
+    except _Poor as e:
+        who = "تو" if int(str(e)) == to else "حریفت"
+        await q.answer(f"موجودی جیب {who} برای این مبلغ کافی نیست.", show_alert=True)
+        await q.edit_message_text(f"💸 دوئل انجام نشد؛ موجودی جیب {who} برای {int(cfg['amount']):,} تومن کافی نیست.", reply_markup=None)
+        _duel_release(context, frm, to)
+        return
     except _CD as e:
         who = "خودت" if int(str(e)) == to else "حریفت"
         await q.answer(f"هنوز وقت دوئل {who} نرسیده (هر ۵ دقیقه یه دوئل).", show_alert=True)
@@ -12897,7 +13405,7 @@ async def _duel_run(update, context, q, frm, to, act, key, done):
     busy.add(frm); busy.add(to)
     _duel_hold(context, frm, to, DUEL_TTL + DQ_TIME * DUEL_QUESTIONS + 120, q.message.chat_id)
     fname = await pool.fetchval("SELECT name FROM users WHERE user_id = $1", frm) or "کاربر"
-    all_questions = [(sk, qi) for sk, (_, qs) in EDU_SUBJECTS.items() for qi in range(len(qs))]
+    all_questions = [(cfg["subj"], qi) for qi in range(len(EDU_SUBJECTS[cfg["subj"]][1]))]
     chosen = random.sample(all_questions, min(DUEL_QUESTIONS, len(all_questions)))
     state = {
         "a": _ulink(frm, fname),
@@ -12905,6 +13413,7 @@ async def _duel_run(update, context, q, frm, to, act, key, done):
         "frm": frm, "to": to, "index": 0, "turn": frm,
         "scores": {frm: 0, to: 0}, "questions": chosen,
         "done": False, "token": 0, "chat_id": q.message.chat_id,
+        "amount": int(cfg["amount"]), "settled": False,
     }
     st = context.application.bot_data.setdefault("dq", {})
     st[key] = state
@@ -12926,14 +13435,18 @@ async def _dq_next(context, key):
         else:
             winner = None; win_link = None
         prize_text = ""
+        _amt = int(state.get("amount") or 0)
+        state["settled"] = True
         if winner is not None:
-            await _give(winner, DUEL_PRIZE)
+            await _give(winner, _amt * 2)
             await pool.execute("UPDATE users SET edu_units = edu_units + $2 WHERE user_id = $1", winner, DQ_UNITS)
             await task_event(context.bot, key[0], winner, "duel_win")
-            prize_text = f"\n{TROPHY_CE} برنده: {win_link}\n{MONEY_CE} جایزه: {DUEL_PRIZE:,} تومن + {DQ_UNITS} واحد درسی"
+            prize_text = f"\n{TROPHY_CE} برنده: {win_link}\n{MONEY_CE} جایزه: {_amt * 2:,} تومن + {DQ_UNITS} واحد درسی"
             ending = random.choice(DUEL_LINES)
         else:
-            ending = "رقابت مساوی شد؛ هر دو عالی بودید! 🤝"
+            await _give(state["frm"], _amt)
+            await _give(state["to"], _amt)
+            ending = "رقابت مساوی شد؛ هر دو عالی بودید و پولتون برگشت! 🤝"
         try:
             await context.bot.edit_message_text(
                 f"<b>{SWORDS_CE} پایان دوئل درسی!\n\n{state['a']}: {a_score} امتیاز\n"
@@ -12954,7 +13467,8 @@ async def _dq_next(context, key):
     token = state["token"]
     turn_link = state["a"] if state["turn"] == state["frm"] else state["b"]
     _ob = [btn(options[o], None, callback_data=f"dq:{state['frm']}:{state['to']}:{idx}:{o}") for o in range(len(options))]
-    random.shuffle(_ob)
+    if not _is_tf(options):
+        random.shuffle(_ob)
     kb = InlineKeyboardMarkup([_ob[i:i + 2] for i in range(0, len(_ob), 2)])
     try:
         await context.bot.edit_message_text(
@@ -12971,7 +13485,13 @@ async def _dq_next(context, key):
 
 
 async def _dq_finish(context, k, frm, to):
-    context.application.bot_data.setdefault("dq", {}).pop(k, None)
+    _st = context.application.bot_data.setdefault("dq", {}).pop(k, None)
+    if _st and not _st.get("settled") and int(_st.get("amount") or 0) > 0:   # دوئل نصفه تموم شد: پول شرط برمی‌گرده
+        _st["settled"] = True
+        try:
+            await _give(frm, int(_st["amount"])); await _give(to, int(_st["amount"]))
+        except Exception:
+            log.exception("duel refund failed")
     context.application.bot_data.setdefault("du_done", set()).discard(k)
     _duel_release(context, frm, to)
 
@@ -15468,18 +15988,17 @@ async def is_channel_member(bot, uid: int):
     """True = عضو هر دو کانال، False = حداقل عضو یکی نیست، None = خطای بررسی."""
     if _MEMBER_OK.get(uid, 0) > time.time():
         return True
-    for channel in FORCE_CHANNELS:
-        try:
-            m = await bot.get_chat_member(channel, uid)
-        except Exception:
-            log.warning("force-join check failed for %s (ربات باید در کانال ادمین باشد)", channel, exc_info=True)
+    results = await asyncio.gather(*(bot.get_chat_member(ch, uid) for ch in FORCE_CHANNELS), return_exceptions=True)
+    for channel, m in zip(FORCE_CHANNELS, results):
+        if isinstance(m, BaseException):
+            log.warning("force-join check failed for %s (ربات باید در کانال ادمین باشد): %r", channel, m)
             return None
         st = str(getattr(m, "status", ""))
         ok = st in ("creator", "administrator", "member") or (st == "restricted" and getattr(m, "is_member", False))
         if not ok:
             _MEMBER_OK.pop(uid, None)
             return False
-    _MEMBER_OK[uid] = time.time() + 15
+    _MEMBER_OK[uid] = time.time() + 120
     if len(_MEMBER_OK) > 20000:
         _MEMBER_OK.clear()
     return True
@@ -15508,7 +16027,7 @@ def _is_bot_text_command(text: str) -> bool:
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
         "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده",
         "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلدرسی", "دوئلدرس",
-        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
+        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
     if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in EDU_WORDS or key in LESSON_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
@@ -15517,6 +16036,9 @@ def _is_bot_text_command(text: str) -> bool:
         return True
     t = norm_word(raw).translate(_DIG)
     return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
+
+
+_USERNAME_SEEN: dict = {}
 
 
 async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -15537,8 +16059,11 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.exception("group membership update failed")
         return
     user, chat = update.effective_user, update.effective_chat
-    if user and user.username and not user.is_bot:
+    if user and user.username and not user.is_bot and _USERNAME_SEEN.get(user.id) != user.username.lower():
         try:  # یوزرنیم ذخیره میشه تا پشتیبان بتونه با @یوزرنیم هم کاربر رو پیدا کنه
+            _USERNAME_SEEN[user.id] = user.username.lower()
+            if len(_USERNAME_SEEN) > 50000:
+                _USERNAME_SEEN.clear()
             await pool.execute(
                 "UPDATE users SET username = $1 WHERE user_id = $2 AND username IS DISTINCT FROM $1",
                 user.username.lower(), user.id)
@@ -15675,6 +16200,7 @@ def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
     add(("group_msgs", btn("👁 پیام‌های گروه‌ها", "primary", callback_data="ad:gm")))
     add(("giveaway", btn("🎁 قرعه‌کشی", "success", callback_data="ad:gw")),
         ("pay", btn("🎁 تنظیم قیمت گیفت‌ها", "success", callback_data="ad:giftprices")))
+    add(("quiz_add", btn("❓ طرح سوال درسی", "primary", callback_data="ad:qz")))
     if not rows:
         rows.append([btn("🔒 هنوز دسترسی‌ای برات فعال نشده", callback_data="ad:noop")])
     return InlineKeyboardMarkup(rows)
@@ -15685,7 +16211,7 @@ _ADMIN_ACT_PERM = {
     "money": "money_sub", "money_add": "money_add", "jagh": "jagh_sub", "jagh_add": "jagh_add",
     "gm": "group_msgs", "gl": "group_msgs", "gu0": "group_msgs", "gu": "group_msgs",
     "ban": "ban", "unban": "unban", "task_daily": "task_daily", "task_weekly": "task_weekly",
-    "toggle": "bot_toggle", "stats": "stats", "bc": "broadcast", "bcgo": "broadcast", "slist": "staff_list", "gw": "giveaway", "giftprices": "pay", "giftprice": "pay",
+    "toggle": "bot_toggle", "stats": "stats", "bc": "broadcast", "bcgo": "broadcast", "slist": "staff_list", "gw": "giveaway", "giftprices": "pay", "giftprice": "pay", "qz": "quiz_add",
 }
 
 
@@ -15694,6 +16220,8 @@ def _adm_state_perm(st: dict):
     act = st.get("act")
     if act == "gift_price":
         return "pay"
+    if act == "quiz_add":
+        return "quiz_add"
     if act == "task_add":
         return "task_daily" if st.get("period") == "daily" else "task_weekly"
     return {"money": "money_sub", "money_add": "money_add", "jagh": "jagh_sub", "jagh_add": "jagh_add",
@@ -16084,6 +16612,8 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _label, _kind = TASK_METRICS[metric][0], TASK_METRICS[metric][1]
         _ask = "مبلغ هدف به تومن (مثلا 5m یا 10 میلیون)" if _kind == "money" else "تعداد هدف (مثلا 10)"
         await q.edit_message_text(f"معیار: {_label}\n\n{_ask} رو بفرست.\nبرای لغو بنویس «لغو».", reply_markup=CANCEL_KB)
+    elif act == "qz":
+        await _quiz_admin_cb(q, context, parts)
     elif act == "toggle":
         BOT_ENABLED = not BOT_ENABLED
         await pool.execute(
@@ -16173,6 +16703,89 @@ async def do_broadcast(bot, admin_chat: int, st: dict, job: dict | None = None):
         log.exception("broadcast report failed")
 
 
+def _quiz_preview(st: dict) -> str:
+    opts = st["options"]
+    lines = []
+    for i, o in enumerate(opts):
+        lines.append(("✅ " if i == st["right"] else "▫️ ") + html.escape(str(o)))
+    kind = "درست / نادرست" if st["kind"] == "tf" else "چندگزینه‌ای"
+    return (f"❓ <b>پیش‌نمایش سوال</b>\n\nدرس: {html.escape(EDU_SUBJECTS[st['subj']][0])}\nنوع: {kind}\n"
+            f"واحد: <b>{st['units']}</b>\n\n<b>{html.escape(st['question'])}</b>\n\n" + "\n".join(lines))
+
+
+async def _quiz_admin_cb(q, context, parts):
+    uid = q.from_user.id
+    sub = parts[2] if len(parts) > 2 else "start"
+    if sub == "start":
+        context.user_data["adm"] = {"act": "quiz_add", "step": "subj"}
+        btns = [btn(v[0], "primary", callback_data=f"ad:qz:s:{k}") for k, v in EDU_SUBJECTS.items()]
+        rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+        rows.append([btn("❌ لغو", "danger", callback_data="ad:cancel")])
+        await q.edit_message_text("❓ طرح سوال درسی\n\nسوال تو کدوم درس باشه؟", reply_markup=InlineKeyboardMarkup(rows))
+        return
+    st = context.user_data.get("adm") or {}
+    if st.get("act") != "quiz_add":
+        await q.edit_message_text("این مرحله منقضی شده؛ دوباره از پنل شروع کن.", reply_markup=admin_menu_kb(uid)); return
+    if sub == "s" and st.get("step") == "subj" and len(parts) > 3 and parts[3] in EDU_SUBJECTS:
+        st.update(step="kind", subj=parts[3])
+        kb = InlineKeyboardMarkup([
+            [btn("✅❌ درست / نادرست", "primary", callback_data="ad:qz:k:tf"), btn("🔘 چندگزینه‌ای", "primary", callback_data="ad:qz:k:mc")],
+            [btn("❌ لغو", "danger", callback_data="ad:cancel")]])
+        await q.edit_message_text(f"درس: {EDU_SUBJECTS[parts[3]][0]}\n\nنوع سوال چیه؟", reply_markup=kb)
+    elif sub == "k" and st.get("step") == "kind" and len(parts) > 3 and parts[3] in ("tf", "mc"):
+        st.update(step="text", kind=parts[3])
+        await q.edit_message_text("متن سوال رو بفرست.\n(لغو: بنویس «لغو»)", reply_markup=CANCEL_KB)
+    elif sub == "r" and st.get("step") == "right" and len(parts) > 3 and parts[3] in ("0", "1"):   # جواب درست سوال درست/نادرست
+        st.update(options=list(EDU_TF), right=int(parts[3]), step="units")
+        await q.edit_message_text("این سوال چند واحد داشته باشه؟ (یه عدد بین ۱ تا ۵۰ بفرست)", reply_markup=CANCEL_KB)
+    elif sub == "ok" and st.get("step") == "confirm":
+        rid = await pool.fetchval(
+            "INSERT INTO edu_custom_q(subj,question,options,right_idx,units,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+            st["subj"], st["question"], json.dumps(st["options"], ensure_ascii=False), st["right"], st["units"], uid, time.time())
+        EDU_SUBJECTS[st["subj"]][1].append((st["question"], list(st["options"]), st["right"], st["units"]))
+        context.user_data.pop("adm", None)
+        await q.edit_message_text(f"✅ سوال ثبت شد (شماره {rid}) و وارد چرخه‌ی درس «{EDU_SUBJECTS[st['subj']][0]}» شد.",
+                                  reply_markup=admin_menu_kb(uid))
+    else:
+        pass
+
+
+async def _quiz_admin_input(update, context, st) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    text = (msg.text or "").strip()
+    step = st.get("step")
+    if step == "text":
+        if not (3 <= len(text) <= 300):
+            await msg.reply_text("متن سوال باید بین ۳ تا ۳۰۰ حرف باشه؛ دوباره بفرست.", reply_markup=CANCEL_KB); return True
+        st["question"] = text
+        if st["kind"] == "tf":
+            st["step"] = "right"
+            kb = InlineKeyboardMarkup([[btn("✅ درسته", "success", callback_data="ad:qz:r:0"), btn("❌ نادرسته", "danger", callback_data="ad:qz:r:1")],
+                                       [btn("❌ لغو", "danger", callback_data="ad:cancel")]])
+            await msg.reply_text("جمله‌ی بالا درسته یا نادرست؟", reply_markup=kb)
+        else:
+            st["step"] = "opts"
+            await msg.reply_text("گزینه‌ها رو بفرست؛ هر گزینه تو یک خط (۲ تا ۶ گزینه، هر کدوم تا ۴۰ حرف).\n"
+                                 "⚠️ گزینه‌ی اول باید جواب درست باشه؛ ربات موقع نمایش قاطیشون می‌کنه.", reply_markup=CANCEL_KB)
+        return True
+    if step == "opts":
+        opts = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        if not (2 <= len(opts) <= 6) or any(len(o) > 40 for o in opts) or len(set(opts)) != len(opts):
+            await msg.reply_text("۲ تا ۶ گزینه‌ی متفاوت بفرست (هر کدوم تا ۴۰ حرف، هر کدوم تو یک خط).", reply_markup=CANCEL_KB); return True
+        st.update(options=opts, right=0, step="units")
+        await msg.reply_text("این سوال چند واحد داشته باشه؟ (یه عدد بین ۱ تا ۵۰ بفرست)", reply_markup=CANCEL_KB)
+        return True
+    if step == "units":
+        digits = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+        if not digits.isdigit() or not (1 <= int(digits) <= 50):
+            await msg.reply_text("یه عدد بین ۱ تا ۵۰ بفرست.", reply_markup=CANCEL_KB); return True
+        st.update(units=int(digits), step="confirm")
+        kb = InlineKeyboardMarkup([[btn("✅ ثبت سوال", "success", callback_data="ad:qz:ok"), btn("❌ لغو", "danger", callback_data="ad:cancel")]])
+        await msg.reply_text(_quiz_preview(st), parse_mode="HTML", reply_markup=kb)
+        return True
+    return True
+
+
 async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """پیام‌های پشتیبان وقتی تو مرحله‌ی پنل هست. True یعنی مصرف شد."""
     msg, user = update.effective_message, update.effective_user
@@ -16207,6 +16820,8 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         return True
     if act == "gw":
         return await gw_admin_input(update, context, st)
+    if act == "quiz_add":
+        return await _quiz_admin_input(update, context, st)
     if act == "gmu":
         uid = None
         fo = getattr(msg, "forward_origin", None)
@@ -16367,6 +16982,7 @@ ENERGY_MAX = 100.0   # سقف انرژی
 ENERGY_CELLS = 10    # تعداد خونه‌های نوار
 ENERGY_START = 50.0  # انرژی اولیه‌ی همه
 ENERGY_LOW = 30.0    # زیر این عدد «انرژی کم» حساب میشه
+WORK_LOW_MULT = 0.75  # انرژی کم: درآمد شیفت کاری ۲۵٪ کمتر
 POINTS_LOW_MULT = 0.5  # انرژی کم: پول امتیاز نصف
 CAR_LOW_MULT = 0.75  # انرژی کم: درآمد ماشین ۲۵٪ کمتر
 ROB_LOW_MULT = 0.8   # انرژی کم: شانس موفقیت خلاف ۲۰٪ کمتر (یعنی بیشتر گیر میفته)
@@ -16421,7 +17037,7 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
     outcome, amount, left = "ok", 0, 0.0
     async with pool.acquire() as c:
         async with c.transaction():
-            rows = await c.fetch("SELECT user_id, balance, last_steal FROM users WHERE user_id = ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", [user.id, target.id])
+            rows = await c.fetch("SELECT user_id, balance, last_steal, bg_active, bg_last FROM users WHERE user_id = ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", [user.id, target.id])
             by = {int(r["user_id"]): r for r in rows}
             left = THEFT_COOLDOWN - (now - float(by[user.id]["last_steal"] or 0))
             pocket = int(by[target.id]["balance"] or 0)
@@ -16429,6 +17045,10 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
                 outcome = "cool"
             elif pocket < THEFT_MIN:
                 outcome = "poor"
+            elif _bg_armed(by[target.id]["bg_active"], by[target.id]["bg_last"], now):
+                outcome = "guard"   # بادیگارد یک دزدی رو می‌گیره و مصرف میشه؛ دزد هم کولداونش می‌خوره
+                await c.execute("UPDATE users SET bg_active=FALSE WHERE user_id=$1", target.id)
+                await c.execute("UPDATE users SET last_steal=$1 WHERE user_id=$2", now, user.id)
             else:
                 amount = min(random.randint(THEFT_MIN, THEFT_MAX), pocket)
                 await c.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", amount, target.id)
@@ -16437,6 +17057,9 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
         await msg.reply_text(B(f"{THEFT_CE} هنوز نمی‌تونی دزدی کنی؛ {_duration_fa(int(left) + 1)} دیگه صبر کن."), parse_mode="HTML", reply_parameters=rp)
     elif outcome == "poor":
         await msg.reply_text(B(f"{THEFT_CE} این بدبخت تو خط فقره💔"), parse_mode="HTML", reply_parameters=rp)
+    elif outcome == "guard":
+        await msg.reply_text(B(f"{BG_EMOJI} بادیگارد {_ulink(target.id, target.full_name)} جلوی دزدی {_ulink(user.id, user.full_name)} رو گرفت و حسابی حالشو گرفت! 💪"),
+                             parse_mode="HTML", reply_parameters=rp)
     else:
         await msg.reply_text(B(f"{THEFT_CE} {_ulink(user.id, user.full_name)} از جیب {_ulink(target.id, target.full_name)} {amount:,} تومن دزدید!"),
                              parse_mode="HTML", reply_parameters=rp)
@@ -18279,9 +18902,201 @@ async def boss_hit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return True
 
 
+# ───────── تجهیزات (قدرت‌ها ← تجهیزات): نارنجک و بمب اتم برای باس‌ها ─────────
+# ریپلای روی پیام باس + «جینگو نارنجک» / «جینگو بمب اتم». نارنجک: خرید روزانه تا ۵ تا. بمب اتم: استفاده‌ی روزانه تا ۲ بار؛ هر بار ۲۵ انرژی
+# از اعضای همون گروه که تو یک ساعت اخیر کار (شیفت) کردن کم میشه.
+GRENADE_EID = "4956691726178715098"
+ATOM_EID = "4956215710658331316"
+GRENADE_CE = f'<tg-emoji emoji-id="{GRENADE_EID}">💣</tg-emoji>'
+ATOM_CE = f'<tg-emoji emoji-id="{ATOM_EID}">☢️</tg-emoji>'
+GRENADE_PRICE = 1_000_000
+GRENADE_DAILY_BUY = 5
+GRENADE_DMG = (600, 1000)
+ATOM_PRICE = 500_000_000
+ATOM_DAILY_USE = 2
+ATOM_DMG = (3500, 4500)
+ATOM_ENERGY_HIT = 25.0
+ATOM_WORK_WINDOW = 3600
+
+
+def _eq_row_today(row):
+    day = _spy_day_key()
+    same = row["eq_day"] == day
+    return day, (int(row["gren_bought"] or 0) if same else 0), (int(row["atom_used"] or 0) if same else 0)
+
+
+def _eq_panel(row, uid: int, qty: int = 1):
+    day, bought, used = _eq_row_today(row)
+    left = max(0, GRENADE_DAILY_BUY - bought)
+    qty = max(1, min(qty, max(left, 1)))
+    text = (f"🧰 <b>تجهیزات</b>\n\n"
+            f"{GRENADE_CE} <b>نارنجک</b> — {GRENADE_PRICE:,} تومن\nموجودی: <b>{int(row['grenades'] or 0)}</b> | امروز خریدی: <b>{bought}/{GRENADE_DAILY_BUY}</b>\n\n"
+            f"{ATOM_CE} <b>بمب اتم</b> — {ATOM_PRICE:,} تومن\nموجودی: <b>{int(row['atoms'] or 0)}</b> | امروز استفاده کردی: <b>{used}/{ATOM_DAILY_USE}</b>\n"
+            f"هر بار که استفاده بشه، ۲۵ انرژی از اعضای همون گروه که تو یک ساعت اخیر کار کردن کم میشه.\n\n"
+            f"روی پیام باس ریپلای کن و بنویس <code>جینگو نارنجک</code> یا <code>جینگو بمب اتم</code>.")
+    rows = [
+        [btn("➖", "danger", callback_data=f"eq:q:{uid}:{max(1, qty - 1)}"),
+         btn(f"{qty} تا — {qty * GRENADE_PRICE:,}", None, callback_data=f"eq:noop:{uid}"),
+         btn("➕", "success", callback_data=f"eq:q:{uid}:{min(max(left, 1), qty + 1)}")],
+        [btn("خرید نارنجک", "success", icon=GRENADE_EID, callback_data=f"eq:g:{uid}:{qty}"),
+         btn("خرید بمب اتم", "danger", icon=ATOM_EID, callback_data=f"eq:a:{uid}")],
+        [btn("🔙 برگشت به قدرت‌ها", "primary", icon=EID_BACK, callback_data=f"sp:powers:{uid}")],
+    ]
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def equip_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    p = q.data.split(":")
+    try:
+        act, uid = p[1], int(p[2])
+    except (IndexError, ValueError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این پنل مال شما نیست.", show_alert=True); return
+    if act == "noop":
+        await q.answer(); return
+    await upsert_user(uid, q.from_user.full_name)
+    alert = None
+    qty = 1
+    if act == "q":
+        try:
+            qty = int(p[3])
+        except (IndexError, ValueError):
+            qty = 1
+    elif act in ("g", "a"):
+        n = 1
+        if act == "g":
+            try:
+                n = max(1, int(p[3]))
+            except (IndexError, ValueError):
+                n = 1
+        async with pool.acquire() as c:
+            async with c.transaction():
+                r = await c.fetchrow("SELECT balance, grenades, atoms, eq_day, gren_bought, atom_used FROM users WHERE user_id=$1 FOR UPDATE", uid)
+                day, bought, used = _eq_row_today(r)
+                if act == "g":
+                    left = GRENADE_DAILY_BUY - bought
+                    if left <= 0:
+                        alert = f"سقف خرید روزانه‌ی نارنجک ({GRENADE_DAILY_BUY} تا) پر شده؛ فردا دوباره بیا."
+                    elif n > left:
+                        alert = f"امروز فقط {left} نارنجک دیگه می‌تونی بخری."
+                    elif int(r["balance"] or 0) < n * GRENADE_PRICE:
+                        alert = f"موجودی جیبت کافی نیست؛ {n * GRENADE_PRICE:,} تومن لازمه."
+                    else:
+                        await c.execute("UPDATE users SET balance=balance-$1, grenades=grenades+$2, eq_day=$3, gren_bought=$4, atom_used=$5 WHERE user_id=$6",
+                                        n * GRENADE_PRICE, n, day, bought + n, used, uid)
+                        alert = f"{n} نارنجک خریدی! 💣"
+                else:
+                    if int(r["balance"] or 0) < ATOM_PRICE:
+                        alert = f"موجودی جیبت کافی نیست؛ {ATOM_PRICE:,} تومن لازمه."
+                    else:
+                        await c.execute("UPDATE users SET balance=balance-$1, atoms=atoms+1, eq_day=$2, gren_bought=$3, atom_used=$4 WHERE user_id=$5",
+                                        ATOM_PRICE, day, bought, used, uid)
+                        alert = "بمب اتم خریدی! ☢️"
+        qty = 1
+    await q.answer(alert, show_alert=bool(alert)) if alert else await q.answer()
+    row = await get_user(uid)
+    text, kb = _eq_panel(row, uid, qty)
+    try:
+        await _sp_edit_text(q, B(text), parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            log.warning("equip panel edit failed", exc_info=True)
+
+
+async def _eq_say(msg, text: str):
+    try:
+        return await msg.reply_text(B(text), parse_mode="HTML")
+    except Exception:
+        return await msg.reply_text(B(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)), parse_mode="HTML")
+
+
+async def boss_equip_use(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> bool:
+    """kind: 'g' نارنجک | 'a' بمب اتم. ریپلای روی پیام باس لازمه."""
+    msg, user = update.effective_message, update.effective_user
+    chat_id = msg.chat_id
+    f = await pool.fetchrow("SELECT * FROM boss_fights WHERE chat_id=$1", chat_id)
+    rep = msg.reply_to_message
+    if not rep or not f or f["status"] != "active" or rep.message_id != f["msg_id"]:
+        await _eq_say(msg, "برای استفاده از تجهیزات باید روی پیام باسِ فعال ریپلای کنی.")
+        return True
+    now = time.time()
+    if f["ends_at"] <= now or f["hp"] <= 0:
+        return True
+    await upsert_user(user.id, user.full_name)
+    day = _spy_day_key()
+    reason = None
+    async with pool.acquire() as c:
+        async with c.transaction():
+            r = await c.fetchrow("SELECT grenades, atoms, eq_day, gren_bought, atom_used, started FROM users WHERE user_id=$1 FOR UPDATE", user.id)
+            _d, bought, used = _eq_row_today(r)
+            if not r["started"]:
+                reason = "اول ربات رو تو پی‌وی استارت کن بعد بیا!"
+            elif kind == "g":
+                if int(r["grenades"] or 0) <= 0:
+                    reason = f"نارنجک نداری! از «خودم» ← قدرت‌ها ← تجهیزات بخرش ({GRENADE_PRICE:,} تومن)."
+                else:
+                    await c.execute("UPDATE users SET grenades=grenades-1, eq_day=$1, gren_bought=$2, atom_used=$3 WHERE user_id=$4", day, bought, used, user.id)
+            else:
+                if int(r["atoms"] or 0) <= 0:
+                    reason = f"بمب اتم نداری! از «خودم» ← قدرت‌ها ← تجهیزات بخرش ({ATOM_PRICE:,} تومن)."
+                elif used >= ATOM_DAILY_USE:
+                    reason = f"امروز {ATOM_DAILY_USE} بمب اتم استفاده کردی؛ سقف روزانه پر شده."
+                else:
+                    await c.execute("UPDATE users SET atoms=atoms-1, eq_day=$1, gren_bought=$2, atom_used=$3 WHERE user_id=$4", day, bought, used + 1, user.id)
+    if reason:
+        await _eq_say(msg, reason)
+        return True
+    lo, hi = GRENADE_DMG if kind == "g" else ATOM_DMG
+    dmg = random.randint(lo, hi)
+    new_hp = await pool.fetchval("UPDATE boss_fights SET hp = GREATEST(hp - $2::bigint, 0), last_hitter = $3::bigint WHERE chat_id=$1 AND status='active' AND hp > 0 RETURNING hp", chat_id, dmg, user.id)
+    if new_hp is None:   # باس همون لحظه مرد/فرار کرد: تجهیزات برمی‌گرده
+        if kind == "g":
+            await pool.execute("UPDATE users SET grenades=grenades+1 WHERE user_id=$1", user.id)
+        else:
+            await pool.execute("UPDATE users SET atoms=atoms+1, atom_used=GREATEST(atom_used-1,0) WHERE user_id=$1", user.id)
+        return True
+    await pool.execute("INSERT INTO boss_hits (chat_id, user_id, name, damage, hits) VALUES ($1,$2,$3,$4,1) ON CONFLICT (chat_id, user_id) DO UPDATE SET damage = boss_hits.damage + $4, hits = boss_hits.hits + 1, name = $3",
+                       chat_id, user.id, user.full_name, dmg)
+    boss_name = html.escape(BOSSES[f["idx"]]["name"])
+    uname = html.escape(user.full_name)
+    if kind == "g":
+        text = f"{GRENADE_CE} {uname} یه نارنجک به {boss_name} پرتاب کرد و {dmg:,} آسیب زد!\n❤️ جان باقی مانده باس: {int(new_hp):,}"
+    else:
+        cand = [int(r["user_id"]) for r in await pool.fetch(
+            "SELECT user_id FROM users WHERE last_shift >= $1::double precision AND user_id <> $2::bigint LIMIT 300", now - ATOM_WORK_WINDOW, user.id)]
+
+        async def _is_member(uid_: int) -> bool:   # فقط اعضای همین گروه
+            try:
+                m_ = await context.bot.get_chat_member(chat_id, uid_)
+            except Exception:
+                return False
+            st_ = str(getattr(m_, "status", ""))
+            return st_ in ("creator", "administrator", "member") or (st_ == "restricted" and getattr(m_, "is_member", False))
+
+        flags = await asyncio.gather(*(_is_member(u_) for u_ in cand)) if cand else []
+        victims = [u_ for u_, ok_ in zip(cand, flags) if ok_]
+        hit_n = 0
+        if victims:
+            hit_n = await pool.fetchval(
+                "WITH u AS (UPDATE users SET energy = GREATEST(energy - $1::double precision, 0) WHERE user_id = ANY($2::bigint[]) RETURNING 1) SELECT count(*) FROM u",
+                ATOM_ENERGY_HIT, victims)
+        text = (f"{ATOM_CE} {uname} بمب اتم رو روی {boss_name} انداخت و {dmg:,} آسیب زد!\n❤️ جان باقی مانده باس: {int(new_hp):,}\n"
+                f"⚡ انفجار {int(ATOM_ENERGY_HIT)} انرژی از {int(hit_n or 0)} نفر که تو یک ساعت اخیر کار کرده بودن کم کرد!")
+    await _eq_say(msg, text)
+    if new_hp <= 0:
+        await _boss_finish_kill(context.bot, chat_id, user.id)
+    else:
+        _BOSS_DIRTY.add(chat_id)
+    return True
+
+
 async def boss_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     key = _word_key(text)
     user, msg = update.effective_user, update.effective_message
+    if key in ("جینگونارنجک", "جینگوبمباتم", "جینگوبمباتمی"):
+        return await boss_equip_use(update, context, "g" if key == "جینگونارنجک" else "a")
     if key in BOSS_SPAWN_WORDS and not msg.reply_to_message and has_perm(user.id, "panel"):
         if not await boss_group_allowed(context.bot, msg.chat_id):
             await msg.reply_text(BP(f"غول فقط تو گروه‌های {BOSS_MIN_MEMBERS} عضو به بالا میاد؛ این گروه کمتر از اینه."), parse_mode="HTML")
@@ -18335,16 +19150,53 @@ async def boss_loop(app: Application):
             log.exception("boss loop failed")
 
 
+def _make_update_processor():
+    """آپدیت‌های کاربرهای مختلف همزمان پردازش میشن؛ آپدیت‌های یک کاربر به ترتیب (تا دو کلیک پشت‌هم با هم قاطی نشن)."""
+    try:
+        from telegram.ext import SimpleUpdateProcessor
+    except Exception:
+        return None
+
+    class _PerUserProcessor(SimpleUpdateProcessor):
+        def __init__(self, n):
+            super().__init__(n)
+            self._locks: dict = {}
+
+        async def do_process_update(self, update, coroutine):
+            u = getattr(update, "effective_user", None)
+            c = getattr(update, "effective_chat", None)
+            key = ("u", u.id) if u else (("c", c.id) if c else None)
+            if key is None:
+                await coroutine
+                return
+            lock = self._locks.get(key)
+            if lock is None:
+                if len(self._locks) > 5000:
+                    self._locks = {k: v for k, v in self._locks.items() if v.locked()}
+                lock = self._locks[key] = asyncio.Lock()
+            async with lock:
+                await coroutine
+
+    return _PerUserProcessor(128)
+
+
 def main():
-    app = (
+    _builder = (
         Application.builder()
         .token(BOT_TOKEN)
         .post_init(startup)
         .post_shutdown(close_db)
-        .build()
+        .connection_pool_size(64)
+        .pool_timeout(10)
     )
+    _proc = _make_update_processor()
+    try:
+        _builder = _builder.concurrent_updates(_proc if _proc is not None else 64)
+    except Exception:
+        log.warning("concurrent_updates not supported", exc_info=True)
+    app = _builder.build()
     app.add_handler(TypeHandler(Update, gate), group=-1)
-    app.add_handler(CallbackQueryHandler(self_panel_cb, pattern=r"^sp:(home|bank|robbery|cars|powers|spy|theft|hand|casino|settings|gender|guide|guide2|transfer|special):\d+$"))
+    app.add_handler(CallbackQueryHandler(self_panel_cb, pattern=r"^sp:(home|bank|robbery|cars|powers|spy|theft|guard|hand|casino|settings|gender|guide|guide2|transfer|special):\d+$"))
     app.add_handler(CallbackQueryHandler(special_cb, pattern=r"^spc:[vbyt]:\d+:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(hand_upgrade_cb, pattern=r"^sp:upgrade:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(account_transfer_cb, pattern=r"^at:(go|ok|no):\d+:\d+$"))
@@ -18355,11 +19207,14 @@ def main():
     app.add_handler(CallbackQueryHandler(marriage_cb, pattern=r"^mar:(yes|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(affair_cb, pattern=r"^af:(divorce|forgive):\d+:\d+:\-?\d+$"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
+    app.add_handler(CallbackQueryHandler(sports_cb, pattern=r"^sg:"))
+    app.add_handler(CallbackQueryHandler(equip_cb, pattern=r"^eq:"))
     app.add_handler(CallbackQueryHandler(sex_cb, pattern=r"^sx:"))
     app.add_handler(CallbackQueryHandler(shop_cb, pattern=r"^shp:"))
     app.add_handler(MessageHandler(filters.Dice.SLOT_MACHINE & filters.ChatType.GROUPS, slot_dice_msg))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.TEXT & ~filters.COMMAND, jagsal_nontext))
     app.add_handler(CallbackQueryHandler(duel_answer, pattern=r"^du:(ok|no):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(duel_subject_cb, pattern=r"^dus:\d+:\d+:\w+$"))
     app.add_handler(CallbackQueryHandler(dq_answer, pattern=r"^dq:\d+:\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(referral_cb, pattern=r"^rf:open$"))
     app.add_handler(CallbackQueryHandler(buy_cb, pattern=r"^bu:(home|menu|cancel|pk:\d+)$"))
