@@ -416,6 +416,26 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_shift DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS shift_seen TEXT NOT NULL DEFAULT ''")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS work_count BIGINT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS job_level INT NOT NULL DEFAULT 0")       # تعداد شغل‌های گرفته‌شده (۰ = بیکار)
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS edu_units INT NOT NULL DEFAULT 0")       # مجموع واحدهای درسی
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS edu_degree INT NOT NULL DEFAULT 0")      # ۰ بدون مدرک، ۱ دیپلم ... ۵ پروفسوری
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS edu_last DOUBLE PRECISION NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS edu_pending TEXT NOT NULL DEFAULT ''")
+        # مهاجرت یک‌باره: شغل فعلی کاربرهای قبلی (که با جق باز شده بود) ریست نشه.
+        # سطح قدیمی = level_for(جق)؛ پله‌ی آخر (۱۰) فقط با ۱۲۰۰ کار. فقط کسانی که هنوز با سیستم جدید کاری نکردن عوض میشن.
+        await c.execute("CREATE TABLE IF NOT EXISTS bot_migrations (name TEXT PRIMARY KEY)")
+        if not await c.fetchval("SELECT 1 FROM bot_migrations WHERE name='job_level_from_jaghs'"):
+            _n_jobs = len(LEVEL_THRESHOLDS)
+            await c.execute(
+                """UPDATE users SET job_level = LEAST($1::int, GREATEST(1, (
+                        SELECT COALESCE(MAX(t.ord), 1) FROM unnest($2::int[]) WITH ORDINALITY AS t(th, ord)
+                        WHERE users.jaghs >= t.th)))
+                   WHERE gender IS NOT NULL AND job_level = 0 AND edu_degree = 0 AND edu_units = 0""",
+                _n_jobs, LEVEL_THRESHOLDS)
+            await c.execute(
+                "UPDATE users SET job_level = $1::int - 1 WHERE job_level = $1::int AND work_count < 1200 AND jaghs >= $2::int AND edu_degree = 0 AND edu_units = 0",
+                _n_jobs, LEVEL_THRESHOLDS[-1])
+            await c.execute("INSERT INTO bot_migrations(name) VALUES('job_level_from_jaghs') ON CONFLICT DO NOTHING")
         await c.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS energy DOUBLE PRECISION NOT NULL DEFAULT {ENERGY_START}")
         await c.execute(f"ALTER TABLE users ALTER COLUMN energy SET DEFAULT {ENERGY_START}")
         await c.execute("CREATE TABLE IF NOT EXISTS rifts (user_lo BIGINT NOT NULL, user_hi BIGINT NOT NULL, ends_at DOUBLE PRECISION NOT NULL, PRIMARY KEY (user_lo, user_hi))")
@@ -476,6 +496,9 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS up_body INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS up_tires INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS up_glass_rims INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS trip_until DOUBLE PRECISION NOT NULL DEFAULT 0")   # شهر فرش: تا کِی نمیشه رفت
+        await c.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS bail_due BIGINT NOT NULL DEFAULT 0")                # >0 یعنی ماشین توقیفه و باید وثیقه بدی
+        await c.execute("ALTER TABLE user_house ADD COLUMN IF NOT EXISTS notified_claim DOUBLE PRECISION NOT NULL DEFAULT -1")  # آخرین دوره‌ای که خبر صندوق خونه‌ش رو دادیم
         # (مهاجرت قدیمی «jaghs = balance / 52» حذف شد: با هر ریستارت برای کسی که پولش از راه‌های دیگه اومده بود
         #  تعداد جق الکی هزارتایی می‌ساخت و تو لیدربرد می‌اومد.)
         await c.execute(
@@ -5378,12 +5401,12 @@ async def _myself_cars(uid):
 async def _g_myself(qs, user):
     uid = int(user["id"])
     r = await pool.fetchrow(
-        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count "
+        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count,u.job_level "
         "FROM users u WHERE u.user_id=$1", uid)
     if not r:
         raise _ApiError("اول ربات رو استارت کن تا پروفایلت ساخته بشه")
     gender = r["gender"] if r["gender"] in ("m", "f") else "m"
-    job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0))
+    job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0), _jlvl(r))
     lvl = JOBS[gender][job[0]][1] if job else level_for(int(r["jaghs"] or 0))
     _sk = await special_current(uid)
     photo_url = f"/api/myself/photo?l={lvl}&v={int(time.time() // 300)}" + (f"&s={_sk}" if _sk else "")
@@ -5513,13 +5536,13 @@ async def _g_myself_car_photo(qs, user):
 
 async def _g_myself_photo(qs, user):
     uid=int(user["id"])
-    r=await pool.fetchrow("SELECT gender,jaghs,work_count,balance,bank_balance FROM users WHERE user_id=$1",uid)
+    r=await pool.fetchrow("SELECT gender,jaghs,work_count,job_level,balance,bank_balance FROM users WHERE user_id=$1",uid)
     if not r: return 404,"text/plain",b"not found",{}
     gender=r["gender"] if r["gender"] in ("m","f") else "m"
     _sk=await special_current(uid)
     if _sk in SPECIALS:   # کاراکتر ویژه جای عکس کاراکتر رو می‌گیره
         return 200,"image/jpeg",_special_img(_sk,gender),{"Cache-Control":"private, max-age=300"}
-    job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0))
+    job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0),_jlvl(r))
     lvl=JOBS[gender][job[0]][1] if job else level_for(int(r["jaghs"] or 0))
     data,typ=b"",None
     fid=CHAR_PHOTOS.get((gender,lvl))
@@ -6261,6 +6284,7 @@ async def startup(app: Application):
         app.bot_data["jagsal_expiry_task"] = asyncio.create_task(jagsal_expiry_loop())
         await boss_init_db()
         app.bot_data["boss_task"] = asyncio.create_task(boss_loop(app))
+        app.bot_data["house_notify_task"] = asyncio.create_task(house_notify_loop(app))
         try:
             app.bot_data["web"] = await start_webapp()
         except Exception:
@@ -7195,11 +7219,11 @@ async def self_panel_text(uid: int, name: str = "") -> str:
     g = row["gender"]
     lvl_pct = 0.0
     if g in JOBS:
-        job = current_job(g, jaghs, work_count)
+        job = current_job(g, jaghs, work_count, _jlvl(row))
         lvl = JOBS[g][job[0]][1] if job else level_for(jaghs)
         char_name = CHARACTERS[g][lvl - 1][0]
         job_name = job[1] if job else "بیکار"
-        lvl_pct = level_progress_pct(lvl, jaghs, work_count)
+        lvl_pct = min(100.0, _jlvl(row) / len(JOBS[g]) * 100)   # پیشرفت = چند شغل از ۱۰ تا رو گرفته
         sk = await special_current(uid)
         if sk in SPECIALS:   # کاراکتر ویژه‌ی فعال (مثل محبوبیت) جای اسم کاراکتر میاد
             char_name = SPECIALS[sk]["name"]
@@ -7522,11 +7546,12 @@ async def _do_account_transfer(src: int, dst: int) -> str | None:
             if await conn.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM user_house WHERE user_id=$1)", dst):
                 return "اکانت مقصد دیگه خالی نیست."
             await conn.execute(
-                "UPDATE users SET balance=$2, bank_balance=$3, jaghs=$4, hand_level=$5, work_count=$6, gender=COALESCE($7, gender) WHERE user_id=$1",
+                "UPDATE users SET balance=$2, bank_balance=$3, jaghs=$4, hand_level=$5, work_count=$6, gender=COALESCE($7, gender), job_level=$8, edu_units=$9, edu_degree=$10 WHERE user_id=$1",
                 dst, int(s_row["balance"] or 0), int(s_row["bank_balance"] or 0), int(s_row["jaghs"] or 0),
                 int(s_row["hand_level"] or 0), int(s_row["work_count"] or 0), s_row["gender"],
+                int(s_row["job_level"] or 0), int(s_row["edu_units"] or 0), int(s_row["edu_degree"] or 0),
             )
-            await conn.execute("UPDATE users SET balance=0, bank_balance=0, jaghs=0, hand_level=0, work_count=0, gender=NULL WHERE user_id=$1", src)
+            await conn.execute("UPDATE users SET balance=0, bank_balance=0, jaghs=0, hand_level=0, work_count=0, gender=NULL, job_level=0, edu_units=0, edu_degree=0 WHERE user_id=$1", src)
             await conn.execute("UPDATE cars SET user_id=$2 WHERE user_id=$1", src, dst)
             await conn.execute("UPDATE user_house SET user_id=$2 WHERE user_id=$1", src, dst)
             # وضعیت خلاف (بازداشت/ردگیری/کول‌داون) هم همراه اکانت میره تا انتقال راه فرار نباشه
@@ -8144,13 +8169,13 @@ async def spy_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
             if used >= SPY_DAILY_LIMIT:
                 await msg.reply_text(B(f"سهمیه‌ی امروزت تموم شده. روزانه فقط {SPY_DAILY_LIMIT} بار جاسوسی مجازه؛ فردا دوباره شارژ می‌شه."), parse_mode="HTML"); return True
             await c.execute("UPDATE users SET spy_day=$1, spy_uses=$2 WHERE user_id=$3", day, used+1, user.id)
-            row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,energy FROM users WHERE user_id=$1", target.id)
+            row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,job_level,energy FROM users WHERE user_id=$1", target.id)
             if not row:
                 await c.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
-                row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,energy FROM users WHERE user_id=$1", target.id)
+                row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,job_level,energy FROM users WHERE user_id=$1", target.id)
             spouse = await c.fetchrow("SELECT name FROM users WHERE user_id=$1", row["spouse_id"]) if row["spouse_id"] else None
             acts = await c.fetchrow("SELECT (SELECT count(*) FROM group_msgs WHERE user_id=$1) AS messages, (SELECT count(*) FROM cars WHERE user_id=$1) AS cars, (SELECT count(*) FROM user_house WHERE user_id=$1) AS homes, (SELECT count(*) FROM robbery_state WHERE user_id=$1) AS robberies", target.id)
-    job = current_job(row["gender"], int(row["jaghs"] or 0), int(row["work_count"] or 0)) if row["gender"] in JOBS else None
+    job = current_job(row["gender"], int(row["jaghs"] or 0), int(row["work_count"] or 0), _jlvl(row)) if row["gender"] in JOBS else None
     job_name = job[1] if job else "بدون شغل"
     marital = f"متأهل با {html.escape(spouse['name'] or 'همسر') }" if spouse else "مجرد"
     activity = f"جق ثبت‌شده: {int(row['jaghs'] or 0):,}\nشیفت‌های کاری: {int(row['work_count'] or 0):,}\nپیام‌های ثبت‌شده در گروه‌ها: {int(acts['messages'] or 0):,}\nعملیات خلاف ثبت‌شده: {int(acts['robberies'] or 0):,}\nماشین‌ها: {int(acts['cars'] or 0)}\nخانه‌ها: {int(acts['homes'] or 0)}"
@@ -8690,7 +8715,7 @@ def _jobtag_for_row(row) -> str:
     try:
         g = row["gender"] if row else None
         if g in JOBS:
-            job = current_job(g, int(row["jaghs"] or 0), int(row["work_count"] or 0))
+            job = current_job(g, int(row["jaghs"] or 0), int(row["work_count"] or 0), _jlvl(row))
             if job:
                 return _jobtag_clean(job[1]) or JOBTAG_UNEMPLOYED
     except Exception:
@@ -8784,6 +8809,141 @@ def jobtag_touch(bot, chat_id: int, user_id: int):
     t.add_done_callback(_JOBTAG_TASKS.discard)
 
 
+# ───────────────────────── هوش مصنوعی (رایگان، با چند سرویس پشتیبان) ─────────────────────────
+# کاربر می‌نویسه «هوش سوالت» (یا روی یه پیام ریپلای می‌کنه و می‌نویسه «هوش ...»).
+# کلیدها از متغیرهای Railway خونده میشن: GEMINI_API_KEY (اصلی) / GROQ_API_KEY (پشتیبان) / OPENROUTER_API_KEY (پشتیبان دوم، اختیاری).
+# اگه سرویس اول سقفش پر شد یا خطا داد، خودکار میره سراغ بعدی. اگه هیچ کلیدی نباشه، قابلیت غیرفعاله.
+AI_WORDS = ("هوش", "ai")
+AI_USER_COOLDOWN = 20                                   # فاصله‌ی بین دو سؤال هر نفر (ثانیه)
+AI_USER_PER_HOUR = 8                                    # حداکثر سؤال هر نفر در ساعت
+AI_DAILY_MAX = int(os.environ.get("AI_DAILY_MAX", "800"))   # سقف کل سؤال‌های ربات در روز (برای اینکه پلن رایگان نسوزه)
+AI_MAX_Q = 600                                          # حداکثر طول سؤال
+AI_SYSTEM = ("تو یه دستیار بامزه و خودمونی تو یه گروه تلگرامی هستی. کوتاه و مفید جواب بده (حداکثر ۶ جمله). "
+             "به زبان فارسی جواب بده مگه اینکه کاربر به زبان دیگه‌ای بنویسه. فحاشی و محتوای مضر نداشته باش.")
+_AI_USER_TS: dict[int, list] = {}
+_AI_PROV_OFF: dict[str, float] = {}
+_AI_DAY = [None, 0]
+_AI_LAST_ASK: dict[int, float] = {}
+
+
+def _ai_providers() -> list:
+    out = []
+    k = os.environ.get("GEMINI_API_KEY")
+    if k:
+        out.append(("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    k, os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")))
+    k = os.environ.get("GROQ_API_KEY")
+    if k:
+        out.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
+                    k, os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")))
+    k = os.environ.get("OPENROUTER_API_KEY")
+    if k:
+        out.append(("openrouter", "https://openrouter.ai/api/v1/chat/completions",
+                    k, os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")))
+    return out
+
+
+async def _ai_post(url: str, key: str, payload: dict) -> tuple:
+    """(status_code, json یا None)"""
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    try:
+        import httpx
+    except Exception:
+        httpx = None
+    if httpx:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(url, headers=headers, json=payload)
+        try:
+            return r.status_code, r.json()
+        except Exception:
+            return r.status_code, None
+
+    def _call():
+        import urllib.request, urllib.error
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read().decode())
+            except Exception:
+                return e.code, None
+    return await asyncio.to_thread(_call)
+
+
+async def ai_answer(question: str, ref: str = "") -> str | None:
+    """جواب هوش مصنوعی؛ اگه همه‌ی سرویس‌ها شکست خوردن None برمی‌گردونه."""
+    user_msg = question if not ref else f"پیامی که کاربر روش ریپلای کرده: «{ref}»\n\nسؤال کاربر: {question}"
+    for name, url, key, model in _ai_providers():
+        if _AI_PROV_OFF.get(name, 0) > time.time():
+            continue
+        payload = {"model": model, "max_tokens": 1024, "temperature": 0.8,
+                   "messages": [{"role": "system", "content": AI_SYSTEM}, {"role": "user", "content": user_msg}]}
+        try:
+            code, data = await _ai_post(url, key, payload)
+            if code == 200 and data:
+                txt = (data["choices"][0]["message"].get("content") or "").strip()
+                if txt:
+                    return txt
+            # سقف پر شده یا خطای سرور: چند دقیقه این سرویس رو کنار می‌ذاریم
+            _AI_PROV_OFF[name] = time.time() + (120 if code == 429 else 60)
+            log.warning("ai provider %s failed: status=%s", name, code)
+        except Exception as e:
+            _AI_PROV_OFF[name] = time.time() + 60
+            log.warning("ai provider %s error: %s", name, e)
+    return None
+
+
+async def ai_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    msg = update.effective_message
+    user = update.effective_user
+    parts = text.split(None, 1)
+    if not parts or parts[0].strip(":،,").lower() not in AI_WORDS:
+        return False
+    q = parts[1].strip() if len(parts) > 1 else ""
+    ref = ""
+    if msg.reply_to_message:
+        ref = (msg.reply_to_message.text or msg.reply_to_message.caption or "").strip()[:500]
+    if len(parts) == 1 and not ref:
+        await msg.reply_text("بنویس: هوش سوالت 🤖\nیا روی یه پیام ریپلای کن و بنویس «هوش» + سوالت.")
+        return True
+    if not q:
+        q = "این پیام رو توضیح بده یا جواب بده."
+    if not _ai_providers():
+        await msg.reply_text("هوش مصنوعی هنوز تو این ربات فعال نشده.")
+        return True
+    now = time.time()
+    if now - _AI_LAST_ASK.get(user.id, 0) < AI_USER_COOLDOWN:
+        await msg.reply_text("چند ثانیه صبر کن، بعد دوباره بپرس ⏳")
+        return True
+    hist = [t for t in _AI_USER_TS.get(user.id, []) if now - t < 3600]
+    if len(hist) >= AI_USER_PER_HOUR:
+        await msg.reply_text(f"تو این یه ساعت {AI_USER_PER_HOUR} تا سؤال پرسیدی؛ کم‌کم بعداً دوباره بپرس 🙏")
+        _AI_USER_TS[user.id] = hist
+        return True
+    today = time.strftime("%Y-%m-%d")
+    if _AI_DAY[0] != today:
+        _AI_DAY[0], _AI_DAY[1] = today, 0
+    if _AI_DAY[1] >= AI_DAILY_MAX:
+        await msg.reply_text("سهمیه‌ی هوش مصنوعی امروز تموم شد، فردا برگرد 🌙")
+        return True
+    _AI_LAST_ASK[user.id] = now
+    hist.append(now)
+    _AI_USER_TS[user.id] = hist
+    _AI_DAY[1] += 1
+    try:
+        await context.bot.send_chat_action(msg.chat_id, "typing")
+    except Exception:
+        pass
+    ans = await ai_answer(q[:AI_MAX_Q], ref)
+    if not ans:
+        await msg.reply_text("الان هوش مصنوعی در دسترس نیست، یه کم بعد دوباره امتحان کن 😅")
+        return True
+    await msg.reply_text(ans[:3500])
+    return True
+
+
 async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     user = update.effective_user
@@ -8794,6 +8954,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
     text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
     log.info("group text from %s: %r", user.id, msg.text)
+    if await ai_text(update, context, text):   # هوش مصنوعی: «هوش سوالت»
+        return
     if await jagsal_group_text(update, context, text):
         return
     _tm = time.time()
@@ -8814,6 +8976,12 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if norm_word(text).replace(" ", "").lower() in JOBS_WORDS:
         await show_jobs(update, context)
+        return
+    if norm_word(text).replace(" ", "").lower() in EDU_WORDS:
+        await show_edu(update, context)
+        return
+    if norm_word(text).replace(" ", "").lower() in LESSON_WORDS:
+        await show_lessons(update, context)
         return
     if norm_word(text).replace(" ", "").lower() in SHIFT_WORDS:
         await show_shift(update, context)
@@ -9049,9 +9217,9 @@ async def set_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ───────────────────────── کاراکتر من ─────────────────────────
-def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None) -> str:
+def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None, job_level: int = 0) -> str:
     # سطح/تصویر کاراکتر با سطحی که برای شغل فعلی در جدول JOBS تعریف شده هماهنگ است.
-    job = current_job(gender, jaghs, work_count) if gender in JOBS else None
+    job = current_job(gender, jaghs, work_count, job_level) if gender in JOBS else None
     lvl = JOBS[gender][job[0]][1] if job else level_for(jaghs)
     title, tagline = CHARACTERS[gender][lvl - 1]
     if title_override:   # کاراکتر ویژه: اسمش جای اسم شغلی میاد
@@ -9066,12 +9234,9 @@ def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int 
         f"{ce('wallet', 1, '💰')} دارایی: {balance:,} تومن",
         f"💼 کارهای انجام‌شده: {work_count:,}",
     ]
-    if lvl == len(LEVEL_THRESHOLDS) - 1 and jaghs >= LEVEL_THRESHOLDS[-1] and work_count < 1200:
-        lines.append(f"💼 {1200 - work_count:,} کار دیگه تا آخرین کاراکتر")
-    elif lvl < len(LEVEL_THRESHOLDS):
-        need = max(0, LEVEL_THRESHOLDS[lvl] - jaghs)
-        nxt = html.escape(CHARACTERS[gender][lvl][0])
-        lines.append(f"{ce('me', 2, '⬆️')} {need:,} جق دیگه تا «{nxt}»")
+    _jl = max(0, min(int(job_level or 0), len(JOBS[gender]))) if gender in JOBS else 0
+    if gender in JOBS and _jl < len(JOBS[gender]):
+        lines.append(f"{ce('me', 2, '⬆️')} شغل بعدی: «{html.escape(JOBS[gender][_jl][0])}» (بنویس «شغل»)")
     else:
         lines.append(f"{ce('top', 1, '👑')} به بالاترین سطح رسیدی!")
     return B("\n".join(lines))
@@ -9231,14 +9396,14 @@ def render_card_image(gender: str, level: int, balance: int) -> BytesIO | None:
 async def send_card(bot, chat_id: int, row, reply_to: int | None = None, text: str | None = None, reply_markup=None, img_balance: int | None = None):
     """کارت کاراکتر کاربر: عکس + کپشن (اسم، سطح، موجودی). اگه یه مرحله خطا بده میره سراغ مرحله‌ی بعد، ولی تا جایی که بشه عکس همراه کپشن میاد."""
     gender = row["gender"]
-    job = current_job(gender, row["jaghs"], row["work_count"]) if row["gender"] else None
+    job = current_job(gender, row["jaghs"], row["work_count"], _jlvl(row)) if row["gender"] else None
     lvl = JOBS[gender][job[0]][1] if job else level_for(row["jaghs"])
     try:
         _sk = await special_current(int(row["user_id"]))
     except Exception:
         _sk = None
     text = text or card_text(row["name"] or "", gender, row["balance"], row["jaghs"], row["work_count"],
-                             title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
+                             job_level=_jlvl(row), title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
 
     # کپشن بدون ایموجی پرمیوم (برای وقتی که تلگرام ایموجی رو قبول نکنه)
@@ -9368,6 +9533,10 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_tasks(update, context)
     elif msg and msg.text and norm_word(msg.text) == ME_WORD:
         await show_me(update, context)
+    elif msg and msg.text and norm_word(msg.text).replace(" ", "").lower() in EDU_WORDS:
+        await show_edu(update, context)
+    elif msg and msg.text and norm_word(msg.text).replace(" ", "").lower() in LESSON_WORDS:
+        await show_lessons(update, context)
     elif msg and msg.text and norm_word(msg.text).replace(" ", "").lower() in JOBS_WORDS:
         await show_jobs(update, context)
     elif msg and msg.text and norm_word(msg.text).replace(" ", "").lower() in SHIFT_WORDS:
@@ -9676,16 +9845,478 @@ def _pad(t: str, n: int) -> str:
     return t + " " * max(n - _w(t), 0)
 
 
-def jobs_rows(gender: str, jaghs: int):
-    """[(ایموجی، اسم، حقوق، جق مانده یا None، پیدا شده؟)] + شغل بعدی."""
-    rows, nxt = [], None
+# ───────────────────────── تحصیل و شغل با مدرک ─────────────────────────
+# شغل‌ها دیگه با جق باز نمیشن: هر شغل مدرک مشخص + هزینه‌ی خرید داره. مدرک‌ها با «واحد» گرفته میشن و واحد با «درس» جمع میشه.
+EDU_DEGREES = [   # (اسم مدرک، مجموع واحد لازم، شهریه)
+    ("دیپلم", 80, 3_000_000),
+    ("لیسانس", 250, 20_000_000),
+    ("فوق لیسانس", 650, 55_000_000),
+    ("دکترا", 1390, 120_000_000),
+    ("پروفسوری", 2700, 250_000_000),
+]
+JOB_DEGREE_NEED = [0, 0, 1, 1, 2, 2, 3, 3, 4, 5]    # مدرک لازم برای هر شغل (۰ = بدون مدرک، ۱ = دیپلم، ... ۵ = پروفسوری)
+JOB_FEES = [0, 2_000_000, 5_000_000, 10_000_000, 40_000_000, 75_000_000, 100_000_000, 130_000_000, 190_000_000, 300_000_000]
+EDU_COOLDOWN = 6 * 60 + 45        # هر ۶ دقیقه و ۴۵ ثانیه یه درس
+EDU_WRONG_UNITS = 1               # جواب اشتباه = ۱ واحد
+EDU_WORDS = {"تحصیل", "تحصیلات", "مدرک", "مدارک", "دانشگاه", "edu"}
+LESSON_WORDS = {"درس", "درسخوندن", "درسخواندن", "lesson"}
+
+# هر سوال: (متن، گزینه‌ها، شماره‌ی گزینه‌ی درست، واحد)
+EDU_SUBJECTS = {
+    "history": ("📜 تاریخ", [
+        ("بنیان‌گذار شاهنشاهی هخامنشی کیست؟", ["کوروش بزرگ", "داریوش", "خشایارشا", "اردشیر"], 0, 2),
+        ("تخت جمشید در کدام استان ایران قرار دارد؟", ["فارس", "اصفهان", "خوزستان", "یزد"], 0, 2),
+        ("جنگ جهانی دوم در چه سالی شروع شد؟", ["۱۹۳۹", "۱۹۱۴", "۱۹۴۵", "۱۹۳۳"], 0, 2),
+        ("ناپلئون بناپارت در کدام نبرد شکست نهایی رو خورد؟", ["واترلو", "وردون", "استالینگراد", "هاستینگز"], 0, 2),
+        ("اولین انسانی که پا روی ماه گذاشت کیست؟", ["نیل آرمسترانگ", "یوری گاگارین", "باز آلدرین", "جان گلن"], 0, 2),
+        ("پایتخت ساسانیان کدام شهر بود؟", ["تیسفون", "شیراز", "تبریز", "مرو"], 0, 3),
+        ("کریم‌خان زند پایتختش رو کجا قرار داد؟", ["شیراز", "اصفهان", "تهران", "مشهد"], 0, 3),
+        ("جنگ چالدران بین صفویان و کدام دولت بود؟", ["عثمانی", "روسیه", "ازبک‌ها", "افغان‌ها"], 0, 3),
+        ("دیوار برلین در چه سالی فروریخت؟", ["۱۹۸۹", "۱۹۶۱", "۱۹۷۹", "۱۹۹۱"], 0, 3),
+        ("امیرکبیر صدراعظم کدام پادشاه قاجار بود؟", ["ناصرالدین‌شاه", "فتحعلی‌شاه", "محمدشاه", "مظفرالدین‌شاه"], 0, 3),
+        ("کتیبه‌ی بیستون به دستور کدام پادشاه نوشته شد؟", ["داریوش بزرگ", "کوروش", "خشایارشا", "اردشیر"], 0, 3),
+        ("جنگ‌های دوم ایران و روس با کدام معاهده تموم شد؟", ["ترکمانچای", "گلستان", "پاریس", "آخال"], 0, 4),
+        ("قسطنطنیه به دست کدام سلطان عثمانی فتح شد؟", ["سلطان محمد فاتح", "سلیمان قانونی", "سلیم اول", "بایزید"], 0, 4),
+    ]),
+    "math": ("🧮 ریاضی و هوش", [
+        ("۷ × ۸ برابر است با؟", ["۵۶", "۵۴", "۴۸", "۶۳"], 0, 2),
+        ("جذر عدد ۱۴۴ چند است؟", ["۱۲", "۱۴", "۱۶", "۱۱"], 0, 2),
+        ("عدد بعدی دنباله‌ی ۲، ۴، ۸، ۱۶ چیست؟", ["۳۲", "۲۴", "۳۰", "۲۸"], 0, 2),
+        ("مجموع زاویه‌های داخلی هر مثلث چند درجه است؟", ["۱۸۰", "۳۶۰", "۹۰", "۲۷۰"], 0, 2),
+        ("مساحت مستطیلی به طول ۸ و عرض ۵ چند است؟", ["۴۰", "۲۶", "۱۳", "۴۵"], 0, 2),
+        ("اگه x + 7 = 20 باشه، x چنده؟", ["۱۳", "۱۲", "۱۴", "۲۷"], 0, 2),
+        ("۱۵ درصد از ۲۰۰ چند است؟", ["۳۰", "۱۵", "۲۵", "۳۵"], 0, 3),
+        ("اگه ۳ تا خودکار ۹۰۰۰ تومن باشه، ۵ تا خودکار چند تومنه؟", ["۱۵۰۰۰", "۱۲۰۰۰", "۱۸۰۰۰", "۱۳۵۰۰"], 0, 3),
+        ("عدد بعدی دنباله‌ی ۱، ۱، ۲، ۳، ۵، ۸ چیست؟", ["۱۳", "۱۱", "۱۲", "۱۰"], 0, 3),
+        ("۲ به توان ۱۰ برابر است با؟", ["۱۰۲۴", "۵۱۲", "۲۰۴۸", "۱۰۰"], 0, 3),
+        ("حاصل ۳ + ۳ × ۳ چند است؟", ["۱۲", "۱۸", "۹", "۲۷"], 0, 3),
+        ("کدوم عدد اوله؟", ["۲۹", "۲۱", "۲۷", "۳۳"], 0, 3),
+        ("یک ساعت و نیم چند ثانیه است؟", ["۵۴۰۰", "۳۶۰۰", "۴۵۰۰", "۶۰۰۰"], 0, 3),
+        ("عدد بعدی دنباله‌ی ۳، ۶، ۱۱، ۱۸، ۲۷ چیست؟", ["۳۸", "۳۶", "۳۹", "۴۰"], 0, 4),
+        ("مجموع اعداد ۱ تا ۱۰۰ چند است؟", ["۵۰۵۰", "۵۰۰۰", "۵۱۰۰", "۴۹۵۰"], 0, 4),
+        ("اگه ۵ دستگاه در ۵ دقیقه ۵ تا کار انجام بدن، ۱۰۰ دستگاه ۱۰۰ تا کار رو در چند دقیقه انجام میدن؟", ["۵", "۱۰۰", "۲۰", "۱"], 0, 4),
+    ]),
+    "lit": ("📖 ادبیات", [
+        ("شاهنامه اثر کیست؟", ["فردوسی", "سعدی", "حافظ", "مولانا"], 0, 2),
+        ("گلستان و بوستان از کیست؟", ["سعدی", "حافظ", "نظامی", "عطار"], 0, 2),
+        ("مثنوی معنوی اثر کدوم شاعره؟", ["مولوی", "سنایی", "جامی", "خیام"], 0, 2),
+        ("«لسان‌الغیب» لقب کدام شاعر است؟", ["حافظ", "سعدی", "خیام", "رودکی"], 0, 2),
+        ("هر بیت شعر چند مصراع دارد؟", ["۲", "۱", "۳", "۴"], 0, 2),
+        ("رباعیات بیشتر با نام کدام شاعر شناخته می‌شود؟", ["خیام", "سعدی", "نظامی", "فردوسی"], 0, 3),
+        ("«پدر شعر فارسی» لقب کدام شاعر است؟", ["رودکی", "فردوسی", "نظامی", "انوری"], 0, 3),
+        ("خمسه‌ی معروف از کیست؟", ["نظامی گنجوی", "جامی", "سعدی", "فردوسی"], 0, 3),
+        ("نویسنده‌ی «بوف کور» کیست؟", ["صادق هدایت", "جلال آل‌احمد", "بزرگ علوی", "صادق چوبک"], 0, 3),
+        ("منطق‌الطیر اثر کیست؟", ["عطار نیشابوری", "مولوی", "سنایی", "نظامی"], 0, 3),
+        ("رمان «سووشون» نوشته‌ی کیست؟", ["سیمین دانشور", "فروغ فرخزاد", "پروین اعتصامی", "گلی ترقی"], 0, 3),
+        ("رمان «کلیدر» اثر کیست؟", ["محمود دولت‌آبادی", "صادق هدایت", "هوشنگ گلشیری", "جمال‌زاده"], 0, 4),
+        ("«تاریخ بیهقی» نوشته‌ی کیست؟", ["ابوالفضل بیهقی", "جوینی", "رشیدالدین فضل‌الله", "نظام‌الملک"], 0, 4),
+        ("«قابوسنامه» نوشته‌ی کدام نویسنده است؟", ["عنصرالمعالی کیکاووس", "نظام‌الملک", "بیهقی", "سعدی"], 0, 4),
+    ]),
+    "sci": ("🔬 علم و دانش", [
+        ("به کدام سیاره «سیاره‌ی سرخ» میگن؟", ["مریخ", "زهره", "مشتری", "عطارد"], 0, 2),
+        ("فرمول شیمیایی آب چیست؟", ["H₂O", "CO₂", "O₂", "NaCl"], 0, 2),
+        ("بزرگ‌ترین سیاره‌ی منظومه‌ی شمسی کدومه؟", ["مشتری", "زحل", "زمین", "نپتون"], 0, 2),
+        ("گیاهان برای فتوسنتز کدام گاز رو جذب می‌کنن؟", ["دی‌اکسید کربن", "اکسیژن", "نیتروژن", "هیدروژن"], 0, 2),
+        ("نظریه‌ی نسبیت از کیست؟", ["انیشتین", "نیوتن", "گالیله", "بور"], 0, 2),
+        ("دمای جوش آب در سطح دریا چند درجه‌ی سانتی‌گراد است؟", ["۱۰۰", "۹۰", "۱۲۰", "۸۰"], 0, 2),
+        ("چند قاره در جهان داریم؟", ["۷", "۵", "۶", "۸"], 0, 2),
+        ("سریع‌ترین حیوان خشکی کدومه؟", ["یوزپلنگ", "شیر", "اسب", "آهو"], 0, 3),
+        ("سرعت نور تقریباً چقدره؟", ["۳۰۰ هزار کیلومتر بر ثانیه", "۳۰ هزار کیلومتر بر ثانیه", "۳ میلیون کیلومتر بر ثانیه", "۱۵۰ هزار کیلومتر بر ثانیه"], 0, 3),
+        ("بدن انسان بالغ حدوداً چند استخوان دارد؟", ["۲۰۶", "۳۰۰", "۱۵۰", "۲۵۰"], 0, 3),
+        ("نماد شیمیایی «Au» مربوط به کدام عنصره؟", ["طلا", "نقره", "آهن", "مس"], 0, 3),
+        ("بزرگ‌ترین اندام بدن انسان کدومه؟", ["پوست", "کبد", "مغز", "ریه"], 0, 3),
+        ("بدن با نور خورشید کدام ویتامین رو می‌سازه؟", ["D", "C", "A", "B12"], 0, 3),
+        ("عدد اتمی کربن چنده؟", ["۶", "۱۲", "۸", "۱۴"], 0, 4),
+        ("سن زمین تقریباً چقدره؟", ["۴٫۵ میلیارد سال", "۴۵ میلیون سال", "۱۰۰ میلیارد سال", "۱ میلیارد سال"], 0, 4),
+        ("پنی‌سیلین رو چه کسی کشف کرد؟", ["الکساندر فلمینگ", "لویی پاستور", "ادوارد جنر", "ماری کوری"], 0, 4),
+        ("انسان چند کروموزوم دارد؟", ["۴۶", "۲۳", "۴۸", "۴۴"], 0, 4),
+    ]),
+}
+_EDU_SEEN: dict = {}
+
+
+def _m_fa(n: int) -> str:
+    """۳۰۰۰۰۰۰ ← «3m»، ۰ ← «رایگان»."""
+    n = int(n)
+    if n <= 0:
+        return "رایگان"
+    return f"{n / 1_000_000:g}m" if n >= 1_000_000 else f"{n:,}"
+
+
+def _jlvl(row) -> int:
+    try:
+        return int(row["job_level"] or 0)
+    except Exception:
+        return 0
+
+
+def _edeg(row) -> int:
+    try:
+        return max(0, min(int(row["edu_degree"] or 0), len(EDU_DEGREES)))
+    except Exception:
+        return 0
+
+
+def _eunits(row) -> int:
+    try:
+        return int(row["edu_units"] or 0)
+    except Exception:
+        return 0
+
+
+def _deg_name(d: int) -> str:
+    return EDU_DEGREES[d - 1][0] if 1 <= d <= len(EDU_DEGREES) else "بدون مدرک"
+
+
+def edu_rich_html(row) -> str:
+    deg = _edeg(row)
+    out = ["<table><tr><th>مدرک</th><th>واحد</th><th>شهریه</th><th>وضعیت</th></tr>"]
+    for i, (name, units, fee) in enumerate(EDU_DEGREES, 1):
+        st = f"{lock_open()} داری ✅" if deg >= i else f"{lock_closed()} نداری ❌"
+        out.append(f"<tr><td>🎓 {html.escape(name)}</td><td>{units:,}</td><td>{_m_fa(fee)}</td><td>{st}</td></tr>")
+    out.append("</table>")
+    return "".join(out)
+
+
+def edu_text(row) -> str:
+    deg = _edeg(row)
+    cells = [("مدرک", "واحد", "شهریه", "وضعیت")]
+    for i, (name, units, fee) in enumerate(EDU_DEGREES, 1):
+        cells.append((name, f"{units:,}", _m_fa(fee), "داری ✅" if deg >= i else "نداری ❌"))
+    w = [max(_w(r[c]) for r in cells) for c in range(4)]
+    sep = "─┼─".join("─" * w[c] for c in range(4))
+    lines = []
+    for k, r in enumerate(cells):
+        lines.append(" │ ".join(_pad(r[c], w[c]) for c in range(4)))
+        if k == 0:
+            lines.append(sep)
+    return f"🎓 <b>تحصیلات</b>\n<pre>{html.escape(chr(10).join(lines))}</pre>"
+
+
+def edu_panel(row, uid: int):
+    """(متن، کیبورد) خلاصه‌ی تحصیل با دکمه‌های درس / گرفتن مدرک / شغل."""
+    deg, units = _edeg(row), _eunits(row)
+    lines = [f"📚 واحدهای تو: <b>{units:,}</b>", f"🎓 مدرک فعلی: <b>{html.escape(_deg_name(deg))}</b>"]
+    rows = [[btn("📚 درس بخون", "primary", callback_data=f"ed:lessons:{uid}")]]
+    if deg < len(EDU_DEGREES):
+        name, need, fee = EDU_DEGREES[deg]
+        left = max(0, need - units)
+        if left > 0:
+            lines.append(f"⬆️ مدرک بعدی: <b>{html.escape(name)}</b> — {left:,} واحد دیگه (شهریه {_m_fa(fee)})")
+        else:
+            lines.append(f"✅ واحدهات برای <b>{html.escape(name)}</b> کافیه! شهریه: {_m_fa(fee)}")
+            rows.insert(0, [btn(f"🎓 گرفتن مدرک {name} · {_m_fa(fee)}", "success", callback_data=f"ed:deg:{uid}")])
+    else:
+        lines.append("👑 بالاترین مدرک رو داری!")
+    rows.append([btn("💼 شغل‌ها", "primary", callback_data=f"jb:menu:{uid}")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def jobs_rows(gender: str, row):
+    """[(ایموجی، اسم، حقوق، مدرک لازم، هزینه)]"""
+    rows = []
     for i, (name, _lvl) in enumerate(JOBS[gender]):
-        left = max(JOB_REQUIRED_JAGHS[i] - jaghs, 0)
         lo, hi = JOB_PAY[i]
-        if left and nxt is None:
-            nxt = (name, left)
-        rows.append((JOB_GLYPHS.get(name, "💼"), name, lo if lo == hi else f"{lo}-{hi}", left))
-    return rows, nxt
+        need = JOB_DEGREE_NEED[i]
+        rows.append((JOB_GLYPHS.get(name, "💼"), name, lo if lo == hi else f"{lo}-{hi}",
+                     _deg_name(need) if need else "ندارد", _m_fa(JOB_FEES[i])))
+    return rows
+
+
+def jobs_panel(row, uid: int):
+    """(متن، کیبورد) شغل فعلی + شغل بعدی با دکمه‌ی گرفتن."""
+    g = row["gender"]
+    jl, deg = _jlvl(row), _edeg(row)
+    cur = JOBS[g][jl - 1][0] if 1 <= jl <= len(JOBS[g]) else "بیکار"
+    lines = [f"💼 شغل فعلی: <b>{html.escape(cur)}</b>", f"🎓 مدرک: <b>{html.escape(_deg_name(deg))}</b>"]
+    rows = []
+    if jl < len(JOBS[g]):
+        nm, need, fee = JOBS[g][jl][0], JOB_DEGREE_NEED[jl], JOB_FEES[jl]
+        need_txt = _deg_name(need) if need else "بدون مدرک"
+        lines.append(f"⬆️ شغل بعدی: <b>{html.escape(nm)}</b>\nمدرک لازم: {need_txt} · هزینه: {_m_fa(fee)}")
+        if deg >= need:
+            rows.append([btn(f"گرفتن شغل {nm} · {_m_fa(fee)}", "success", callback_data=f"jb:take:{uid}")])
+        else:
+            lines.append("🔒 مدرکش رو نداری؛ از «تحصیل» درس بخون و مدرکش رو بگیر.")
+    else:
+        lines.append("👑 همه‌ی شغل‌ها رو داری!")
+    rows.append([btn("🎓 تحصیل و درس", "primary", callback_data=f"ed:menu:{uid}")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def jobs_rich_html(gender: str, row) -> str:
+    """جدول واقعی (Rich Message تلگرام)، شخصی برای هر کاربر: قفل باز برای شغل‌هایی که گرفته."""
+    jl = _jlvl(row)
+    out = ["<table><tr><th>شغل</th><th>حقوق</th><th>مدرک</th><th>هزینه</th><th>وضعیت</th></tr>"]
+    for i, (glyph, name, pay, need, fee) in enumerate(jobs_rows(gender, row)):
+        st = f"{lock_open()} داری" if i < jl else f"{lock_closed()}"
+        out.append(f"<tr><td>{job_glyph(gender, i, name)} {html.escape(name)}</td><td>{pay}</td><td>{need}</td><td>{fee}</td><td>{st}</td></tr>")
+    out.append("</table>")
+    return "".join(out)
+
+
+def jobs_text(gender: str, row) -> str:
+    """نسخه‌ی جایگزین: جدول مونواسپیس داخل <pre> (اگه Rich Message کار نکرد)."""
+    jl = _jlvl(row)
+    cells = [("شغل", "حقوق", "مدرک", "هزینه", "وضعیت")]
+    for i, (glyph, name, pay, need, fee) in enumerate(jobs_rows(gender, row)):
+        cells.append((name, pay, need, fee, "داری ✅" if i < jl else "🔒"))
+    w = [max(_w(r[c]) for r in cells) for c in range(5)]
+    sep = "─┼─".join("─" * w[c] for c in range(5))
+    lines = []
+    for k, r in enumerate(cells):
+        lines.append(" │ ".join(_pad(r[c], w[c]) for c in range(5)))
+        if k == 0:
+            lines.append(sep)
+    return f"{ce('me', 1, '🎖')} <b>شغل‌ها</b>\n<pre>{html.escape(chr(10).join(lines))}</pre>"
+
+
+async def _send_table(context, msg, rich_html: str, fallback_text: str, panel_text: str, kb):
+    """اول جدول واقعی تلگرام + پیام دکمه‌ها؛ اگه نشد جدول مونواسپیس + دکمه‌ها تو همون پیام."""
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    sent = False
+    try:
+        await context.bot._post("sendRichMessage", {
+            "chat_id": msg.chat_id,
+            "rich_message": {"html": rich_html},
+            "reply_parameters": rp.to_dict(),
+        })
+        sent = True
+    except Exception:
+        log.warning("sendRichMessage failed, using <pre> table", exc_info=True)
+    if sent:
+        text = panel_text
+    else:
+        text = fallback_text + "\n\n" + panel_text
+    try:
+        await msg.reply_text(B(text), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+    except Exception:
+        log.exception("table message failed, retrying without premium emojis")
+        await msg.reply_text(_strip_te(B(text)), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+
+
+async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/jobs یا نوشتن «شغل» / «شغل ها» — جدول شغل‌ها (مدرک + هزینه‌ی هر شغل) و دکمه‌ی گرفتن شغل بعدی."""
+    msg, user = update.effective_message, update.effective_user
+    await upsert_user(user.id, user.full_name)
+    row = await get_user(user.id)
+    if not row["gender"]:
+        await ask_gender(update, context)
+        return
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    panel_text, kb = jobs_panel(row, user.id)
+    # اگه پشتیبان با /setjobs جدول ساخته باشه، همون برای همه نشون داده میشه
+    custom = CUSTOM_JOBS.get(row["gender"])
+    personal = (not custom) or custom.get("job_emojis") or any(k[0] == "job" for k in EMOJI_IDS)
+    if custom and not personal:
+        try:
+            await send_custom_jobs(context.bot, custom, msg.chat_id, rp)
+            await msg.reply_text(B(panel_text), parse_mode="HTML", reply_markup=kb)
+            return
+        except Exception:
+            log.exception("custom jobs failed, falling back to default table")
+    await _send_table(context, msg, jobs_rich_html(row["gender"], row), jobs_text(row["gender"], row), panel_text, kb)
+
+
+async def show_edu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """«تحصیل» / «مدرک» — جدول مدرک‌ها (واحد، شهریه، وضعیت) + دکمه‌ی درس و گرفتن مدرک."""
+    msg, user = update.effective_message, update.effective_user
+    await upsert_user(user.id, user.full_name)
+    row = await get_user(user.id)
+    if not row["gender"]:
+        await ask_gender(update, context)
+        return
+    panel_text, kb = edu_panel(row, user.id)
+    await _send_table(context, msg, edu_rich_html(row), edu_text(row), panel_text, kb)
+
+
+def _lesson_kb(uid: int) -> InlineKeyboardMarkup:
+    rows = [[btn(label, "primary", callback_data=f"ed:subj:{uid}:{key}")] for key, (label, _qs) in EDU_SUBJECTS.items()]
+    rows.append([btn("🔙 تحصیل", "primary", callback_data=f"ed:menu:{uid}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _lesson_text(row) -> str:
+    left = EDU_COOLDOWN - (time.time() - float(row["edu_last"] or 0))
+    t = f"📚 <b>درس</b>\nموضوع درس رو انتخاب کن؛ هر سوال ۲ تا ۴ واحد داره (جواب اشتباه = {EDU_WRONG_UNITS} واحد).\n\n📚 واحدهای تو: <b>{_eunits(row):,}</b>"
+    if left > 0:
+        t += f"\n⏳ درس بعدی: <b>{_duration_fa(left)}</b> دیگه"
+    return t
+
+
+async def show_lessons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """«درس» — انتخاب موضوع درس."""
+    msg, user = update.effective_message, update.effective_user
+    await upsert_user(user.id, user.full_name)
+    row = await get_user(user.id)
+    if not row["gender"]:
+        await ask_gender(update, context)
+        return
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    await msg.reply_text(B(_lesson_text(row)), parse_mode="HTML", reply_markup=_lesson_kb(user.id), reply_parameters=rp)
+
+
+async def _edu_edit(q, text: str, kb=None):
+    try:
+        await q.edit_message_text(B(text), parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        try:
+            await q.edit_message_text(_strip_te(B(text)), parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            log.warning("edu edit failed", exc_info=True)
+
+
+async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    p = q.data.split(":")
+    try:
+        act, uid = p[1], int(p[2])
+    except (IndexError, ValueError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این پنل مال شما نیست.", show_alert=True); return
+    row = await get_user(uid)
+    if not row:
+        await q.answer(); return
+    now = time.time()
+    if act == "menu":
+        await q.answer()
+        text, kb = edu_panel(row, uid)
+        await _edu_edit(q, "🎓 <b>تحصیلات</b>\n" + text, kb)
+    elif act == "lessons":
+        await q.answer()
+        await _edu_edit(q, _lesson_text(row), _lesson_kb(uid))
+    elif act == "subj":
+        key = p[3] if len(p) > 3 else ""
+        if key not in EDU_SUBJECTS:
+            await q.answer(); return
+        label, qs = EDU_SUBJECTS[key]
+        seen = _EDU_SEEN.get((uid, key), [])
+        avail = [i for i in range(len(qs)) if i not in seen] or list(range(len(qs)))
+        if len(avail) == len(qs):
+            seen = []
+        qi = random.choice(avail)
+        ok = await pool.fetchval(
+            "UPDATE users SET edu_last=$2::double precision, edu_pending=$3 WHERE user_id=$1 "
+            "AND edu_last <= $2::double precision - $4::double precision RETURNING 1",
+            uid, now, f"{key}:{qi}", float(EDU_COOLDOWN))
+        if not ok:
+            left = EDU_COOLDOWN - (now - float(row["edu_last"] or 0))
+            await q.answer(f"درس بعدی: {_duration_fa(max(left, 1))} دیگه", show_alert=True); return
+        _EDU_SEEN[(uid, key)] = (seen + [qi])[-len(qs):]
+        if len(_EDU_SEEN) > 20000:
+            _EDU_SEEN.clear()
+        question, options, _right, units = qs[qi]
+        order = list(range(len(options)))
+        random.shuffle(order)
+        kb = InlineKeyboardMarkup([[btn(options[o], "primary", callback_data=f"ed:ans:{uid}:{key}:{qi}:{o}")] for o in order])
+        await q.answer()
+        await _edu_edit(q, f"{label}\n\n<b>{html.escape(question)}</b>\n\n💎 ارزش سوال: <b>{units} واحد</b> (اشتباه = {EDU_WRONG_UNITS} واحد)", kb)
+    elif act == "ans":
+        try:
+            key, qi, oi = p[3], int(p[4]), int(p[5])
+            label, qs = EDU_SUBJECTS[key]
+            question, options, right, units = qs[qi]
+            options[oi]
+        except Exception:
+            await q.answer("این سوال دیگه معتبر نیست.", show_alert=True); return
+        correct = (oi == right)
+        gain = units if correct else EDU_WRONG_UNITS
+        new_units = await pool.fetchval(
+            "UPDATE users SET edu_pending='', edu_units=edu_units+$2 WHERE user_id=$1 AND edu_pending=$3 RETURNING edu_units",
+            uid, gain, f"{key}:{qi}")
+        if new_units is None:
+            await q.answer("این سوال دیگه معتبر نیست.", show_alert=True); return
+        await q.answer()
+        left = max(0, EDU_COOLDOWN - (time.time() - float(row["edu_last"] or now)))
+        if correct:
+            head = f"✅ <b>آفرین، درست بود!</b>\n💎 +{gain} واحد"
+        else:
+            head = f"❌ <b>اشتباه بود!</b>\nجواب درست: <b>{html.escape(options[right])}</b>\n💎 +{gain} واحد (دلداری)"
+        deg = _edeg(row)
+        extra = ""
+        if deg < len(EDU_DEGREES):
+            nm, need, fee = EDU_DEGREES[deg]
+            if new_units >= need:
+                extra = f"\n🎓 واحدهات برای <b>{html.escape(nm)}</b> کافیه! شهریه: {_m_fa(fee)}"
+            else:
+                extra = f"\n⬆️ تا «{html.escape(nm)}»: {need - new_units:,} واحد دیگه"
+        kb = InlineKeyboardMarkup([[btn("📚 درس بعدی", "primary", callback_data=f"ed:lessons:{uid}"),
+                                    btn("🎓 تحصیل", "success", callback_data=f"ed:menu:{uid}")]])
+        await _edu_edit(q, f"{label}\n\n<blockquote>{html.escape(question)}</blockquote>\n\n{head}\n📚 مجموع واحدها: <b>{new_units:,}</b>{extra}\n⏳ درس بعدی: {_duration_fa(left)} دیگه", kb)
+    elif act == "deg":
+        msg_alert = None
+        res = None
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                r = await conn.fetchrow("SELECT balance, edu_units, edu_degree FROM users WHERE user_id=$1 FOR UPDATE", uid)
+                d = int(r["edu_degree"] or 0)
+                if d >= len(EDU_DEGREES):
+                    msg_alert = "بالاترین مدرک رو داری!"
+                else:
+                    nm, need, fee = EDU_DEGREES[d]
+                    if int(r["edu_units"] or 0) < need:
+                        msg_alert = f"واحدهات کافی نیست؛ {need - int(r['edu_units'] or 0):,} واحد دیگه لازم داری."
+                    elif int(r["balance"] or 0) < fee:
+                        msg_alert = f"شهریه {fee:,} تومنه؛ موجودیت کافی نیست."
+                    else:
+                        await conn.execute("UPDATE users SET balance=balance-$2, edu_degree=$3 WHERE user_id=$1", uid, fee, d + 1)
+                        res = (nm, fee)
+        if msg_alert:
+            await q.answer(msg_alert, show_alert=True); return
+        await q.answer("مدرک گرفتی! 🎓", show_alert=True)
+        row = await get_user(uid)
+        text, kb = edu_panel(row, uid)
+        await _edu_edit(q, f"🎓 <b>مدرک {html.escape(res[0])} گرفتی!</b> 🎉\n<blockquote>شهریه‌ی پرداختی: {res[1]:,} تومان</blockquote>\n\n" + text, kb)
+    else:
+        await q.answer()
+
+
+async def job_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    p = q.data.split(":")
+    try:
+        act, uid = p[1], int(p[2])
+    except (IndexError, ValueError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این پنل مال شما نیست.", show_alert=True); return
+    row = await get_user(uid)
+    if not row or row["gender"] not in JOBS:
+        await q.answer("اول جنسیتت رو انتخاب کن (بنویس «شغل»).", show_alert=True); return
+    g = row["gender"]
+    if act == "menu":
+        await q.answer()
+        text, kb = jobs_panel(row, uid)
+        await _edu_edit(q, "💼 <b>شغل‌ها</b>\n" + text, kb)
+    elif act == "take":
+        alert = None; res = None
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                r = await conn.fetchrow("SELECT balance, job_level, edu_degree FROM users WHERE user_id=$1 FOR UPDATE", uid)
+                jl = int(r["job_level"] or 0)
+                if jl >= len(JOBS[g]):
+                    alert = "همه‌ی شغل‌ها رو داری!"
+                else:
+                    need, fee, name = JOB_DEGREE_NEED[jl], JOB_FEES[jl], JOBS[g][jl][0]
+                    if int(r["edu_degree"] or 0) < need:
+                        alert = f"برای این شغل مدرک {_deg_name(need)} لازمه."
+                    elif int(r["balance"] or 0) < fee:
+                        alert = f"هزینه‌ی این شغل {fee:,} تومنه؛ موجودیت کافی نیست."
+                    else:
+                        if fee:
+                            await conn.execute("UPDATE users SET balance=balance-$2 WHERE user_id=$1", uid, fee)
+                        await conn.execute("UPDATE users SET job_level=$2 WHERE user_id=$1", uid, jl + 1)
+                        res = (name, fee, JOB_PAY[jl][0])
+        if alert:
+            await q.answer(alert, show_alert=True); return
+        await q.answer("شغل جدید گرفتی! 💼", show_alert=True)
+        row = await get_user(uid)
+        text, kb = jobs_panel(row, uid)
+        cost = f"هزینه: {res[1]:,} تومان" if res[1] else "رایگان بود"
+        await _edu_edit(q, f"💼 <b>شغل «{html.escape(res[0])}» رو گرفتی!</b> 🎉\n<blockquote>{cost}\nحقوق هر شیفت: {res[2]}</blockquote>\n\nبنویس «کار» تا شیفتت رو شروع کنی.\n\n" + text, kb)
+    else:
+        await q.answer()
 
 
 LOCK_OPEN_ID = "6034962180875490251"
@@ -9712,81 +10343,6 @@ def lock_closed() -> str:
 
 def lock_open() -> str:
     return _tge(EMOJI_IDS.get(("lock", 2)) or LOCK_OPEN_ID, "🔓")
-
-
-def jobs_footer(jaghs: int, nxt) -> str:
-    lines = [f"{ce('jagh', 1, '🤛')} جق‌های تو: {jaghs:,}"]
-    if nxt:
-        lines.append(f"{ce('me', 2, '⬆️')} شغل بعدی: {html.escape(nxt[0])} — {nxt[1]:,} جق دیگه")
-    else:
-        lines.append(f"{ce('top', 1, '👑')} همه‌ی شغل‌ها رو داری!")
-    return "\n".join(lines)
-
-
-def jobs_rich_html(gender: str, jaghs: int) -> str:
-    """جدول واقعی (Rich Message تلگرام)، شخصی برای هر کاربر: قفل باز برای شغل‌هایی که داره."""
-    rows, nxt = jobs_rows(gender, jaghs)
-    out = ["<table><tr><th>شغل</th><th>حقوق</th><th>جق باقی مانده</th></tr>"]
-    for i, (glyph, name, pay, left) in enumerate(rows):
-        st = f"{lock_open()} 0" if left == 0 else f"{lock_closed()} {left:,}"
-        out.append(f"<tr><td>{job_glyph(gender, i, name)} {html.escape(name)}</td><td>{pay}</td><td>{st}</td></tr>")
-    out.append("</table>")
-    out.append("<p>" + jobs_footer(jaghs, nxt).replace("\n", "<br>") + "</p>")
-    return "".join(out)
-
-
-def jobs_text(gender: str, jaghs: int) -> str:
-    """نسخه‌ی جایگزین: جدول مونواسپیس داخل <pre> (اگه Rich Message کار نکرد)."""
-    rows, nxt = jobs_rows(gender, jaghs)
-    cells = [("شغل", "حقوق", "جق مانده")]
-    for glyph, name, pay, left in rows:
-        cells.append((name, pay, "داری ✅" if left == 0 else f"{left:,}"))
-    w = [max(_w(r[c]) for r in cells) for c in range(3)]
-    sep = "─" * w[0] + "─┼─" + "─" * w[1] + "─┼─" + "─" * w[2]
-    lines = []
-    for k, r in enumerate(cells):
-        lines.append(" │ ".join(_pad(r[c], w[c]) for c in range(3)))
-        if k == 0:
-            lines.append(sep)
-    table = "<pre>" + html.escape("\n".join(lines)) + "</pre>"
-    return f"{ce('me', 1, '🎖')} <b>شغل‌ها</b>\n{table}\n" + jobs_footer(jaghs, nxt)
-
-
-async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/jobs یا نوشتن «شغل» / «شغل ها» — جدول شغل‌ها."""
-    msg, user = update.effective_message, update.effective_user
-    await upsert_user(user.id, user.full_name)
-    row = await get_user(user.id)
-    if not row["gender"]:
-        await ask_gender(update, context)
-        return
-    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
-    # اگه پشتیبان با /setjobs جدول ساخته باشه، همون برای همه نشون داده میشه
-    custom = CUSTOM_JOBS.get(row["gender"])
-    personal = (not custom) or custom.get("job_emojis") or any(k[0] == "job" for k in EMOJI_IDS)
-    if custom and not personal:
-        try:
-            await send_custom_jobs(context.bot, custom, msg.chat_id, rp)
-            await msg.reply_text(f"🤛 جق‌های تو: {row['jaghs']:,}")
-            return
-        except Exception:
-            log.exception("custom jobs failed, falling back to default table")
-    # اول جدول واقعی تلگرام (Bot API 10.1)، اگه نشد جدول مونواسپیس
-    try:
-        await context.bot._post("sendRichMessage", {
-            "chat_id": msg.chat_id,
-            "rich_message": {"html": jobs_rich_html(row["gender"], row["jaghs"])},
-            "reply_parameters": rp.to_dict(),
-        })
-        return
-    except Exception:
-        log.warning("sendRichMessage failed, using <pre> table", exc_info=True)
-    text = jobs_text(row["gender"], row["jaghs"])
-    try:
-        await msg.reply_text(text, parse_mode="HTML", reply_parameters=rp)
-    except Exception:
-        log.exception("jobs message failed, retrying without premium emojis")
-        await msg.reply_text(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), parse_mode="HTML")
 
 
 # ───────────────────────── شیفت کار ─────────────────────────
@@ -10178,15 +10734,13 @@ def parse_pay(s: str) -> int:
     return int(round(float(s.rstrip("KM")) * mult))
 
 
-def current_job(gender: str, jaghs: int, work_count: int = 0):
-    """شغل بر اساس جق؛ شغل نهایی علاوه بر ۲۵۰۰ جق به ۱۲۰۰ شیفت انجام‌شده نیاز دارد."""
-    best = None
-    for i, (name, _lvl) in enumerate(JOBS[gender]):
-        if jaghs >= JOB_REQUIRED_JAGHS[i]:
-            best = (i, name)
-    if best and best[0] == len(JOBS[gender]) - 1 and work_count < 1200:
-        best = (len(JOBS[gender]) - 2, JOBS[gender][len(JOBS[gender]) - 2][0]) if len(JOBS[gender]) > 1 and jaghs >= JOB_REQUIRED_JAGHS[-2] else None
-    return best
+def current_job(gender: str, jaghs: int = 0, work_count: int = 0, job_level: int = 0):
+    """شغل فعلی از روی شغل‌هایی که کاربر گرفته (job_level = تعداد شغل‌های گرفته‌شده؛ ۰ = بیکار). جق دیگه شغل رو باز نمی‌کنه."""
+    n = len(JOBS[gender])
+    lv = max(0, min(int(job_level or 0), n))
+    if lv <= 0:
+        return None
+    return (lv - 1, JOBS[gender][lv - 1][0])
 
 
 # ───── متن‌های خفن شیفت: هر شغل مجموعه‌ی جدا داره. هر دور کار: یه «شروع» + نتیجه‌ی سوال + یه «واکنش» + خط حقوق، همه رندوم ─────
@@ -10449,11 +11003,10 @@ async def show_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML", reply_parameters=rp,
         )
         return
-    job = current_job(row["gender"], row["jaghs"], row["work_count"])
+    job = current_job(row["gender"], row["jaghs"], row["work_count"], _jlvl(row))
     if job is None:
-        need = JOB_REQUIRED_JAGHS[0] - row["jaghs"]
         await msg.reply_text(
-            B(f"{ce('me', 1, '🎖')} هنوز شغلی نداری! {need:,} جق دیگه بزن تا اولین شغلت رو بگیری."),
+            B(f"{ce('me', 1, '🎖')} هنوز شغلی نداری! بنویس «شغل» و اولین شغلت رو (رایگانه) بگیر."),
             parse_mode="HTML", reply_parameters=rp,
         )
         return
@@ -10512,7 +11065,7 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not row or not row["gender"]:
         await q.answer()
         return
-    job = current_job(row["gender"], row["jaghs"], row["work_count"])
+    job = current_job(row["gender"], row["jaghs"], row["work_count"], _jlvl(row))
     if job is None:
         await q.answer("هنوز شغلی نداری!", show_alert=True)
         return
@@ -13585,11 +14138,44 @@ def _upgrade_btn(car_row, uid: int, idx: int, style: str):
     return btn("⬆️ ارتقای ماشین", style, callback_data=f"car:upmenu:{uid}:{idx}:0")
 
 
+# ───────────────────────── شهر فرش (سفر ۲۵ دقیقه‌ای ماشین) ─────────────────────────
+FARSH_COOLDOWN = 25 * 60                                          # هر ماشین هر ۲۵ دقیقه یه بار
+FARSH_CATCH_CHANCE = 0.25                                         # شانس گیر افتادن
+FARSH_REWARDS = [200_000, 400_000, 600_000, 800_000, 1_000_000]   # جایزه‌ی هر ماشین (به ترتیب CARS؛ آخری ۱ میلیون)
+FARSH_BAILS = [300_000, 600_000, 900_000, 1_200_000, 1_500_000]   # وثیقه‌ی آزادی ماشین
+FARSH_COP = "سروان کیانی"                                         # اسم افسر داستان (هر وقت خواستی عوضش کن)
+FARSH_WIN_TEXTS = [
+    "{car} رو تو پارکینگ شهر فرش پارک کردی، یه چایی داغ خوردی و با کیسه‌ی پول برگشتی! 🍵",
+    "تو بازار شهر فرش یه معامله‌ی توپ زدی و {car} با جیب پر برگشت خونه! 🧿",
+    "{car} وسط شهر فرش همه رو انگشت‌به‌دهان کرد؛ کلی خرید کردن و تو سود کردی! 😎",
+]
+FARSH_CAUGHT_TEXTS = [
+    "{cop} نزدیک {car} شد، جلوت رو گرفت و گیرت انداخت! 🚔 ماشین توقیف شد؛ باید وثیقه بدی تا آزاد بشه.",
+    "تو شهر فرش داشتی دور می‌زدی که {cop} سر رسید و با {car} گیرت انداخت! 🚨 ماشین پارکینگ پلیسه؛ برای آزادیش وثیقه بده.",
+    "{cop} از دور {car} رو دید، راهت رو بست و گیرت انداخت! 👮 تا وثیقه ندی ماشین از پارکینگ پلیس بیرون نمیاد.",
+]
+
+
+def _farsh_btn(uid: int, idx: int, row):
+    now = time.time()
+    try:
+        due = int(row["bail_due"] or 0) if row is not None else 0
+        until = float(row["trip_until"] or 0) if row is not None else 0.0
+    except Exception:
+        due, until = 0, 0.0
+    if due > 0:
+        return btn(f"🚔 وثیقه‌ی ماشین · {fmt_short(due)}", "danger", callback_data=f"car:bail:{uid}:{idx}:0")
+    if until > now:
+        return btn(f"⏳ شهر فرش · {_duration_fa(until - now)}", None, callback_data=f"car:trip:{uid}:{idx}:0")
+    return btn(f"🏙 رفتن به شهر فرش · {fmt_short(FARSH_REWARDS[idx])}", "primary", callback_data=f"car:trip:{uid}:{idx}:0")
+
+
 def _car_keyboard(uid: int, idx: int, row, balance: int):
     rows = [
         [_upgrade_btn(row, uid, idx, "primary")],
         [btn("🎨 رنگ ماشین", "primary", callback_data=f"car:colors:{uid}:{idx}:0")],
         [btn("💰 جمع‌آوری درآمد", "success", callback_data=f"car:collect:{uid}:{idx}:0")],
+        [_farsh_btn(uid, idx, row)],
         [btn("🔙 گاراژ", callback_data=f"car:garage:{uid}:{idx}:0")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -13838,6 +14424,7 @@ def _panel_keyboard(uid: int, idx: int, owned: dict):
          btn("🚗 گاراژ", "danger", callback_data=f"car:garage:{uid}:{idx}:0")],
         [_upgrade_btn(owned.get(idx), uid, idx, "success"),
          btn("🎨 رنگ", "primary", callback_data=f"car:colors:{uid}:{idx}:0")],
+        [_farsh_btn(uid, idx, owned.get(idx))],
     ]
     nxt = _next_car_idx(owned)
     if nxt < len(CARS):
@@ -14040,6 +14627,52 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer(f"موجودی کافی نیست. قیمت: {fmt_toman(price)}", show_alert=True); return
         await q.answer("ماشین با موفقیت خریداری شد!", show_alert=True)
         await _repanel(q, context, uid, idx)
+    elif act in ("trip", "bail"):
+        if idx not in await _owned_cars(uid):
+            await q.answer("اول ماشین را بخر.", show_alert=True); return
+        now = time.time()
+        car_name = html.escape(CARS[idx][0])
+        alert = None; result = None
+        async with pool.acquire() as c:
+            async with c.transaction():
+                r = await c.fetchrow("SELECT trip_until, bail_due FROM cars WHERE user_id=$1 AND car_idx=$2 FOR UPDATE", uid, idx)
+                due = int(r["bail_due"] or 0) if r else 0
+                if not r:
+                    alert = "ماشین پیدا نشد."
+                elif act == "bail":
+                    if due <= 0:
+                        alert = "این ماشین توقیف نیست."
+                    else:
+                        paid = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance >= $1 RETURNING 1", due, uid)
+                        if not paid:
+                            alert = f"وثیقه {due:,} تومنه؛ موجودیت کافی نیست."
+                        else:
+                            await c.execute("UPDATE cars SET bail_due=0 WHERE user_id=$1 AND car_idx=$2", uid, idx)
+                            result = f"🔓 <b>ماشین آزاد شد!</b>\n\n<blockquote>{car_name} با پرداخت وثیقه‌ی <b>{due:,} تومان</b> از پارکینگ پلیس بیرون اومد.</blockquote>"
+                elif due > 0:
+                    alert = f"ماشینت توقیفه! اول وثیقه‌ی {due:,} تومنی رو بده."
+                elif float(r["trip_until"] or 0) > now:
+                    alert = f"این ماشین تازه از شهر فرش برگشته؛ {_duration_fa(float(r['trip_until']) - now)} دیگه می‌تونه بره."
+                elif random.random() < FARSH_CATCH_CHANCE:
+                    bail = FARSH_BAILS[idx]
+                    await c.execute("UPDATE cars SET trip_until=$3, bail_due=$4 WHERE user_id=$1 AND car_idx=$2", uid, idx, now + FARSH_COOLDOWN, bail)
+                    txt = random.choice(FARSH_CAUGHT_TEXTS).format(car=car_name, cop=html.escape(FARSH_COP))
+                    result = f"🚨 <b>گیر افتادی!</b>\n\n<blockquote>{txt}</blockquote>\n\n💸 وثیقه‌ی آزادی: <b>{bail:,} تومان</b>\nدکمه‌ی «وثیقه‌ی ماشین» تو پنل ماشین رو بزن."
+                else:
+                    reward = FARSH_REWARDS[idx]
+                    await c.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", reward, uid)
+                    await c.execute("UPDATE cars SET trip_until=$3 WHERE user_id=$1 AND car_idx=$2", uid, idx, now + FARSH_COOLDOWN)
+                    txt = random.choice(FARSH_WIN_TEXTS).format(car=car_name)
+                    result = f"🏙 <b>سفر به شهر فرش موفق بود!</b>\n\n<blockquote>{txt}</blockquote>\n\n💰 جایزه: <b>+{reward:,} تومان</b>\n⏳ سفر بعدی: <b>{_duration_fa(FARSH_COOLDOWN)}</b> دیگه"
+        if alert:
+            await q.answer(alert[:190], show_alert=True); return
+        await q.answer()
+        try:
+            await context.bot.send_message(q.message.chat_id, B(result), parse_mode="HTML",
+                                           reply_parameters=ReplyParameters(message_id=q.message.message_id, allow_sending_without_reply=True))
+        except Exception:
+            log.warning("farsh result send failed", exc_info=True)
+        await _repanel(q, context, uid, idx)
     elif act == "upmenu":
         await q.answer(); await _show_upgrade_menu(q, uid, idx)
     elif act == "upgrade":
@@ -14123,6 +14756,43 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _repanel(q, context, uid, idx)
     else:
         await q.answer()
+
+HOUSE_NOTIFY_EVERY = 120
+
+
+async def house_notify_loop(app):
+    """وقتی درآمد (صندوق) خونه‌ی کسی آماده شد، تو پیوی بات بهش خبر میده (برای هر دوره فقط یک بار)."""
+    await asyncio.sleep(30)
+    while True:
+        try:
+            now = time.time()
+            rows = await pool.fetch(
+                "SELECT user_id, repair_done_at, last_claim, items FROM user_house "
+                "WHERE repair_done_at <= $1 AND last_claim + 86400 <= $1 AND notified_claim <> last_claim", now)
+            for r in rows:
+                pending = _house_pending(r, now)
+                if pending <= 0:
+                    continue
+                marked = await pool.fetchval(
+                    "UPDATE user_house SET notified_claim=last_claim WHERE user_id=$1 AND last_claim=$2 AND notified_claim<>last_claim RETURNING 1",
+                    r["user_id"], r["last_claim"])
+                if not marked:
+                    continue
+                text = (f"{HOUSE_CE} <b>صندوق خونه‌ت آماده‌ست!</b> ✨\n\n"
+                        f"<blockquote>{MONEY_CE} درآمد آماده‌ی برداشت: <b>{pending:,} تومان</b></blockquote>\n\n"
+                        f"🔑 برو تو گروه، بنویس «<code>خونه</code>» و دکمه‌ی «دریافت درآمد» رو بزن.\n"
+                        f"⏳ درآمد جمع‌نشده تا {HOUSE_STORE_DAYS} روز ذخیره می‌مونه، پس عجله کن! 🔥")
+                try:
+                    await app.bot.send_message(r["user_id"], B(text), parse_mode="HTML")
+                except Exception:
+                    pass   # کاربر هنوز پیوی بات رو استارت نکرده یا بات رو بلاک کرده
+                await asyncio.sleep(0.07)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("house notify loop failed")
+        await asyncio.sleep(HOUSE_NOTIFY_EVERY)
+
 
 async def car_profit_loop():
     """درآمد ساعتی را فقط داخل صندوق همان ماشین ذخیره می‌کند؛ برداشت با دکمه کاربر است."""
@@ -14264,10 +14934,10 @@ def _gm_fmt(rows, chat_id: int, budget: int = 3600) -> str:
 
 # ───────────────────────── سیستم خلاف و سرقت گروهی ─────────────────────────
 ROBBERIES = {
-    "club": {"name": "کلاب", "cooldown": 25*60, "payout": (200_000, 500_000), "chance": 0.62, "penalty": 5, "lock": 30*60, "bail": 1_000_000, "fail": "وسط کلاب در حال جق زدن بودی که پلیس‌ها سر رسیدن و گیر افتادی!"},
-    "cinema": {"name": "سینما", "cooldown": 35*60, "payout": (500_000, 850_000), "chance": 0.48, "penalty": 10, "lock": 60*60, "bail": 1_200_000, "fail": "در سینما مشغول تماشا بودی و تمرکزت رو از دست دادی؛ پلیس‌ها سر رسیدن و دستگیرت کردن!"},
-    "shop": {"name": "سوپری", "cooldown": 45*60, "payout": (850_000, 1_000_000), "chance": 0.36, "penalty": 10, "lock": 90*60, "bail": 1_500_000, "fail": "در سوپری در حال جق زدن بودی که صاحب مغازه پلیس رو خبر کرد و گیر افتادی!"},
-    "bank": {"name": "بانک مرکزی", "cooldown": 60*60, "payout": (1_000_000, 1_500_000), "chance": 0.18, "penalty": 15, "lock": 120*60, "bail": 2_000_000, "fail": "آژیرهای بانک مرکزی فعال شد؛ نیروهای ویژه محاصره‌ات کردن و دستگیرت کردن!"},
+    "club": {"name": "کلاب", "cooldown": 25*60, "payout": (200_000, 500_000), "chance": 0.74, "penalty": 5, "lock": 30*60, "bail": 1_000_000, "fail": "وسط کلاب در حال جق زدن بودی که پلیس‌ها سر رسیدن و گیر افتادی!"},
+    "cinema": {"name": "سینما", "cooldown": 35*60, "payout": (500_000, 850_000), "chance": 0.60, "penalty": 10, "lock": 60*60, "bail": 1_200_000, "fail": "در سینما مشغول تماشا بودی و تمرکزت رو از دست دادی؛ پلیس‌ها سر رسیدن و دستگیرت کردن!"},
+    "shop": {"name": "سوپری", "cooldown": 45*60, "payout": (850_000, 1_000_000), "chance": 0.48, "penalty": 10, "lock": 90*60, "bail": 1_500_000, "fail": "در سوپری در حال جق زدن بودی که صاحب مغازه پلیس رو خبر کرد و گیر افتادی!"},
+    "bank": {"name": "بانک مرکزی", "cooldown": 60*60, "payout": (1_000_000, 1_500_000), "chance": 0.30, "penalty": 15, "lock": 120*60, "bail": 2_000_000, "fail": "آژیرهای بانک مرکزی فعال شد؛ نیروهای ویژه محاصره‌ات کردن و دستگیرت کردن!"},
 }
 # سه سطح ریسک برای هر سرقت: کم‌ریسک (درآمد کم)، متوسط، پرریسک (درآمد بالا)
 # chance: "low" = شانس موفقیت پایه + نصفِ فاصله تا ۱۰۰٪ (ولی هیچ‌وقت صددرصد نیست!)، "high" = ۶۰٪ شانس پایه
@@ -14310,7 +14980,7 @@ def tier_cfg(kind: str, tier: str) -> dict:
     if tier == "low":
         c["chance"] = min(0.92, base["chance"] + (1 - base["chance"]) * 0.5)
     elif tier == "high":
-        c["chance"] = base["chance"] * 0.6
+        c["chance"] = base["chance"] * 0.7
     c["payout"] = (int(base["payout"][0] * t["pay"]), int(base["payout"][1] * t["pay"]))
     c["penalty"] = min(30, max(1, round(base["penalty"] * t["penalty"])))
     c["lock"] = int(base["lock"] * t["lock"])
@@ -14322,6 +14992,7 @@ def tier_cfg(kind: str, tier: str) -> dict:
     return c
 
 
+ROBBERY_PENALTY_MAX_BAL = 7_000_000   # فقط وقتی موجودی جیبِ کاربر ≤ ۷ میلیون باشه موقع گیر افتادن جریمه کم میشه؛ بیشتر از این: جریمه‌ای نیست
 ROBBERY_TRACE_STEP = 12
 ROBBERY_TRACE_LIMIT = 100
 ROBBERY_TRACE_CLEAN_COST = 1_300_000
@@ -14486,7 +15157,7 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await conn.execute("UPDATE robbery_profile SET clean_cost=$2, clean_step=$3, bail_amount=0 WHERE user_id=$1",
                                        owner, max(1, int(payout * ROBBERY_CLEAN_PCT)), cfg['trace_step'])
                 else:
-                    payout = 0; penalty = min(bal, int(bal * cfg['penalty'] / 100)); new_balance = bal - penalty
+                    payout = 0; penalty = 0 if bal > ROBBERY_PENALTY_MAX_BAL else min(bal, int(bal * cfg['penalty'] / 100)); new_balance = bal - penalty
                     await conn.execute("UPDATE users SET balance=GREATEST(0,balance-$1) WHERE user_id=$2", penalty, owner)
                     await conn.execute("UPDATE robbery_profile SET bail_amount=$2, clean_cost=0, clean_step=0 WHERE user_id=$1", owner, cfg['bail'])
             else:
@@ -14520,8 +15191,12 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_html(q, B(result), view_kb)
         await task_event(context.bot, q.message.chat_id, owner, "robbery")
     else:
+        if penalty > 0:
+            _pen_line = f"جریمه: <b>{cfg['penalty']}٪</b> موجودی ({penalty:,} تومان)"
+        else:
+            _pen_line = "جریمه: <b>ندارد</b> (موجودیت بالای ۷ میلیونه؛ این بار چیزی کم نشد)"
         result = (f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji> <b>عملیات {html.escape(cfg['op'])} لو رفت؛ دستگیر شدی!</b>\n\n<blockquote>{html.escape(cfg['fail'])}</blockquote>\n\n"
-                  f"جریمه: <b>{cfg['penalty']}٪</b> موجودی ({penalty:,} تومان)\nموجودی باقی‌مانده: <b>{new_balance:,} تومان</b>\n"
+                  f"{_pen_line}\nموجودی باقی‌مانده: <b>{new_balance:,} تومان</b>\n"
                   f"مدت بازداشت: <b>{_duration_fa(cfg['lock'])}</b>\nوثیقه آزادی: <b>{cfg['bail']:,} تومان</b>\nرد خلاف: <b>{new_trace}٪</b>")
         await q.answer("گیر افتادی! پلیس دستگیرت کرد.", show_alert=True)
         await edit_html(q, B(result), view_kb)
@@ -14574,7 +15249,7 @@ def _is_bot_text_command(text: str) -> bool:
         "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
-    if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
+    if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in EDU_WORDS or key in LESSON_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
         return True
     if key.startswith(("واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
         return True
@@ -17437,6 +18112,8 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_cb, pattern=r"^ad:"))
     app.add_handler(CallbackQueryHandler(task_cb, pattern=r"^tk:"))
     app.add_handler(CallbackQueryHandler(car_cb, pattern=r"^car:"))
+    app.add_handler(CallbackQueryHandler(edu_cb, pattern=r"^ed:"))
+    app.add_handler(CallbackQueryHandler(job_cb, pattern=r"^jb:"))
     app.add_handler(CommandHandler("garage", show_garage))
     app.add_handler(CommandHandler("start", gw_start, filters=filters.ChatType.PRIVATE & filters.Regex(r"^/start(?:@\w+)? gw(?:top)?_\d+")))
     app.add_handler(CallbackQueryHandler(gw_cb, pattern=r"^gw:"))
