@@ -6410,7 +6410,7 @@ def _gq(title: str, body: str) -> str:
 def _guide_sections() -> list:
     return [
         _gq("🎓 تحصیل و درس", "<code>تحصیل</code> جدول مدرک‌ها\n<code>درس</code> هر ۶ دقیقه و ۴۵ ثانیه یه سوال از تاریخ، ریاضی و هوش، ادبیات یا علم و دانش؛ هر جواب ۲ تا ۴ واحد داره و جواب اشتباه ۱ واحد."),
-        _gq(f"{JM_CE} پروفیت", f"<code>پروفیت</code>\nدرآمد شیفت کاری (کار)، بوس و بغل میره تو پروفیت (ظرفیت {JM_CAP:,} تومن). با نوشتن این کلمه همه‌ش میره تو کیف پولت؛ حداقل {JM_MIN:,} تومن باید توش باشه. وقتی پر بشه پول جدید جا نمیشه، پس به موقع برداشت کن. وضعیتش تو پنل «خودم» هم دیده میشه."),
+        _gq(f"{JM_CE} پروفیت", f"<code>پروفیت</code>\n۵٪ درآمد شیفت کاری (کار) و پول بوس و بغل میره تو پروفیت (ظرفیت {JM_CAP:,} تومن). با نوشتن این کلمه همه‌ش میره تو کیف پولت؛ حداقل {JM_MIN:,} تومن باید توش باشه. وقتی پر بشه پول جدید جا نمیشه، پس به موقع برداشت کن. وضعیتش تو پنل «خودم» هم دیده میشه."),
         _gq("🎖 پنل شخصی", "<code>خودم</code>\nبانک، خلاف، ماشینم، کازینو، قدرت‌ها و تنظیمات (تغییر جنسیت، راهنما، انتقال اکانت) رو از اینجا باز می‌کنی. کاراکتر و شغل و دارایی‌ت هم همین‌جا نوشته میشه."),
         _gq(f"{POWERS_CE} قدرت‌ها", "از پنل «خودم» ← قدرت‌ها: جاسوسی، هوش و دزدی."),
         _gq(f"{HAND_CE} هوش", "<code>هوش</code>\n۵ سطح ارتقا داره و روی قدرت هوش اثر می‌ذاره؛ زمان کلاس طبق زمان‌بندی ثابت ۶:۴۵ است."),
@@ -6434,7 +6434,7 @@ def _guide_sections() -> list:
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
         _gq("📋 تسک", "<code>تسک</code>\nتسک‌های روزانه و هفتگی با جایزه؛ ربات خودش پیشرفتت رو حساب می‌کنه."),
         _gq("🏆 لیدربرد", "<code>لیدربرد</code>\nبرترین‌ها بر اساس پول و امتیاز."),
-        _gq("🔥 ایونت درآمد", "گاهی پشتیبانی ایونت می‌ذاره و برای مدت محدود پول امتیاز و کار چند برابر میشه؛ ربات تو همه‌ی گروه‌ها اعلامش می‌کنه."),
+        _gq("🔥 ایونت درآمد", "گاهی پشتیبانی ایونت می‌ذاره و برای مدت محدود درآمد «کار» چند برابر میشه؛ ربات تو همه‌ی گروه‌ها اعلامش می‌کنه."),
         _gq("🎁 قرعه‌کشی", "پشتیبانی‌ها قرعه‌کشی می‌سازن. با دکمه «شرکت در قرعه‌کشی» وارد میشی و با دعوت دوستات تیکتت بیشتر میشه (اگه دعوت‌شده از کانال‌ها بره تیکت هم میره)."),
         _gq("🔁 انتقال اکانت", "فقط تو پی‌وی ربات: <code>خودم</code> ← تنظیمات ← انتقال اکانت با آیدی عددی."),
     ]
@@ -6504,7 +6504,7 @@ BANK_EMOJIS = ("5805331874653932911",)
 BANK_ICON_ID = "5805331874653932911"
 BANK_CE = "".join(f'<tg-emoji emoji-id="{eid}">🏦</tg-emoji>' for eid in BANK_EMOJIS)
 BANK_FEE = 5_000
-# ───── ایونت درآمد: پشتیبان می‌نویسه «ایونت درآمد 5 5دقیقه» ← تو اون مدت حقوق شیفت (کار) و پول امتیاز ×۵ میشه ─────
+# ───── ایونت درآمد: پشتیبان می‌نویسه «ایونت درآمد 5 5دقیقه» ← تو اون مدت حقوق شیفت (کار) ×۵ میشه ─────
 INCOME_EVENT = {"mult": 1.0, "end": 0.0}
 EVENT_CE = '<tg-emoji emoji-id="5875483791702630534">🎉</tg-emoji><tg-emoji emoji-id="5875065225664798722">🔥</tg-emoji>'
 EVENT_MAX_SECONDS = 24 * 3600
@@ -6516,7 +6516,7 @@ def income_mult() -> float:
 
 
 def event_banner() -> str:
-    """متن زیر پیام کار/امتیاز وقتی ایونت فعاله (وقتی تموم شد خالیه و همه‌چی مثل قبل)."""
+    """متن زیر پیام کار وقتی ایونت فعاله (وقتی تموم شد خالیه و همه‌چی مثل قبل)."""
     left = INCOME_EVENT["end"] - time.time()
     if left <= 0 or INCOME_EVENT["mult"] <= 1:
         return ""
@@ -6548,7 +6548,7 @@ def event_announce_html(mult: float, dur: int) -> str:
         f"<b>{e1}{e2} ایونت درآمد شروع شد! {e2}{e1}\n{line}\n"
         f"{e2} ضریب درآمد: ×{mult:g}\n"
         f"{ce('jagh', 6, '⏳')} مدت: {_duration_fa(dur)}\n{line}\n"
-        f"{_ev_e(SHIFT_EMOJI_START, '💼')} با «کار» کردن و {ce('jagh', 1, '🤛')} «امتیاز» زدن تو این مدت\n"
+        f"{_ev_e(SHIFT_EMOJI_START, '💼')} با «کار» کردن تو این مدت\n"
         f"{GIFT_MONEY_CE}{GIFT_MONEY_CE} {mult:g} برابر پول می‌گیری!\n\n"
         f"{e1} بدو که وقت کمه! {e1}</b>"
     )
@@ -9194,7 +9194,6 @@ def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int 
         f"سطح {lvl} از {len(LEVEL_THRESHOLDS)}: {html.escape(title)} {'' if title_override else char_emojis(gender, lvl)}",
         html.escape(tagline),
         "",
-        f"{ce('jagh', 1, '🤛')} امتیازها: {jaghs:,}",
         f"{ce('wallet', 1, '💰')} دارایی: {balance:,} تومن",
         f"💼 کارهای انجام‌شده: {work_count:,}",
     ]
@@ -11201,15 +11200,17 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _sp:
         pay *= SPECIAL_WORK_MULT                     # قدرت «شاهزاده خسته»: ۱۰۰٪ درآمد بیشتر
     now = time.time()
-    # درآمد شیفت میره تو «پروفیت»؛ اگه جا نبود، باقیش مستقیم میره تو کیف پول
+    # ۵٪ درآمد شیفت بی‌صدا میره تو «پروفیت»؛ بقیه مستقیم میره تو کیف پول (اگه پروفیت پر بود، سهمش هم میره کیف پول)
+    profit_part = pay * 5 // 100
+    wallet_part = pay - profit_part
     _r = await pool.fetchrow(
         "WITH o AS (SELECT jagh_machine AS old_m FROM users WHERE user_id = $3::bigint FOR UPDATE) "
         "UPDATE users SET jagh_machine = LEAST(o.old_m + $1::bigint, $5::bigint), "
-        "balance = balance + GREATEST(o.old_m + $1::bigint - $5::bigint, 0), "
+        "balance = balance + $6::bigint + GREATEST(o.old_m + $1::bigint - $5::bigint, 0), "
         "last_shift = $2::double precision, work_count = work_count + 1 FROM o "
         "WHERE user_id = $3::bigint AND last_shift <= $2::double precision - $4::double precision "
         "RETURNING jagh_machine, o.old_m",
-        pay, now, q.from_user.id, float(SHIFT_COOLDOWN), JM_CAP,
+        profit_part, now, q.from_user.id, float(SHIFT_COOLDOWN), JM_CAP, wallet_part,
     )
     new_bal = None if _r is None else 1
     if new_bal is None:
@@ -11220,9 +11221,7 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{shift_header(name)}\n\n"
         f"<blockquote><b>{html.escape(done)}\n\n"
         f"{html.escape(shift_pick(SHIFT_OUTRO.get(name, []), q.from_user.id, 'outro', name))}</b></blockquote>\n"
-        f"<b>{_te(SHIFT_EMOJI_PAY, '💰')} {short_money(pay)}{skin_tag('درآمد') if _sp else ''}</b>\n"
-        f"<b>{JM_CE} {short_money(int(_r['jagh_machine']) - int(_r['old_m']))} رفت تو پروفیت — بنویس «پروفیت» تا برداشت کنی"
-        + (f" (باقیش، {short_money(pay - (int(_r['jagh_machine']) - int(_r['old_m'])))}، چون پروفیت پر بود مستقیم رفت تو کیف پولت)" if int(_r['jagh_machine']) - int(_r['old_m']) < pay else "") + "</b>"
+        f"<b>{_te(SHIFT_EMOJI_PAY, '💰')} {short_money(wallet_part)}{skin_tag('درآمد') if _sp else ''}</b>"
     )
     if (_eb := event_banner()):
         text += f"<b>{_eb}</b>"
@@ -16486,7 +16485,7 @@ async def profit_collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cur = int(await c.fetchval("SELECT jagh_machine FROM users WHERE user_id=$1 FOR UPDATE", user.id) or 0)
             if cur >= JM_MIN:
                 new_bal = await c.fetchval(
-                    "UPDATE users SET balance=balance+$1, jagh_machine=0 WHERE user_id=$2 RETURNING balance", cur, user.id)
+                    "UPDATE users SET balance=balance+$1, jagh_machine=0, energy=LEAST(COALESCE(energy,0)+5, $3::double precision) WHERE user_id=$2 RETURNING balance", cur, user.id, ENERGY_MAX)
     if cur <= 0:
         await msg.reply_text(B(f"{JM_CE} هیچی توی پروفیتت نیست!"), parse_mode="HTML", reply_parameters=rp)
         return
@@ -16498,6 +16497,7 @@ async def profit_collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await msg.reply_text(B(f"{JM_CE} برداشت از پروفیت انجام شد!\n"
                            f"{MONEY_CE} {cur:,} تومن به کیف پولت اضافه شد.\n"
+                           f"⚡ ۵ انرژی هم گرفتی!\n"
                            f"👛 موجودی کیف پول: {int(new_bal):,} تومن"),
                          parse_mode="HTML", reply_parameters=rp)
 
