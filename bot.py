@@ -5498,12 +5498,12 @@ async def _myself_cars(uid):
 async def _g_myself(qs, user):
     uid = int(user["id"])
     r = await pool.fetchrow(
-        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count,u.job_level,u.msg_total "
+        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count,u.job_level,u.job_sel,u.msg_total "
         "FROM users u WHERE u.user_id=$1", uid)
     if not r:
         raise _ApiError("اول ربات رو استارت کن تا پروفایلت ساخته بشه")
     gender = r["gender"] if r["gender"] in ("m", "f") else "m"
-    job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0), _jlvl(r))
+    job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0), _jsel(r))
     lvl = msg_char_level(int(r["msg_total"] or 0))
     _sk = await special_current(uid)
     photo_url = f"/api/myself/photo?l={lvl}&v={int(time.time() // 300)}" + (f"&s={_sk}" if _sk else "")
@@ -5633,13 +5633,13 @@ async def _g_myself_car_photo(qs, user):
 
 async def _g_myself_photo(qs, user):
     uid=int(user["id"])
-    r=await pool.fetchrow("SELECT gender,jaghs,work_count,job_level,balance,bank_balance,msg_total FROM users WHERE user_id=$1",uid)
+    r=await pool.fetchrow("SELECT gender,jaghs,work_count,job_level,job_sel,balance,bank_balance,msg_total FROM users WHERE user_id=$1",uid)
     if not r: return 404,"text/plain",b"not found",{}
     gender=r["gender"] if r["gender"] in ("m","f") else "m"
     _sk=await special_current(uid)
     if _sk in SPECIALS:   # کاراکتر ویژه جای عکس کاراکتر رو می‌گیره
         return 200,"image/jpeg",_special_img(_sk,gender),{"Cache-Control":"private, max-age=300"}
-    job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0),_jlvl(r))
+    job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0), _jsel(r))
     lvl=msg_char_level(int(r["msg_total"] or 0))
     data,typ=b"",None
     fid=CHAR_PHOTOS.get((gender,lvl))
@@ -6510,8 +6510,8 @@ def _guide_sections() -> list:
         _gq("🤗 بوس و بغل", f"روی پیام کاربر ریپلای کن و بنویس <code>بوس</code> یا <code>بغل</code>\nهر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد. به هر دو نفر انرژی و {HUG_MONEY[0]} تا {HUG_MONEY[1]} تومن (تو پروفیت) می‌رسه. بوس و بغل روی همسر بقیه ۳ انرژی منفی داره."),
         _gq("🎁 هدیه", "<code>هدیه</code> لیست هدیه‌ها و قیمتشون\nریپلای + <code>هدیه گل</code>\nهدیه به طرف مقابل انرژی میده."),
         _gq("⚡ انرژی", "انرژی زیر ۳۰٪ یعنی پول امتیاز نصف، درآمد ماشین ۲۵٪ کمتر و شانس گیر افتادن تو خلاف بیشتر. با بغل، بوس و هدیه بالا میره."),
-        _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code>\n<code>همسرم</code> اطلاعات همسر و میزان رابطه\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
-        _gq("👶 فرزندخواندگی", "زوج‌های متأهل: ریپلای روی کاربر + <code>جینگو فرزندخواندگی</code> (یا <code>فرزندخواندگی</code>)؛ اگه قبول کنه فرزندخونده‌تون میشه.\n<code>خانواده</code> والدین، فرزندها و دکمه‌ی شجره‌نامه | <code>شجره نامه</code> عکس شجره‌نامه."),
+        _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code> (پشتیبان‌ها هم می‌تونن؛ طلاق با پشتیبان پولی جابه‌جا نمی‌کنه)\n<code>همسرم</code> اطلاعات همسر و میزان رابطه\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
+        _gq("👶 فرزندخواندگی", "زوج‌های متأهل: ریپلای روی کاربر + <code>جینگو فرزندخواندگی</code> (یا <code>فرزندخواندگی</code>)؛ اگه قبول کنه فرزندخونده‌تون میشه.\n<code>خانواده</code> والدین، فرزندها و دکمه‌ی شجره‌نامه (لیدربرد ← فامیل‌سالارها). بوس و بغل بین فامیل‌ها خیانت حساب نمیشه | <code>شجره نامه</code> عکس شجره‌نامه.\nوالد: ریپلای + <code>عیدی ۱۰۰۰۰۰</code> | ریپلای + <code>عاق</code>\nفرزندخونده: <code>پول توجیبی</code> (روزی ۵۰ هزار از والدین) | <code>ترک خانواده</code>"),
         _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
         _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
@@ -6595,6 +6595,12 @@ INCOME_EVENT = {"mult": 1.0, "end": 0.0}
 EVENT_CE = '<tg-emoji emoji-id="5875483791702630534">🎉</tg-emoji><tg-emoji emoji-id="5875065225664798722">🔥</tg-emoji>'
 EVENT_MAX_SECONDS = 24 * 3600
 EVENT_MAX_MULT = 100
+HUGEV_CE = '<tg-emoji emoji-id="5470080737711502911">🤗</tg-emoji>'
+HUG_EVENT = {"mult": 1.0, "end": 0.0}   # ایونت محبوبیت: بوس/بغل → انرژی ۱۰۰٪ و پول ×ضریب
+
+
+def hug_event_mult() -> float:
+    return float(HUG_EVENT["mult"]) if HUG_EVENT["end"] > time.time() else 0.0   # ۰ = ایونت فعال نیست
 
 
 def income_mult() -> float:
@@ -6614,11 +6620,22 @@ async def _event_save():
                        f"{INCOME_EVENT['mult']}|{INCOME_EVENT['end']}")
 
 
+async def _hug_event_save():
+    await pool.execute("INSERT INTO bot_settings (key, value) VALUES ('hug_event', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                       f"{HUG_EVENT['mult']}|{HUG_EVENT['end']}")
+
+
 async def _event_load():
     v = await pool.fetchval("SELECT value FROM bot_settings WHERE key = 'income_event'")
     try:
         m, e = (v or "").split("|")
         INCOME_EVENT["mult"], INCOME_EVENT["end"] = float(m), float(e)
+    except Exception:
+        pass
+    v = await pool.fetchval("SELECT value FROM bot_settings WHERE key = 'hug_event'")
+    try:
+        m, e = (v or "").split("|")
+        HUG_EVENT["mult"], HUG_EVENT["end"] = float(m), float(e)
     except Exception:
         pass
 
@@ -6637,6 +6654,19 @@ def event_announce_html(mult: float, dur: int) -> str:
         f"{_ev_e(SHIFT_EMOJI_START, '💼')} با «کار» کردن تو این مدت\n"
         f"{GIFT_MONEY_CE}{GIFT_MONEY_CE} {mult:g} برابر پول می‌گیری!\n\n"
         f"{e1} بدو که وقت کمه! {e1}</b>"
+    )
+
+
+def hug_event_announce_html(mult: float, dur: int) -> str:
+    e1, e2 = _ev_e("5875483791702630534", "🎉"), _ev_e("5875065225664798722", "🔥")
+    line = "━━━━━━━━━━━━━━"
+    return (
+        f"<b>{e1}{e2} ایونت محبوبیت شروع شد! {e2}{e1}\n{line}\n"
+        f"{HUGEV_CE}{HUGEV_CE} با هر بوس و بغل تو این مدت:\n"
+        f"{ce('energy', 1, '⚡')} انرژی هر دو نفر میره روی ۱۰۰٪\n"
+        f"{GIFT_MONEY_CE}{GIFT_MONEY_CE} پول بوس و بغل ×{mult:g} میشه!\n{line}\n"
+        f"{ce('jagh', 6, '⏳')} مدت: {_duration_fa(dur)}\n\n"
+        f"{e1} برو بغل کن، بوس کن، پول جمع کن! {e1}\n{HUGEV_CE}{HUGEV_CE}{HUGEV_CE}</b>"
     )
 
 
@@ -6684,12 +6714,33 @@ async def event_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
         return False
     if compact.startswith("پایانایونت") or compact.startswith("ایونتپایان") or compact.startswith("ایونتتمام"):
         INCOME_EVENT["end"] = 0.0
+        HUG_EVENT["end"] = 0.0
         await _event_save()
-        await msg.reply_text(B(f"{EVENT_CE} ایونت درآمد تموم شد؛ همه‌چی برگشت به حالت عادی."), parse_mode="HTML")
+        await _hug_event_save()
+        await msg.reply_text(B(f"{EVENT_CE} ایونت‌ها تموم شد؛ همه‌چی برگشت به حالت عادی."), parse_mode="HTML")
+        return True
+    mh = re.match(r"^ایونت\s*(?:محبوبیت|بوس|بغل|لاو)\s*(.*)$", t)
+    if mh:
+        hu = ("مثال: <code>ایونت محبوبیت 5 5دقیقه</code> (با هر بوس و بغل انرژی ۱۰۰٪ و پول ×۵ برای ۵ دقیقه)\n"
+              f"حداکثر ضریب {EVENT_MAX_MULT} و حداکثر مدت ۲۴ ساعت. برای تموم کردن: <code>پایان ایونت</code>")
+        m2 = re.match(r"^[x×*]?\s*(\d+(?:\.\d+)?)\s*(?:برابر|x|×)?\s*(.+)$", mh.group(1).strip())
+        dur2 = parse_duration(m2.group(2).strip()) if m2 else None
+        mult2 = float(m2.group(1)) if m2 else 0.0
+        if not m2 or dur2 is None or dur2 <= 0 or dur2 > EVENT_MAX_SECONDS or not (1 <= mult2 <= EVENT_MAX_MULT):
+            await msg.reply_text(B("ایونت رو نفهمیدم.\n" + hu), parse_mode="HTML")
+            return True
+        HUG_EVENT["mult"], HUG_EVENT["end"] = mult2, time.time() + dur2
+        await _hug_event_save()
+        if msg.chat.type == "private":
+            await msg.reply_text(B(f"{EVENT_CE} ایونت محبوبیت ثبت شد؛ دارم به همه‌ی گروه‌ها اعلام می‌کنم…"), parse_mode="HTML")
+        task = asyncio.create_task(_event_announce(context.bot, hug_event_announce_html(mult2, int(dur2)), user.id))
+        _BG_TASKS.add(task)
+        task.add_done_callback(_BG_TASKS.discard)
         return True
     m = re.match(r"^ایونت\s*(?:درآمد|درامد)\s*(.*)$", t)
     usage = ("مثال: <code>ایونت درآمد 5 5دقیقه</code> (ضریب ۵ برابر برای ۵ دقیقه)\n"
-             f"حداکثر ضریب {EVENT_MAX_MULT} و حداکثر مدت ۲۴ ساعت. برای تموم کردن: <code>پایان ایونت</code>")
+             f"حداکثر ضریب {EVENT_MAX_MULT} و حداکثر مدت ۲۴ ساعت. برای تموم کردن: <code>پایان ایونت</code>\n"
+             "ایونت بوس و بغل: <code>ایونت محبوبیت 5 5دقیقه</code>")
     if not m:
         cur = event_banner().strip()
         await msg.reply_text(B((cur + "\n\n" if cur else "الان ایونتی فعال نیست.\n\n") + usage), parse_mode="HTML")
@@ -7318,7 +7369,7 @@ async def self_panel_text(uid: int, name: str = "") -> str:
     g = row["gender"]
     lvl_pct = 0.0
     if g in JOBS:
-        job = current_job(g, jaghs, work_count, _jlvl(row))
+        job = current_job(g, jaghs, work_count, _jsel(row))
         lvl = msg_char_level(int(row["msg_total"] or 0))
         char_name = CHARACTERS[g][lvl - 1][0]
         job_name = job[1] if job else "بیکار"
@@ -7331,6 +7382,8 @@ async def self_panel_text(uid: int, name: str = "") -> str:
     return B(
         f"{ce('me', 1, '🎖')} {html.escape(char_name)}\n\n"
         f"💼 شغل: {html.escape(job_name)}\n"
+        f"🏅 سطح {msg_level(int(row['msg_total'] or 0))} · "
+        f'<tg-emoji emoji-id="6023744400608206043">🎓</tg-emoji> مدرک: {html.escape(_deg_name(_edeg(row)))}\n'
         f"{MONEY_CE} دارایی کل: {total:,} تومان\n\n"
         f"{self_energy_line(row.get('energy', 0))}\n\n"
         f"{jm_bar_line(row.get('jagh_machine', 0))}\n\n"
@@ -7830,19 +7883,24 @@ TOP_LVL_EID = "5192964134899047657"
 
 
 async def _top_view(kind: str, ids: bool):
-    """متن و دکمه‌ی لیدربرد: kind = rich (پولدارها) یا lvl (بیشترین سطح‌ها)."""
+    """متن و دکمه‌های لیدربرد: kind = rich (پولدارها) | lvl (بیشترین سطح‌ها) | fam (فامیل‌سالارها)."""
+    def kb_for(cur: str):
+        opts = {"rich": ("پولدارها", TOP_RICH_EID), "lvl": ("بیشترین سطح‌ها", TOP_LVL_EID), "fam": ("فامیل‌سالارها", None)}
+        return InlineKeyboardMarkup([[btn(("👨‍👩‍👧 " if k == "fam" else "") + opts[k][0], "primary", icon=opts[k][1], callback_data=f"tp:{k}") if opts[k][1] else btn("👨‍👩‍👧 " + opts[k][0], "primary", callback_data=f"tp:{k}") for k in opts if k != cur]])
     if kind == "lvl":
         rows = await pool.fetch("SELECT user_id, name, username, msg_total FROM users WHERE msg_total > 0 AND user_id <> ALL($1::bigint[]) ORDER BY msg_total DESC LIMIT 10", list(ADMIN_IDS))
         rows = [dict(r, lvl=msg_level(r["msg_total"])) for r in rows]
         body = _top_lines(rows, "lvl", "سطح", ids) if rows else "هنوز کسی تو لیست نیست!"
         text = f'<tg-emoji emoji-id="{TOP_LVL_EID}">⭐</tg-emoji> <b>۱۰ نفر با بیشترین سطح</b>\n\n{body}'
-        kb = InlineKeyboardMarkup([[btn("پولدارها", "primary", icon=TOP_RICH_EID, callback_data="tp:rich")]])
+    elif kind == "fam":
+        rows = await family_leaders(10)
+        body = _top_lines(rows, "fam", "نفر فامیل", ids) if rows else "هنوز هیچ خانواده‌ای تو لیست نیست!"
+        text = f'👨‍👩‍👧 <b>۱۰ فامیل‌سالار برتر</b>\n<i>بالاترین جدِ بزرگ‌ترین خانواده‌ها</i>\n\n{body}'
     else:
         rows = await pool.fetch("SELECT user_id, name, username, balance FROM users WHERE balance > 0 AND user_id <> ALL($1::bigint[]) ORDER BY balance DESC LIMIT 10", list(ADMIN_IDS))
         body = _top_lines(rows, "balance", "تومن", ids) if rows else "هنوز کسی تو لیست نیست!"
         text = f'<tg-emoji emoji-id="{TOP_RICH_EID}">💰</tg-emoji> <b>۱۰ نفر از پولدارها</b>\n\n{body}'
-        kb = InlineKeyboardMarkup([[btn("بیشترین سطح‌ها", "primary", icon=TOP_LVL_EID, callback_data="tp:lvl")]])
-    return text, kb
+    return text, kb_for(kind)
 
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7859,7 +7917,7 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def top_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    kind = "lvl" if q.data == "tp:lvl" else "rich"
+    kind = {"tp:lvl": "lvl", "tp:fam": "fam"}.get(q.data, "rich")
     ids = q.from_user.id in ADMIN_IDS and q.message.chat.type == "private"
     text, kb = await _top_view(kind, ids)
     try:
@@ -8727,13 +8785,13 @@ async def spy_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
             if used >= SPY_DAILY_LIMIT:
                 await msg.reply_text(B(f"سهمیه‌ی امروزت تموم شده. روزانه فقط {SPY_DAILY_LIMIT} بار جاسوسی مجازه؛ فردا دوباره شارژ می‌شه."), parse_mode="HTML"); return True
             await c.execute("UPDATE users SET spy_day=$1, spy_uses=$2 WHERE user_id=$3", day, used+1, user.id)
-            row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,job_level,energy FROM users WHERE user_id=$1", target.id)
+            row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,job_level,job_sel,energy FROM users WHERE user_id=$1", target.id)
             if not row:
                 await c.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
-                row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,job_level,energy FROM users WHERE user_id=$1", target.id)
+                row = await c.fetchrow("SELECT user_id,name,balance,bank_balance,spouse_id,gender,jaghs,work_count,job_level,job_sel,energy FROM users WHERE user_id=$1", target.id)
             spouse = await c.fetchrow("SELECT name FROM users WHERE user_id=$1", row["spouse_id"]) if row["spouse_id"] else None
             acts = await c.fetchrow("SELECT (SELECT count(*) FROM group_msgs WHERE user_id=$1) AS messages, (SELECT count(*) FROM cars WHERE user_id=$1) AS cars, (SELECT count(*) FROM user_house WHERE user_id=$1) AS homes, (SELECT count(*) FROM robbery_state WHERE user_id=$1) AS robberies", target.id)
-    job = current_job(row["gender"], int(row["jaghs"] or 0), int(row["work_count"] or 0), _jlvl(row)) if row["gender"] in JOBS else None
+    job = current_job(row["gender"], int(row["jaghs"] or 0), int(row["work_count"] or 0), _jsel(row)) if row["gender"] in JOBS else None
     job_name = job[1] if job else "بدون شغل"
     marital = f"متأهل با {html.escape(spouse['name'] or 'همسر') }" if spouse else "مجرد"
     activity = f"امتیاز ثبت‌شده: {int(row['jaghs'] or 0):,}\nشیفت‌های کاری: {int(row['work_count'] or 0):,}\nپیام‌های ثبت‌شده در گروه‌ها: {int(acts['messages'] or 0):,}\nعملیات خلاف ثبت‌شده: {int(acts['robberies'] or 0):,}\nماشین‌ها: {int(acts['cars'] or 0)}\nخانه‌ها: {int(acts['homes'] or 0)}"
@@ -9273,7 +9331,7 @@ def _jobtag_for_row(row) -> str:
     try:
         g = row["gender"] if row else None
         if g in JOBS:
-            job = current_job(g, int(row["jaghs"] or 0), int(row["work_count"] or 0), _jlvl(row))
+            job = current_job(g, int(row["jaghs"] or 0), int(row["work_count"] or 0), _jsel(row))
             if job:
                 return _jobtag_clean(job[1]) or JOBTAG_UNEMPLOYED
     except Exception:
@@ -9916,7 +9974,7 @@ def render_card_image(gender: str, level: int, balance: int) -> BytesIO | None:
 async def send_card(bot, chat_id: int, row, reply_to: int | None = None, text: str | None = None, reply_markup=None, img_balance: int | None = None):
     """کارت کاراکتر کاربر: عکس + کپشن (اسم، سطح، موجودی). اگه یه مرحله خطا بده میره سراغ مرحله‌ی بعد، ولی تا جایی که بشه عکس همراه کپشن میاد."""
     gender = row["gender"]
-    job = current_job(gender, row["jaghs"], row["work_count"], _jlvl(row)) if row["gender"] else None
+    job = current_job(gender, row["jaghs"], row["work_count"], _jsel(row)) if row["gender"] else None
     lvl = msg_char_level(int(row["msg_total"] or 0))
     try:
         _sk = await special_current(int(row["user_id"]))
@@ -16559,14 +16617,14 @@ def _is_bot_text_command(text: str) -> bool:
     exact = {
         ME_WORD, "تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks",
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
-        "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده", "شجرهنامه", "فرزندخواندگی", "فرزندخوندگی", "جینگوفرزندخواندگی", "جینگوفرزندخوندگی", "جینگوفرزندخونده", "جینگوفرزندخوانده", "جینگوشجرهنامه", "درختخانواده",
+        "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده", "شجرهنامه", "پولتوجیبی", "ترکخانواده", "عاق", "فرزندخواندگی", "فرزندخوندگی", "جینگوفرزندخواندگی", "جینگوفرزندخوندگی", "جینگوفرزندخونده", "جینگوفرزندخوانده", "جینگوشجرهنامه", "درختخانواده",
         "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلدرسی", "دوئلدرس",
         "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
     if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in EDU_WORDS or key in LESSON_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
         return True
-    if key.startswith(("واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
+    if key.startswith(("عیدی", "واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
         return True
     t = norm_word(raw).translate(_DIG)
     return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
@@ -17928,8 +17986,6 @@ async def adopt_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     target = msg.reply_to_message.from_user if msg.reply_to_message else None
     if not target or target.is_bot or target.id == user.id:
         await msg.reply_text("برای فرزندخواندگی، روی پیام کاربر موردنظرت ریپلای کن و «جینگو فرزندخواندگی» بنویس."); return True
-    if user.id in ADMIN_IDS or target.id in ADMIN_IDS:
-        await msg.reply_text("🛡 حساب‌های پشتیبانی امکان فرزندخواندگی ندارن."); return True
     await upsert_user(user.id, user.full_name)
     await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
     me = await get_user(user.id); other = await get_user(target.id)
@@ -17938,8 +17994,6 @@ async def adopt_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     spouse_id = int(me["spouse_id"])
     if target.id == spouse_id:
         await msg.reply_text("همسرت رو که نمی‌تونی فرزندخونده کنی 😅"); return True
-    if other and other["spouse_id"]:
-        await msg.reply_text("کسی که ازدواج کرده نمی‌تونه فرزندخونده بشه."); return True
     if await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", target.id):
         await msg.reply_text("این کاربر قبلاً فرزندخونده‌ی یه خانواده شده."); return True
     if await _adopt_is_ancestor(target.id, user.id) or await _adopt_is_ancestor(target.id, spouse_id):
@@ -17980,8 +18034,6 @@ async def adopt_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ch, pa = by.get(child), by.get(parent)
             if not ch or not pa or not pa["spouse_id"]:
                 err = "والد دیگه متأهل نیست."
-            elif ch["spouse_id"]:
-                err = "کسی که ازدواج کرده نمی‌تونه فرزندخونده بشه."
             elif await c.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", child):
                 err = "این کاربر قبلاً فرزندخونده شده."
             else:
@@ -18251,12 +18303,106 @@ async def family_tree_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+# ───── عیدی، پول توجیبی، ترک خانواده و عاق ─────
+ALLOWANCE_AMOUNT = 50_000
+ALLOWANCE_CD = 24 * 3600
+
+
+async def family_money_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    key = _word_key(text)
+    t = norm_word(text).translate(_DIG)
+    # ── عیدی: والد (ریپلای روی فرزندخونده‌اش) + «عیدی مبلغ»
+    m = re.fullmatch(r"عیدی\s*([\d,]+)?", t)
+    if m:
+        target = msg.reply_to_message.from_user if msg.reply_to_message else None
+        if not target or target.is_bot or target.id == user.id:
+            await msg.reply_text("روی پیام فرزندخونده‌ت ریپلای کن و بنویس: عیدی ۱۰۰۰۰۰"); return True
+        if not m.group(1):
+            await msg.reply_text("مبلغ رو هم بنویس؛ مثلاً: عیدی ۱۰۰۰۰۰"); return True
+        amount = int(m.group(1).replace(",", "") or 0)
+        if amount < 1000:
+            await msg.reply_text("حداقل عیدی ۱٬۰۰۰ تومنه."); return True
+        if not await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1 AND (parent1_id=$2 OR parent2_id=$2)", target.id, user.id):
+            await msg.reply_text("عیدی رو فقط والدین به فرزندخونده‌ی خودشون می‌تونن بدن."); return True
+        await upsert_user(user.id, user.full_name)
+        async with pool.acquire() as c:
+            async with c.transaction():
+                bal = await c.fetchval("UPDATE users SET balance=balance-$1::bigint WHERE user_id=$2::bigint AND balance>=$1::bigint RETURNING balance", amount, user.id)
+                if bal is not None:
+                    await c.execute("UPDATE users SET balance=balance+$1::bigint WHERE user_id=$2::bigint", amount, target.id)
+        if bal is None:
+            await msg.reply_text("تو جیبت این‌قدر پول نداری."); return True
+        await send_html(context.bot, msg.chat_id, B(f"🧧 {_ulink(user.id, user.full_name)} به فرزندش {_ulink(target.id, target.full_name)} <b>{amount:,}</b> تومن عیدی داد!"),
+                        reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)); return True
+    # ── پول توجیبی: فرزندخونده، روزی یه بار، از جیب یکی از والدین
+    if key in ("پولتوجیبی", "پولتوجیبی", "پولتوجیب", "توجیبی", "پولتوجیبیمیخوام"):
+        par = await pool.fetchrow("SELECT parent1_id, parent2_id FROM adoptions WHERE child_id=$1", user.id)
+        if not par:
+            await msg.reply_text("پول توجیبی فقط برای فرزندخونده‌هاست."); return True
+        now = time.time()
+        last = await pool.fetchval("SELECT last_ts FROM actor_cooldowns WHERE actor_id=$1 AND kind='allowance'", user.id) or 0
+        left = ALLOWANCE_CD - (now - float(last))
+        if left > 0:
+            await msg.reply_text(f"امروز پول توجیبیت رو گرفتی؛ {_duration_fa(int(left) + 1)} دیگه می‌تونی دوباره بگیری."); return True
+        paid = None
+        async with pool.acquire() as c:
+            async with c.transaction():
+                for pid in (int(par["parent1_id"]), int(par["parent2_id"])):
+                    ok = await c.fetchval("UPDATE users SET balance=balance-$1::bigint WHERE user_id=$2::bigint AND balance>=$1::bigint RETURNING user_id", ALLOWANCE_AMOUNT, pid)
+                    if ok is not None:
+                        paid = pid; break
+                if paid is not None:
+                    await c.execute("UPDATE users SET balance=balance+$1::bigint WHERE user_id=$2::bigint", ALLOWANCE_AMOUNT, user.id)
+                    await c.execute("INSERT INTO actor_cooldowns(actor_id,kind,last_ts) VALUES($1,'allowance',$2) ON CONFLICT(actor_id,kind) DO UPDATE SET last_ts=EXCLUDED.last_ts", user.id, now)
+        if paid is None:
+            await msg.reply_text("والدینت الان پول توجیبی ندارن 😅"); return True
+        pr = await get_user(paid)
+        await send_html(context.bot, msg.chat_id, B(f"💵 {_ulink(user.id, user.full_name)} {ALLOWANCE_AMOUNT:,} تومن پول توجیبی از {_ulink(paid, (pr['name'] if pr else None) or 'والدش')} گرفت!"),
+                        reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)); return True
+    # ── ترک خانواده (فرزندخونده، با تایید)
+    if key in ("ترکخانواده", "ترکخانواده‌"):
+        if not await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", user.id):
+            await msg.reply_text("تو فرزندخونده‌ی هیچ خانواده‌ای نیستی."); return True
+        kb = InlineKeyboardMarkup([[btn("✅ آره، ترک می‌کنم", "danger", callback_data=f"fam:leave:{user.id}:y"), btn("انصراف", "primary", callback_data=f"fam:leave:{user.id}:n")]])
+        await msg.reply_text("مطمئنی می‌خوای خانواده‌ت رو ترک کنی؟ از شجره‌نامه‌ی اونا حذف می‌شی.", reply_markup=kb); return True
+    # ── عاق: والد، ریپلای روی فرزندخونده
+    if key in ("عاق", "عاقکردن", "عاقش‌کن", "عاقشکن"):
+        target = msg.reply_to_message.from_user if msg.reply_to_message else None
+        if not target or target.is_bot:
+            await msg.reply_text("روی پیام فرزندخونده‌ت ریپلای کن و «عاق» بنویس."); return True
+        n = await pool.fetchval("DELETE FROM adoptions WHERE child_id=$1 AND (parent1_id=$2 OR parent2_id=$2) RETURNING 1", target.id, user.id)
+        if not n:
+            await msg.reply_text("این کاربر فرزندخونده‌ی تو نیست."); return True
+        await send_html(context.bot, msg.chat_id, B(f"💔 {_ulink(user.id, user.full_name)} فرزندخونده‌ش {_ulink(target.id, target.full_name)} رو عاق کرد."),
+                        reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)); return True
+    return False
+
+
+async def family_leave_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        _, _, uid_s, act = q.data.split(":"); uid = int(uid_s)
+    except (ValueError, IndexError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این دکمه مال تو نیست.", show_alert=True); return
+    if act == "n":
+        await q.answer("انصراف داده شد."); await edit_html(q, B("باشه، خانواده‌ت رو ترک نکردی ❤️")); return
+    n = await pool.fetchval("DELETE FROM adoptions WHERE child_id=$1 RETURNING 1", uid)
+    await q.answer("انجام شد.")
+    await edit_html(q, B("💔 خانواده‌ت رو ترک کردی." if n else "تو فرزندخونده‌ی هیچ خانواده‌ای نیستی."))
+
+
+
 async def marriage_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     key=_word_key(text); msg=update.effective_message; user=update.effective_user
     if key in ("همسرم","خانوادهزنم","خانوادههمسرم","خانواده"):
         await family_panel(update, context); return True
     if key in ADOPT_WORDS:
         return await adopt_request(update, context)
+    if await family_money_text(update, context, text):
+        return True
     if key in TREE_WORDS:
         await upsert_user(user.id, user.full_name)
         try:
@@ -18274,8 +18420,6 @@ async def marriage_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
     target=msg.reply_to_message.from_user if msg.reply_to_message else None
     if not target or target.is_bot or target.id==user.id:
         await msg.reply_text("برای خواستگاری، روی پیام فرد موردنظرت ریپلای کن و «ازدواج» بنویس."); return True
-    if user.id in ADMIN_IDS or target.id in ADMIN_IDS:
-        await msg.reply_text("🛡 حساب‌های پشتیبانی امکان ازدواج ندارن."); return True
     await upsert_user(user.id,user.full_name)
     await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING",target.id,target.full_name)
     a,b=await pool.fetch("SELECT user_id,gender,spouse_id FROM users WHERE user_id=ANY($1::bigint[])",[user.id,target.id])
@@ -18297,9 +18441,6 @@ async def marriage_cb(update,context):
     if q.from_user.id!=bride: await q.answer("فقط عروس می‌تونه جواب بده.",show_alert=True); return
     prop=await pool.fetchrow("SELECT groom_id,chat_id FROM marriage_proposals WHERE bride_id=$1",bride)
     if not prop or int(prop['groom_id'])!=groom: await q.answer("درخواست منقضی شده.",show_alert=True); return
-    if bride in ADMIN_IDS or groom in ADMIN_IDS:
-        await pool.execute("DELETE FROM marriage_proposals WHERE bride_id=$1",bride)
-        await q.answer("حساب‌های پشتیبانی امکان ازدواج ندارن.",show_alert=True); return
     if act=="no":
         await pool.execute("DELETE FROM marriage_proposals WHERE bride_id=$1",bride)
         await q.answer("درخواست رد شد."); await q.edit_message_text("💔 درخواست ازدواج رد شد."); return
@@ -18315,6 +18456,10 @@ async def marriage_cb(update,context):
             await c.execute("UPDATE users SET spouse_id=CASE WHEN user_id=$1 THEN $2 ELSE $1 END WHERE user_id IN ($1,$2)",bride,groom)
     await q.answer("مبارکه! 💍"); await q.edit_message_text("💍 ازدواجتون ثبت شد! از این به بعد با نوشتن «همسرم» می‌تونید خانواده و انرژی همسرتون رو ببینید.")
 
+def _is_support(uid: int) -> bool:
+    return uid in ADMIN_IDS or uid in STAFF
+
+
 async def affair_cb(update,context):
     q=update.callback_query; _,act,cheater_s,spouse_s,chat_s=q.data.split(":"); cheater=int(cheater_s); spouse=int(spouse_s)
     if q.from_user.id!=spouse: await q.answer("این تصمیم فقط برای همسرته.",show_alert=True); return
@@ -18323,12 +18468,127 @@ async def affair_cb(update,context):
         async with c.transaction():
             row=await c.fetchrow("SELECT balance,bank_balance FROM users WHERE user_id=$1 FOR UPDATE",cheater)
             if not row: await q.answer("کاربر پیدا نشد.",show_alert=True); return
-            amount=int((int(row['balance'])+int(row['bank_balance']))*0.10)
+            amount=0 if (_is_support(cheater) or _is_support(spouse)) else int((int(row['balance'])+int(row['bank_balance']))*0.10)   # طلاق با پشتیبان: پولی جابه‌جا نمیشه
             from_bank=min(int(row['bank_balance']),amount); from_pocket=amount-from_bank
             await c.execute("UPDATE users SET bank_balance=bank_balance-$1,balance=balance-$2,spouse_id=NULL WHERE user_id=$3",from_bank,from_pocket,cheater)
             await c.execute("UPDATE users SET spouse_id=NULL,balance=balance+$1 WHERE user_id=$2",amount,spouse)
             await c.execute("DELETE FROM couple_relation WHERE pair_key=$1",_pair_key(cheater,spouse))
-    await q.answer("طلاق ثبت شد."); await q.edit_message_text(f"💔 طلاق ثبت شد. {amount:,} تومان (۱۰٪ دارایی همسر سابقت) به حسابت منتقل شد.")
+    await q.answer("طلاق ثبت شد.")
+    await q.edit_message_text(f"💔 طلاق ثبت شد. {amount:,} تومان (۱۰٪ دارایی همسر سابقت) به حسابت منتقل شد." if amount else "💔 طلاق ثبت شد. (چون یکی از طرفین پشتیبانه، هیچ پولی جابه‌جا نشد.)")
+
+# ───── فامیل: اجتماع خانواده، برچسب نسبت و لیدربرد «فامیل‌سالارها» ─────
+async def _family_component(uid: int, limit: int = 400) -> set:
+    """همه‌ی اعضای خانواده‌ی یه نفر: والدین، فرزندها و همسرها (به‌صورت زنجیره‌ای)."""
+    seen = {uid}
+    frontier = [uid]
+    for _ in range(20):
+        if not frontier or len(seen) >= limit:
+            break
+        rows = await pool.fetch("SELECT child_id, parent1_id, parent2_id FROM adoptions WHERE child_id=ANY($1::bigint[]) OR parent1_id=ANY($1::bigint[]) OR parent2_id=ANY($1::bigint[])", frontier)
+        sp = await pool.fetch("SELECT user_id, spouse_id FROM users WHERE spouse_id IS NOT NULL AND (user_id=ANY($1::bigint[]) OR spouse_id=ANY($1::bigint[]))", frontier)
+        nxt = set()
+        for r in rows:
+            nxt.update((int(r["child_id"]), int(r["parent1_id"]), int(r["parent2_id"])))
+        for r in sp:
+            nxt.update((int(r["user_id"]), int(r["spouse_id"])))
+        frontier = list(nxt - seen)
+        seen |= nxt
+    return seen
+
+
+async def family_relation_label(a: int, b: int):
+    """b برای a چه نسبتی داره؟ (مثلاً «عموته»)؛ اگه فامیل نباشن None."""
+    async def parents(x):
+        r = await pool.fetchrow("SELECT parent1_id, parent2_id FROM adoptions WHERE child_id=$1", x)
+        return [int(r["parent1_id"]), int(r["parent2_id"])] if r else []
+
+    async def kids(x):
+        rows = await pool.fetch("SELECT child_id FROM adoptions WHERE parent1_id=$1 OR parent2_id=$1", x)
+        return [int(r["child_id"]) for r in rows]
+
+    async def gender(x):
+        return await pool.fetchval("SELECT gender FROM users WHERE user_id=$1", x)
+
+    pa, pb = await parents(a), await parents(b)
+    gb = await gender(b)
+    male = gb == "m"
+    if b in pa:
+        return "پدرته" if male else "مادرته"
+    if a in pb:
+        return "پسرته" if male else "دخترته"
+    if set(pa) & set(pb):
+        return "برادرته" if male else "خواهرته"
+    for p in pa:                      # عمو/عمه/دایی/خاله
+        if set(await parents(p)) & set(pb):
+            if await gender(p) == "m":
+                return "عموته" if male else "عمه‌ته"
+            return "داییته" if male else "خاله‌ته"
+    for p in pb:                      # برادرزاده/خواهرزاده
+        if set(await parents(p)) & set(pa):
+            return "برادرزاده‌ته" if await gender(p) == "m" else "خواهرزاده‌ته"
+    for p in pa:                      # پدربزرگ/مادربزرگ
+        if b in await parents(p):
+            return "پدربزرگته" if male else "مادربزرگته"
+    for p in pb:                      # نوه
+        if a in await parents(p):
+            return "نواته"
+    if b in await _family_component(a):
+        return "جزو فامیلته"
+    return None
+
+
+async def family_leaders(limit: int = 10):
+    """هر خانواده یه ردیف: بالاترین جدِ خانواده (فامیل‌سالار) با تعداد کل افراد فامیل (بدون خودش)."""
+    adopt = await pool.fetch("SELECT child_id, parent1_id, parent2_id, created_at FROM adoptions ORDER BY created_at")
+    if not adopt:
+        return []
+    par: dict = {}
+    def find(x):
+        while par.setdefault(x, x) != x:
+            par[x] = par[par[x]]; x = par[x]
+        return x
+    def union(x, y):
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            par[rx] = ry
+    kids: dict = {}
+    children = set()
+    first_ts: dict = {}
+    for r in adopt:
+        c, p1, p2 = int(r["child_id"]), int(r["parent1_id"]), int(r["parent2_id"])
+        union(c, p1); union(c, p2)
+        children.add(c)
+        for p in (p1, p2):
+            kids.setdefault(p, []).append(c)
+            first_ts.setdefault(p, float(r["created_at"]))
+    ids = list(par.keys())
+    sp = await pool.fetch("SELECT user_id, spouse_id FROM users WHERE spouse_id IS NOT NULL AND (user_id=ANY($1::bigint[]) OR spouse_id=ANY($1::bigint[]))", ids)
+    for r in sp:
+        union(int(r["user_id"]), int(r["spouse_id"]))
+    members: dict = {}
+    for x in list(par.keys()):
+        members.setdefault(find(x), set()).add(x)
+
+    def desc(x, seen):
+        n = 0
+        for c in kids.get(x, []):
+            if c not in seen:
+                seen.add(c); n += 1 + desc(c, seen)
+        return n
+
+    out = []
+    for comp in members.values():
+        roots = [x for x in comp if x in kids and x not in children and x not in ADMIN_IDS]
+        if not roots:
+            continue
+        head = sorted(roots, key=lambda x: (-desc(x, {x}), first_ts.get(x, 0), x))[0]
+        out.append((len(comp) - 1, head))
+    out.sort(key=lambda t: -t[0])
+    out = out[:limit]
+    rows = await pool.fetch("SELECT user_id, name, username FROM users WHERE user_id=ANY($1::bigint[])", [h for _, h in out])
+    by = {int(r["user_id"]): r for r in rows}
+    return [{"user_id": h, "name": (by[h]["name"] if h in by else None), "username": (by[h]["username"] if h in by else None), "fam": n} for n, h in out]
+
 
 async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> bool:
     msg,user=update.effective_message,update.effective_user
@@ -18348,11 +18608,20 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     if me['spouse_id'] and int(me['spouse_id'])!=target.id:
         affair=True; cheater_id=user.id; spouse_id=int(me['spouse_id'])
     poach=bool(them['spouse_id']) and int(them['spouse_id'])!=user.id   # طرف مقابل همسر دارد (و همسرش خود بوس‌کننده نیست)
+    fam_label=None
+    if affair or poach:   # فامیل‌ها (مثلاً عمو، پدر، خواهر...) با بوس و بغل خیانت حساب نمی‌شن
+        fam_label=await family_relation_label(user.id,target.id)
+        if fam_label:
+            affair=False; poach=False
     energy_gain=2.0 if married else round(random.uniform(*HUG_ENERGY),1)
     sk_u=await special_key_active(user.id,SPECIAL_HUG_KEYS); sk_t=await special_key_active(target.id,SPECIAL_HUG_KEYS)
     gain_u=SPECIAL_HUG_ENERGY if sk_u else energy_gain      # کاراکتر ویژه: ۲۰ انرژی
     gain_t=SPECIAL_HUG_ENERGY if sk_t else energy_gain
     money=random.randint(*HUG_MONEY)
+    _hev=hug_event_mult()
+    if _hev:   # ایونت محبوبیت: انرژی هر دو ۱۰۰٪ و پول ×ضریب
+        gain_u=gain_t=ENERGY_MAX
+        money=int(money*_hev)
     async with pool.acquire() as c:
         async with c.transaction():
             await c.execute("INSERT INTO affection_cooldowns(actor_id,target_id,last_ts) VALUES($1,$2,$3) ON CONFLICT(actor_id,target_id) DO UPDATE SET last_ts=EXCLUDED.last_ts",user.id,target.id,now)
@@ -18371,11 +18640,14 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     en=RLM+random.choice(HUG_ENERGY_LINES).format(ea=pct(s_en),eb=pct(t_en))
     mn=RLM+random.choice(HUG_MONEY_LINES).format(m=f"{GIFT_MONEY_CE}{GIFT_MONEY_CE}",n=f"{money:,}")
     sk_lines="".join(f"\n{RLM}{nm}: +{_fmt_en(g)} انرژی{skin_tag('محبوبیت')}" for nm,g,on in ((a,gain_u,sk_u),(b,gain_t,sk_t)) if on)   # فقط برای کسی که اسکین محبوبیت فعال داره
-    text=f"<b>{line}\n\n{en}{sk_lines}\n\n{mn}{rel_note}</b>"
+    ev_note=f"\n\n{HUGEV_CE}{EVENT_CE} {RLM}ایونت محبوبیت: انرژی ۱۰۰٪ و پول ×{_hev:g}!" if _hev else ""
+    text=f"<b>{line}\n\n{en}{sk_lines}\n\n{mn}{rel_note}{ev_note}</b>"
     await msg.reply_text(text,parse_mode="HTML")
     await task_event(context.bot, msg.chat_id, user.id, "hug", name=user.full_name)
     act_past="بغل کرد" if kind=="hug" else "بوسید"      # کی کیو چیکار کرد
     A=_ltr_name(user.id,user.full_name); T=_ltr_name(target.id,target.full_name)   # لینک‌شده و ایزوله‌ی راست‌به‌چپ (اسم‌های لاتین/عدد دار به‌هم نمی‌ریزن)
+    if fam_label:
+        await msg.reply_text(B(f"{RLM}✅ خیانت محسوب نشد؛ {T} {fam_label}!"),parse_mode="HTML")
     if poach:
         await pool.execute("UPDATE users SET energy=GREATEST(energy-$1::double precision,0) WHERE user_id=$2",AFFAIR_ENERGY_PENALTY,user.id)
         await msg.reply_text(B(f"{RLM}{A} تو حواست هست؟ {A} همین الان {T} رو {act_past}، ولی {T} همسر داره؛ {_fmt_en(AFFAIR_ENERGY_PENALTY)} انرژی منفی می‌گیری تا دیگه رو زوجین لاو ندی 😤"),parse_mode="HTML")
@@ -20124,6 +20396,7 @@ def main():
     app.add_handler(CallbackQueryHandler(bank_cb, pattern=r"^bk:(dep|wd):\d+$"))
     app.add_handler(CallbackQueryHandler(marriage_cb, pattern=r"^mar:(yes|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(adopt_cb, pattern=r"^adp:(yes|no):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(family_leave_cb, pattern=r"^fam:leave:\d+:[yn]$"))
     app.add_handler(CallbackQueryHandler(family_tree_cb, pattern=r"^fam:tree:\d+$"))
     app.add_handler(CallbackQueryHandler(affair_cb, pattern=r"^af:(divorce|forgive):\d+:\d+:\-?\d+$"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
