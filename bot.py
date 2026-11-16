@@ -8307,6 +8307,7 @@ PET_WALK_EID = "5364128318335499401"
 PET_WALK_CE = f'<tg-emoji emoji-id="{PET_WALK_EID}">🚶</tg-emoji>'
 PET_DIR = Path(__file__).parent / "pets"
 _PET_FILEID: dict = {}
+_PET_WARNED: dict = {}
 PET_LINES = {
     "pet": [
         "دستت رو کشیدی رو سرِ {n}؛ چشماش بسته شد و یه لبخندِ سلطنتی زد",
@@ -8361,8 +8362,13 @@ def _pet_src(idx: int, stage: int):
     fid = _PET_FILEID.get((idx, stage))
     if fid:
         return fid
-    f = PET_DIR / f"pet{idx}_{stage}.jpg"
-    return f.read_bytes() if f.exists() else None
+    for f in (PET_DIR / f"pet{idx}_{stage}.jpg", PET_DIR.parent / f"pet{idx}_{stage}.jpg"):   # تو پوشه‌ی pets یا کنار bot.py
+        if f.exists():
+            return f.read_bytes()
+    if (idx, stage) not in _PET_FILEID and not _PET_WARNED.get((idx, stage)):
+        _PET_WARNED[(idx, stage)] = True
+        log.warning("pet image not found: pet%s_%s.jpg (looked in %s and next to bot.py)", idx, stage, PET_DIR)
+    return None
 
 
 def _pet_cache(idx: int, stage: int, message):
