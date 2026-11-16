@@ -6560,7 +6560,7 @@ def _guide_sections() -> list:
         _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
         _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
-        _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه و بعد از هر بازی ۱۵ ثانیه استراحت داری."),
+        _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه و بعد از هر بازی ۱۵ ثانیه استراحت داری.\n<code>جینگو بت 10m</code> (بدون سقف، هر ۱۰ ثانیه یک بار)"),
         _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
         _gq("📋 تسک", "<code>تسک</code>\nتسک‌های روزانه و هفتگی با جایزه؛ ربات خودش پیشرفتت رو حساب می‌کنه."),
@@ -10131,7 +10131,7 @@ def _pm_group_only_text(text: str) -> bool:
     if key in _PM_BLOCK_WORDS or key in CAR_WORDS or key.startswith(("خریدجاسوسی",)):
         return True
     t = norm_word(text).translate(_DIG)
-    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
+    return bool(re.fullmatch(r"جینگو\s*(?:بت|قمار|شرط\s*بندی)(?:\s+.+)?|(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
 
 
 async def purchase_cancel_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -12034,6 +12034,18 @@ SLOT_TIERS = [(60, 2.0), (53, 1.8), (46, 1.7), (36, 1.5), (28, 1.3), (22, 1.2), 
 # استراحت بعد از هر بازی کازینو (تاس، اسلات، مین)
 CASINO_COOLDOWN = 15
 
+# ───── جینگو بت: شرط شانسی بدون سقف؛ برد همیشه ×۱٫۸ (ضریب به کاربر نشون داده نمیشه) و هر ۱۰ ثانیه یک بار ─────
+JINGO_BET_EID = "5442961846053118972"      # آیکن دکمه‌ی پنل
+JINGO_NAME_EID = "5368698786308708223"     # ایموجی کنار مبلغ
+JINGO_WIN_EID = "5402609202378062848"      # ایموجی بعد از جمله‌ی برد
+JINGO_WIN_LINES = ("دسخوش حاجی", "ترکوندی شیر")
+JINGO_LOSE_LINES = (("به قول قلعه نویی بازیه دیگه", "5368779029182695865"),
+                    ("اشکال نداره دست بعدی تو میتونی", "5244727536016970540"))
+JINGO_MULT = 1.8            # ضریب برد (مخفی)
+JINGO_WIN_CHANCE = 0.45     # شانس برد
+JINGO_COOLDOWN = 10         # ثانیه
+JINGO_RE = re.compile(r"جینگو\s*(?:بت|قمار|شرط\s*بندی)\s*(.*)", re.S)
+
 DICE_EID = "5123323069850452850"
 DICE_CE = f'<tg-emoji emoji-id="{DICE_EID}">🎲</tg-emoji>'
 SLOT_SYMS = [
@@ -12043,7 +12055,7 @@ SLOT_SYMS = [
     '<tg-emoji emoji-id="5357158630091139922">7️⃣</tg-emoji>',
 ]
 GAME_EMOJI = {"dice": "🎲", "slot": "🎰", "darts": "🎯", "bowl": "🎳", "hoop": "🏀"}  # ایموجی خودِ تلگرام برای sendDice
-GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "موشک کاغذی 🛩", "mines": f"مین {MINES_BOMB_CE}", "poison": "سم یا خوراکی ☠️",
+GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "موشک کاغذی 🛩", "mines": f"مین {MINES_BOMB_CE}", "poison": "سم یا خوراکی ☠️", "jingo": "جینگو بت",
            "darts": "دارت 🎯", "bowl": "بولینگ 🎳", "hoop": "بسکتبال 🏀"}
 
 
@@ -12197,6 +12209,7 @@ def panel_main(uid: int):
         btn("مین", "primary", icon=MINES_BOMB_EID, callback_data=f"cz:g:{uid}:mines"),
     ], ([btn("🛩 موشک کاغذی", "success", callback_data=f"cz:g:{uid}:crash")] if crash_allowed(uid) else [])
        + [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")],
+       [btn("جینگو بت", "success", icon=JINGO_BET_EID, callback_data=f"cz:g:{uid}:jingo")],
        [btn("🏅 بازی‌های ورزشی", "success", callback_data=f"sg:m:{uid}")]])
     return text, kb
 
@@ -12246,6 +12259,9 @@ def panel_game(uid: int, game: str):
     if game == "dice":
         rules = (f"{DICE_CE} تاس\n\n۱ نفره: یه عدد ۱ تا ۶ حدس می‌زنی؛ درست بیاد {DICE_NET + 1} برابر پولت رو می‌گیری.\n"
                  f"۲ نفره: یه میز تو گروه باز می‌شه، نفر دوم میاد؛ هر کی تاس بالاتر بندازه کل پول رو می‌بره.")
+    elif game == "jingo":
+        rules = ("🎲 جینگو بت\n\nاول مبلغ شرط رو تعیین می‌کنی، بعد شانستو امتحان می‌کنی! سقف نداره و هر ۱۰ ثانیه یه بار می‌تونی بت کنی.\n"
+                 "میانبر: <code>جینگو بت 10m</code> یا <code>جینگو قمار 10m</code> یا <code>جینگو شرط بندی 10m</code>")
     elif game == "poison":
         rules = "☠️ سم یا خوراکی — فقط دو نفره\n\n۲۴ خانه وجود داره. هر نفر در ۶۰ ثانیه سم خودش رو پشت یک خانه مخفی می‌کنه. بعد به نوبت خانه‌های حریف رو انتخاب می‌کنید؛ پیدا کردن سم حریف یعنی بردن کل شرط! انتخاب هر مرحله ۶۰ ثانیه مهلت داره."
     elif game == "crash":
@@ -12259,7 +12275,8 @@ def panel_game(uid: int, game: str):
                  "هر سه تا نماد تو یکی باشه ×۳ | دوتاش ×۱٫۷ | فقط یکیش ×۰٫۳ | هیچی نیاد می‌بازی.\n\n"
                  "۲ نفره: ربات اسلات می‌ندازه؛ نماد امتیاز داره (🔔 صفر | 🍇 ۱۰ | 🍋 ۱۵ | 7️⃣ ۲۱) و هر کی امتیاز بیشتر بیاره کل پول رو می‌بره.")
     kb = InlineKeyboardMarkup([
-        ([btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1")] if game in ("mines", "crash")
+        ([btn("🎲 شروع بت", "success", callback_data=f"cz:a:{uid}:jingo:1")] if game == "jingo"
+         else [btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1")] if game in ("mines", "crash")
          else [btn("👥 ۲ نفره", "success", callback_data=f"cz:a:{uid}:poison:2")] if game == "poison"
          else [btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1"),
                btn("👥 ۲ نفره", "success", callback_data=f"cz:a:{uid}:{game}:2")]),
@@ -12271,7 +12288,7 @@ def panel_game(uid: int, game: str):
 def panel_amounts(uid: int, game: str, mode: str):
     who = "۱ نفره" if mode == "1" else "۲ نفره"
     if mode == "1":
-        pre = "n" if game == "dice" else ("pm" if game == "mines" else ("pc" if game == "crash" else "ps"))
+        pre = "pj" if game == "jingo" else "n" if game == "dice" else ("pm" if game == "mines" else ("pc" if game == "crash" else "ps"))
     else:
         pre = "sy" if game == "poison" else ("td" if game == "dice" else "ts")
     rows, row = [], []
@@ -12376,6 +12393,56 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
         await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
     finally:
         busy.discard(user.id)
+
+
+async def play_jingo(bot, context, chat_id: int, user, bet: int, reply_to: int | None = None, q=None):
+    """جینگو بت: بدون سقف، شانسی؛ برد ×۱٫۸ (مخفی) و فقط مبلغ برد/باخت نشون داده میشه. هر ۱۰ ثانیه یک بار."""
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    again_kb = None
+    if q is not None:
+        again_kb = InlineKeyboardMarkup([
+            [btn("🔄 دوباره", "success", callback_data=f"cz:a:{user.id}:jingo:1")],
+            [btn("برگشت", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")],
+        ])
+
+    async def say(text, kb=None):
+        if q is not None:
+            await edit_html(q, text, kb if kb is not None else again_kb)
+        else:
+            await send_html(bot, chat_id, text, reply_parameters=rp)
+
+    if bet < CASINO_MIN_BET:
+        await say(BP(f"حداقل شرط {CASINO_MIN_BET:,} تومنه."))
+        return
+    cds = context.application.bot_data.setdefault("jingo_cd", {})
+    left = JINGO_COOLDOWN - (time.time() - cds.get(user.id, 0))
+    if left > 0:
+        await say(B(f"{HG_CE} هر {JINGO_COOLDOWN} ثانیه یه بار می‌تونی بت کنی؛ {int(left) + 1} ثانیه دیگه."))
+        return
+    cds[user.id] = time.time()   # پیش از هر await، تا دو پیام پشت‌سرهم دوبار حساب نشن
+    await upsert_user(user.id, user.full_name)
+    if await _take(user.id, bet) is None:
+        cds.pop(user.id, None)
+        row = await get_user(user.id)
+        await say(B(f"{ce('wallet', 1, '💰')} دارایی‌ت کافی نیست! موجودی: {row['balance']:,} تومن"))
+        return
+    link = _ulink(user.id, user.full_name)
+    money = f'<tg-emoji emoji-id="{JINGO_NAME_EID}">💰</tg-emoji>'
+    if random.random() < JINGO_WIN_CHANCE:
+        payout = int(bet * JINGO_MULT)
+        await _give(user.id, payout)
+        profit = payout - bet
+        tail = f'{random.choice(JINGO_WIN_LINES)} <tg-emoji emoji-id="{JINGO_WIN_EID}">🔥</tg-emoji>'
+        amount = f"{profit:,}"
+    else:
+        line, eid = random.choice(JINGO_LOSE_LINES)
+        tail = f'{line} <tg-emoji emoji-id="{eid}">😅</tg-emoji>'
+        amount = f"\u200e-{bet:,}"
+    await say(B(f"{link}\n\n{money} <b>{amount}</b> تومن\n\n{tail}"))
+    try:
+        await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
+    except Exception:
+        log.warning("jingo task_event failed", exc_info=True)
 
 
 # ───── اسلات ۱ نفره: روی یه نماد شرط می‌بنده و خودش 🎰 می‌فرسته ─────
@@ -13246,6 +13313,9 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["crash_target_custom"] = int(parts[3])
         await edit_html(q, B(f"ضریب هدفت رو بفرست (عدد بین {CRASH_MIN_TARGET:g} تا {CRASH_MAX:g}). مثال: 2.5"),
                         InlineKeyboardMarkup([[btn("لغو", None, callback_data=f"cz:pc:{uid}:{parts[3]}")]]))
+    elif act == "pj":
+        await q.answer()
+        await play_jingo(bot, context, chat_id, user, int(parts[3]), q=q)
     elif act == "ps":
         await q.answer()
         bet = int(parts[3])
@@ -13722,7 +13792,7 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     msg, user = update.effective_message, update.effective_user
     t = norm_word(text).translate(_DIG)
     if not CASINO_OPEN:
-        if re.fullmatch(r"کازینو|casino|(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I):
+        if re.fullmatch(r"کازینو|casino|جینگو\s*(?:بت|قمار|شرط\s*بندی)(?:\s+.+)?|(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I):
             await send_html(
                 context.bot, msg.chat_id,
                 B(f'<tg-emoji emoji-id="{CASINO_CLOSED_EID}">🔒</tg-emoji> {CASINO_CLOSED_TEXT}'),
@@ -13738,13 +13808,15 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     if custom_choice:
         custom_game, custom_mode = custom_choice
         amt = parse_amount(t)
-        if amt < CASINO_MIN_BET or amt > CASINO_MAX_BET:
+        if amt < CASINO_MIN_BET or (amt > CASINO_MAX_BET and custom_game != "jingo"):
             context.user_data["casino_custom_bet"] = custom_choice
             await msg.reply_text(BP(f"مبلغ معتبر نیست؛ حداقل {CASINO_MIN_BET:,} و حداکثر {CASINO_MAX_BET:,} تومنه. دوباره بفرست."), parse_mode="HTML")
         elif custom_mode == "2" and custom_game == "poison":
             await create_poison_table(bot, context, chat_id, user, amt, msg.message_id)
         elif custom_mode == "2":
             await create_table(bot, chat_id, user, custom_game, amt, msg.message_id, context=context)
+        elif custom_game == "jingo":
+            await play_jingo(bot, context, chat_id, user, amt, reply_to=msg.message_id)
         elif custom_game == "mines":
             await start_mines(bot, context, chat_id, user, amt, reply_to=msg.message_id)
         elif custom_game == "crash":
@@ -13775,6 +13847,19 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     if context.user_data.get("casino_custom_dice") and re.fullmatch(r"[1-6]", t):
         amt = context.user_data.pop("casino_custom_dice")
         await play_single(bot, context, chat_id, user, "dice", amt, int(t), msg.message_id)
+        return True
+    mj = JINGO_RE.fullmatch(t)
+    if mj:
+        raw = mj.group(1).strip()
+        if not raw:
+            ptext, kb = panel_amounts(user.id, "jingo", "1")
+            await send_html(bot, chat_id, ptext, reply_markup=kb, reply_parameters=rp)
+            return True
+        amt = parse_amount(raw)
+        if amt <= 0:
+            await msg.reply_text(BP("مبلغ رو نفهمیدم. مثال: جینگو بت 10m"), parse_mode="HTML")
+        else:
+            await play_jingo(bot, context, chat_id, user, amt, reply_to=msg.message_id)
         return True
     if re.fullmatch(r"کازینو|casino", t, re.I):
         await send_casino_main(bot, chat_id, user.id, reply_to=msg.message_id)
@@ -16761,7 +16846,7 @@ def _is_bot_text_command(text: str) -> bool:
     if key.startswith(("عیدی", "واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
         return True
     t = norm_word(raw).translate(_DIG)
-    return bool(re.fullmatch(r"(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
+    return bool(re.fullmatch(r"جینگو\s*(?:بت|قمار|شرط\s*بندی)(?:\s+.+)?|(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
 
 
 _USERNAME_SEEN: dict = {}
