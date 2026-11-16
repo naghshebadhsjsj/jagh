@@ -18989,7 +18989,7 @@ def _heist_player_block(p: dict, i: int, active: bool = False) -> list[str]:
     ]
     prefix = "▶️ " if active else ""
     return [
-        f"{prefix}<b>[{uid}] {HEIST_ROLES[i]} ({name})</b>",
+        f"{prefix}<b>{HEIST_ROLES[i]} ({name})</b>",
         f"┘─ ⭐ سطح: {level}  {bar}",
         f"  └─ {labels[i]}: {xp}/{HEIST_XP_PER_LEVEL} XP",
     ]
@@ -19001,7 +19001,8 @@ def _heist_render(g):
     lines = [f"{HEIST_BANK_CE} <b>سرقت از خزانه بانک</b>"]
     if g["state"] == "wait":
         lines.append(f"میز: <b>{len(ps)}/۴</b>")
-        lines.append(f"<b>جینگو خلافکار[{g['owner']}]</b>")
+        owner_name = next((html.escape(p.get("name") or "کاربر") for p in ps if int(p.get("id", 0)) == int(g["owner"])), "کاربر")
+        lines.append(f"<b>جینگو خلافکار: {owner_name}</b>")
         lines.append("〰️〰️〰️〰️〰️")
         for i in range(4):
             if i < len(ps):
@@ -19098,10 +19099,11 @@ def _retry_secs(e) -> float:
 
 
 async def _heist_edit(bot, g, text: str, kb=None) -> bool:
-    plain = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)
-    attempts = [(text, kb), (plain, kb)]
+    # متن پنل را هیچ‌وقت به نسخه‌ی بدون tg-emoji تبدیل نکن؛ این کار شناسه‌های
+    # ایموجی پرمیوم را حذف می‌کرد. در صورت مشکل فقط آیکن دکمه‌ها را حذف کن.
+    attempts = [(text, kb)]
     if kb is not None:
-        attempts.append((plain, _kb_no_icons(kb)))
+        attempts.append((text, _kb_no_icons(kb)))
     for t, k in attempts:
         for tries in range(2):
             try:
