@@ -18948,7 +18948,7 @@ def _heist_questions() -> list:
 
 
 def _heist_layout() -> list:
-    cells = ["money"] * 3 + ["ruby"] + [None] * 5
+    cells = ["money"] * 3 + ["ruby"] + [None] * 8
     random.shuffle(cells)
     return cells
 
@@ -19021,54 +19021,41 @@ def _heist_render(g):
         return B("\n".join(lines)), InlineKeyboardMarkup(rows)
 
     st = g["stage"]
-    lines[0] += f" — ⏱ <b>{_heist_time(g)}</b>"
-    if st == 2:
-        lines.append("👮 <b>نگهبان اینجاست؛ صبر کن بره.</b>" if g.get("guard") else "🟢 <b>نگهبان نیست.</b>")
-    elif st == 3:
-        lines.append("🚨 <b>دوربین روشنه؛ صبر کن خاموش شه.</b>" if g.get("camera") else "🟢 <b>دوربین خاموشه.</b>")
-    if g.get("last"):
-        lines.append(f"📢 {g['last']}")
-    lines.append("")
-    lines.append(f"<b>نوبت: {HEIST_ROLES[st - 1]}</b>")
+    _pl = ps[st - 1] if 0 <= st - 1 < len(ps) else {}
+    lines = [f"<b>نوبت: {html.escape(_pl.get('name') or 'کاربر')} ({HEIST_ROLES[st - 1]})</b>"]
     rows = []
     if st == 1:
-        lines += ["🔓 <b>باز کردن گاوصندوق</b>", f"<code>{g['a']} + {g['b']} = ؟</code>",
-                  f"جواب: <code>{g['typed'] or '—'}</code>"]
+        lines.append(f"<code>{g['a']} + {g['b']} = ؟</code>")
+        lines.append(f"<code>{g['typed'] or '—'}</code>")
         nums = [str(i) for i in range(1, 10)]
         for r in range(3):
-            rows.append([btn(n, "primary", callback_data=f"hs:k:{cid}:{n}") for n in nums[r * 3:r * 3 + 3]])
-        rows.append([btn("⌫", "danger", callback_data=f"hs:k:{cid}:b"),
-                     btn("0", "primary", callback_data=f"hs:k:{cid}:0"),
-                     btn("تأیید", "success", callback_data=f"hs:k:{cid}:ok")])
+            rows.append([btn(n, callback_data=f"hs:k:{cid}:{n}") for n in nums[r * 3:r * 3 + 3]])
+        rows.append([btn("⌫", callback_data=f"hs:k:{cid}:b"),
+                     btn("0", callback_data=f"hs:k:{cid}:0"),
+                     btn("تأیید", callback_data=f"hs:k:{cid}:ok")])
     elif st == 2:
-        lines += ["💰 <b>جمع‌آوری</b>", "۳ خانه را انتخاب کن؛ خانه خالی یعنی شروع دوباره.",
-                  f"برداشت: <b>{len(g['picked'])}/۳ خانه</b>  {_heist_icons(g['picked'])}"]
-        for r in range(3):
+        lines.append("👮 <b>پلیس هست</b>" if g.get("guard") else "🟢 <b>پلیس نیست</b>")
+        for r in range(4):
             row = []
             for i in range(r * 3, r * 3 + 3):
                 if i in g["open"]:
                     k = g["cells"][i]
-                    row.append(btn("پول" if k == "money" else "یاقوت", "success" if k == "money" else "primary",
+                    row.append(btn("پول" if k == "money" else "یاقوت",
                                    icon=HEIST_MONEY_EID if k == "money" else HEIST_RUBY_EID,
                                    callback_data=f"hs:c:{cid}:{i}"))
+                elif i == g.get("spider"):
+                    row.append(btn("🕷️", callback_data=f"hs:c:{cid}:{i}"))
                 else:
-                    row.append(btn("❓", "primary", callback_data=f"hs:c:{cid}:{i}"))
+                    row.append(btn("❓", callback_data=f"hs:c:{cid}:{i}"))
             rows.append(row)
         rows.append([btn("کافیه", "success", callback_data=f"hs:e:{cid}")])
     elif st == 3:
-        total, moved = len(g["items"]), int(g["moved"])
-        filled = min(5, int(moved * 5 / max(1, total)))
-        bar = "▰" * filled + "▱" * (5 - filled)
-        lines += [f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji> <b>جابه‌جایی به ماشین</b>',
-                  f"🚗 {moved}/{total} واحد منتقل شد", f"نوار جابه‌جایی: {bar}"]
+        lines.append("🚨 <b>آژیر روشنه</b>" if g.get("camera") else "🟢 <b>آژیر خاموشه</b>")
         rows.append([btn("انتقال یک واحد", "danger", icon=THEFT_EID, callback_data=f"hs:m:{cid}")])
         rows.append([btn("کافیه", "success", callback_data=f"hs:e:{cid}")])
     else:
         q = g["qs"][g["qi"]]
-        qi = int(g["qi"])
-        bar = "▰" * qi + "▱" * (3 - qi)
-        lines += [f"🚗 <b>رانندگی — سؤال {qi + 1}/۳</b>", f"نوار رانندگی: {bar}",
-                  f"غنیمت: {_heist_icons(g['loot'])}", q["t"]]
+        lines.append(q["t"])
         rows.append([btn("راست", "primary", callback_data=f"hs:d:{cid}:0"),
                      btn("وسط", "primary", callback_data=f"hs:d:{cid}:1"),
                      btn("چپ", "primary", callback_data=f"hs:d:{cid}:2")])
@@ -19236,10 +19223,12 @@ async def _heist_start(bot, g):
     _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
 
 
-def _heist_stage2(g):
+def _heist_stage2(g, keep_layout: bool = False):
     g["stage"] = 2
-    g["cells"] = _heist_layout()
+    if not (keep_layout and g.get("cells") and len(g["cells"]) == 12):
+        g["cells"] = _heist_layout()   # چیدمان ثابت: فقط اول مرحله ساخته میشه، با ریست عوض نمیشه
     g["open"], g["picked"] = set(), []
+    g["spider"] = None
     g["guard"] = random.random() < HEIST_GUARD_CHANCE
 
 
@@ -19414,18 +19403,19 @@ async def _heist_dispatch(q, context, g, act, parts):
             g["typed"] += v
     elif st == 2 and act == "c":
         i = int(parts[3])
+        g["spider"] = None
         if i in g["open"]:
             note, alert = "این خونه رو قبلاً برداشتی.", True
         elif g.get("guard"):
-            _heist_stage2(g)
-            note, alert = "👮 نگهبان متوجه شد! مرحله جمع‌آوری از اول شروع شد.", True
+            _heist_stage2(g, keep_layout=True)
+            note, alert = "👮 نگهبان متوجه شد! مرحله جمع‌آوری از اول شروع شد (جای صندوق‌ها عوض نشد).", True
         else:
             g["open"].add(i)
             kind = g["cells"][i]
             if kind is None:
-                g["cells"] = _heist_layout(); g["open"] = set(); g["picked"] = []
-                g["guard"] = random.random() < HEIST_GUARD_CHANCE
-                note, alert = "❌ خونه خالی بود! همه‌چی از اول شروع شد.", True
+                _heist_stage2(g, keep_layout=True)   # چیدمان همون می‌مونه
+                g["spider"] = i                       # صندوق خالی با 🕷️ نشون داده میشه
+                note, alert = "🕷️ صندوق خالی بود! همه‌چی از اول شروع شد (جای صندوق‌ها عوض نشد).", True
             else:
                 g["picked"].append(kind)
                 note = "💰 پول برداشتی!" if kind == "money" else "💎 یاقوت برداشتی!"
