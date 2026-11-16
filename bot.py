@@ -332,6 +332,61 @@ def norm_word(text: str) -> str:
     return text.strip().strip(".!؟?،, ")
 
 
+# سطح کاربر بر اساس تعداد پیام‌هایی که تو گروه‌ها داده؛ بی‌نهایت و سخت: پیام لازم برای سطح L = ۲۵۰ × (L-1)²
+# (سطح ۲=۲۵۰، ۳=۱٬۰۰۰، ۵=۴٬۰۰۰، ۱۰=۲۰٬۲۵۰، ۲۰=۹۰٬۲۵۰ ...). عکس/کاراکتر از سطح ۱۰ به بعد همون آخریه.
+MSG_LEVEL_K = 250
+LEVEL_UP_PRIZE = 1000
+
+
+def msg_level_need(lvl: int) -> int:
+    return MSG_LEVEL_K * max(0, int(lvl) - 1) ** 2
+
+
+def msg_level(n: int) -> int:
+    n = max(0, int(n or 0))
+    lv = 1 + int((n / MSG_LEVEL_K) ** 0.5)
+    while msg_level_need(lv + 1) <= n:
+        lv += 1
+    while lv > 1 and msg_level_need(lv) > n:
+        lv -= 1
+    return lv
+
+
+def msg_char_level(n: int) -> int:
+    return min(msg_level(n), len(LEVEL_THRESHOLDS))   # برای انتخاب کاراکتر/عکس (۱ تا ۱۰)
+
+
+def msg_level_pct(n: int) -> float:
+    n = int(n or 0)
+    lv = msg_level(n)
+    lo, hi = msg_level_need(lv), msg_level_need(lv + 1)
+    return max(0.0, min(100.0, (n - lo) / max(1, hi - lo) * 100))
+
+
+LEVELUP_TIERS = [   # (از سطح، جمله‌ی سطح) — هرچی سطح بالاتر، لحن سنگین‌تر
+    (2, "تازه داری گرم می‌گیری؛ گپ کم‌کم باهات آشنا میشه"),
+    (4, "دیگه تو گپ یه چهره‌ی شناخته‌شده‌ای"),
+    (7, "بچه‌های گپ بدون تو حال نمی‌کنن"),
+    (10, "رسماً از قدیمی‌های گپی؛ اسمت رو همه می‌شناسن"),
+    (15, "ستون گپ شدی؛ اگه تو نباشی گپ خاموش میشه"),
+    (25, "افسانه‌ی گپی؛ بقیه به پیام‌هات غبطه می‌خورن"),
+    (40, "اسطوره‌ی زنده‌ی گپ؛ تاریخ این گروه با اسم تو نوشته میشه"),
+    (60, "خدای گپ؛ دیگه کسی نمی‌تونه بهت برسه"),
+]
+
+
+def levelup_text(name_link: str, lvl: int, cur: int) -> str:
+    line = LEVELUP_TIERS[0][1]
+    for frm, tx in LEVELUP_TIERS:
+        if lvl >= frm:
+            line = tx
+    left = msg_level_need(lvl + 1) - int(cur)
+    return (f"{TROPHY_CE} {name_link} رسید به لول {lvl}!\n"
+            f"{line}.\nالان با این گپ صمیمی‌تر شدی\n\n"
+            f"{MONEY_CE} اینم جایزت: {LEVEL_UP_PRIZE:,} تومن\n"
+            f"تا لول {lvl + 1} هم {left:,} پیام دیگه مونده")
+
+
 def level_for(jaghs: int) -> int:
     lvl = 1
     for i, need in enumerate(LEVEL_THRESHOLDS, 1):
@@ -462,6 +517,17 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_steal DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spouse_id BIGINT")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS spy_owned BOOLEAN NOT NULL DEFAULT FALSE")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS msg_total BIGINT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pets_owned INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_active INT NOT NULL DEFAULT 1")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_names TEXT NOT NULL DEFAULT '{}'")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_pet DOUBLE PRECISION NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_feed DOUBLE PRECISION NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_walk DOUBLE PRECISION NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_acts INT NOT NULL DEFAULT 0")
+        if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'msg_total_seed_v1'"):   # یک‌بار: پیام‌های قبلیِ ثبت‌شده‌ی گروه‌ها شمرده میشه
+            await c.execute("UPDATE users u SET msg_total = COALESCE((SELECT count(*) FROM group_msgs g WHERE g.user_id = u.user_id), 0)")
+            await c.execute("INSERT INTO bot_settings (key, value) VALUES ('msg_total_seed_v1', '1') ON CONFLICT (key) DO NOTHING")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS grenades INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS atoms INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS eq_day TEXT NOT NULL DEFAULT ''")
@@ -3704,7 +3770,7 @@ async def _g_user(qs, user):
         raise _ApiError("آیدی نامعتبر")
     now = time.time()
     u = await pool.fetchrow(
-        "SELECT user_id, name, username, balance, jaghs, started, gender, banned_until, work_count, last_ts FROM users WHERE user_id = $1", uid)
+        "SELECT user_id, name, username, balance, jaghs, started, gender, banned_until, work_count, last_ts, msg_total FROM users WHERE user_id = $1", uid)
     p = await pool.fetchrow("SELECT * FROM tg_profiles WHERE user_id = $1", uid)
     act = await pool.fetchrow("SELECT count(*) AS n, min(ts) AS first_ts, max(ts) AS last_ts FROM group_msgs WHERE user_id = $1", uid)
     lastmsg = await pool.fetchrow("SELECT name, username FROM group_msgs WHERE user_id = $1 ORDER BY ts DESC LIMIT 1", uid)
@@ -3722,10 +3788,10 @@ async def _g_user(qs, user):
     game = None
     if u:
         bu = u["banned_until"] or 0
-        lvl = level_for(u["jaghs"])
+        lvl = msg_level(int(u["msg_total"] or 0))
         ch = CHARACTERS.get(u["gender"] or "")
         game = {"balance": u["balance"], "jaghs": u["jaghs"], "started": u["started"], "level": lvl,
-                "character": ch[lvl - 1][0] if ch and 0 < lvl <= len(ch) else None, "work_count": u["work_count"],
+                "character": ch[min(lvl, len(ch)) - 1][0] if ch else None, "work_count": u["work_count"],
                 "banned": bu > now, "banned_text": _ban_until_txt(bu) if bu > now else None}
     return _j({
         "id": uid, "name": name, "username": username, "premium": bool(p and p["is_premium"]), "lang": p["lang"] if p else None,
@@ -5429,13 +5495,13 @@ async def _myself_cars(uid):
 async def _g_myself(qs, user):
     uid = int(user["id"])
     r = await pool.fetchrow(
-        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count,u.job_level "
+        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count,u.job_level,u.msg_total "
         "FROM users u WHERE u.user_id=$1", uid)
     if not r:
         raise _ApiError("اول ربات رو استارت کن تا پروفایلت ساخته بشه")
     gender = r["gender"] if r["gender"] in ("m", "f") else "m"
     job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0), _jlvl(r))
-    lvl = JOBS[gender][job[0]][1] if job else level_for(int(r["jaghs"] or 0))
+    lvl = msg_char_level(int(r["msg_total"] or 0))
     _sk = await special_current(uid)
     photo_url = f"/api/myself/photo?l={lvl}&v={int(time.time() // 300)}" + (f"&s={_sk}" if _sk else "")
     pocket = int(r["balance"] or 0)
@@ -5564,14 +5630,14 @@ async def _g_myself_car_photo(qs, user):
 
 async def _g_myself_photo(qs, user):
     uid=int(user["id"])
-    r=await pool.fetchrow("SELECT gender,jaghs,work_count,job_level,balance,bank_balance FROM users WHERE user_id=$1",uid)
+    r=await pool.fetchrow("SELECT gender,jaghs,work_count,job_level,balance,bank_balance,msg_total FROM users WHERE user_id=$1",uid)
     if not r: return 404,"text/plain",b"not found",{}
     gender=r["gender"] if r["gender"] in ("m","f") else "m"
     _sk=await special_current(uid)
     if _sk in SPECIALS:   # کاراکتر ویژه جای عکس کاراکتر رو می‌گیره
         return 200,"image/jpeg",_special_img(_sk,gender),{"Cache-Control":"private, max-age=300"}
     job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0),_jlvl(r))
-    lvl=JOBS[gender][job[0]][1] if job else level_for(int(r["jaghs"] or 0))
+    lvl=msg_char_level(int(r["msg_total"] or 0))
     data,typ=b"",None
     fid=CHAR_PHOTOS.get((gender,lvl))
     if fid and BOT_REF is not None:
@@ -7249,10 +7315,10 @@ async def self_panel_text(uid: int, name: str = "") -> str:
     lvl_pct = 0.0
     if g in JOBS:
         job = current_job(g, jaghs, work_count, _jlvl(row))
-        lvl = JOBS[g][job[0]][1] if job else level_for(jaghs)
+        lvl = msg_char_level(int(row["msg_total"] or 0))
         char_name = CHARACTERS[g][lvl - 1][0]
         job_name = job[1] if job else "بیکار"
-        lvl_pct = min(100.0, _jlvl(row) / len(JOBS[g]) * 100)   # پیشرفت = چند شغل از ۱۰ تا رو گرفته
+        lvl_pct = msg_level_pct(int(row["msg_total"] or 0))   # پیشرفت سطح = پیام‌های گروه تا سطح بعدی
         sk = await special_current(uid)
         if sk in SPECIALS:   # کاراکتر ویژه‌ی فعال (مثل محبوبیت) جای اسم کاراکتر میاد
             char_name = SPECIALS[sk]["name"]
@@ -8222,6 +8288,293 @@ async def bodyguard_text(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     return True
 
 
+# ───────────────────────── پت‌ها ─────────────────────────
+# «پت» پنل | «پت نوازش» | «پت غذا» (۱۲۳ هزار) | «پت گردش» | «جینگو اسم پت جسی» اسم پت فعال رو عوض می‌کنه.
+# پت‌ها به ترتیب خریده میشن (اولی بعدش دومی و ...). مرحله‌ی پت = لول کاربر (۱ تا ۴؛ از لول ۴ به بعد آخریه) و با هر ارتقا عوض میشه.
+# عکس‌ها: پوشه‌ی pets کنار bot.py با اسم pet{شماره‌ی پت}_{مرحله}.jpg
+PETS = [
+    {"name": "گربه", "titles": ["بچه‌گربه‌ی بازیگوش", "جوونِ چابک", "نگهبان", "همراهِ افسانه‌ای"]},
+    {"name": "خرگوش", "titles": ["خرگوشِ کوچولو", "خرگوشِ شنل‌دار", "خرگوشِ زره‌پوش", "خرگوشِ افسانه‌ای"]},
+    {"name": "سگ", "titles": ["توله‌ی ریزه", "سگ جوونِ پرانرژی", "نگهبانِ بااعتمادبه‌نفس", "همراهِ افسانه‌ایِ باشکوه"]},
+    {"name": "پاندا", "titles": ["پانداِ شیطون", "پانداِ چابک", "پانداِ نگهبان", "پانداِ افسانه‌ای"]},
+    {"name": "تک‌شاخ", "titles": ["کره‌ی دوست‌داشتنی", "تک‌شاخِ جوونِ چابک", "نگهبانِ باوقار", "افسانه‌یِ باشکوه"]},
+]
+PET_PRICES = [3_000_000, 15_000_000, 50_000_000, 120_000_000, 300_000_000]   # قیمت پت اول تا پنجم
+PET_FEED_COST = 123_000
+PET_CD = {"pet": 20 * 60, "feed": 30 * 60, "walk": 60 * 60}   # فاصله‌ی نوازش / غذا / گردش
+PET_ENERGY = (3, 5)
+PET_WALK_EID = "5364128318335499401"
+PET_WALK_CE = f'<tg-emoji emoji-id="{PET_WALK_EID}">🚶</tg-emoji>'
+PET_DIR = Path(__file__).parent / "pets"
+_PET_FILEID: dict = {}
+PET_LINES = {
+    "pet": [
+        "دستت رو کشیدی رو سرِ {n}؛ چشماش بسته شد و یه لبخندِ سلطنتی زد",
+        "{n} خودش رو چسبوند بهت و انگار کل دنیا همین یه لحظه‌ست",
+        "نوازشِ تو جادو داره؛ هاله‌ی نورانیِ دورِ {n} یه لحظه درخشید",
+        "{n} از ته دل نفس کشید و با نگاهش گفت: دمت گرم رفیق",
+        "یه نوازشِ آروم و {n} همه‌ی خستگیِ دنیا رو فراموش کرد",
+        "{n} غرقِ لذته؛ اگه می‌تونست حرف بزنه می‌گفت: برای همیشه همین‌جا",
+        "دمِ {n} با ریتمِ شادی تکون خورد؛ پیوندتون محکم‌تر شد",
+        "{n} چشماش رو باز کرد و یه نگاهِ «تو بهترینی» بهت انداخت",
+    ],
+    "feed": [
+        "یه غذای شاه‌پسند جلوی {n} گذاشتی؛ تا آخرین ذره خورد و بشقاب رو برق انداخت",
+        "{n} با اشتهای یه قهرمان حمله کرد به غذا",
+        "شکمِ {n} سیر شد و قدرتش دو برابر؛ حالا آماده‌ی هر ماجراجوییه",
+        "{n} بعد از غذا یه آروغِ سلطنتی زد و نگاهت کرد: آفرین به سلیقه‌ت",
+        "غذای ویژه سهمِ {n}! دیگه هیچ‌چی نمی‌تونه جلوش وایسه",
+        "{n} غذا رو خورد و هاله‌ی انرژی دورش چرخید",
+        "بوی غذا پیچید و {n} مثل برق رسید سرِ بشقاب",
+        "{n} شکمش رو گرفت و ولو شد؛ حسابی چسبید",
+    ],
+    "walk": [
+        "{n} رو بردی گردش؛ تو مسیر کلی ردپای افسانه‌ای جا گذاشتید",
+        "گردش توی دشتِ پرنور؛ {n} مثل یه قهرمان جلوتر از تو می‌دوید",
+        "{n} تو گردش یه گنجِ کوچیک پیدا کرد و با افتخار آورد جلوی پات",
+        "باد تو موهای {n} پیچید؛ امروز حال‌وهوای فتحِ قله داشتید",
+        "{n} همه‌ی راه جلوی تو می‌رفت و مراقب بود؛ یه نگهبانِ واقعی",
+        "غروبِ قشنگی بود؛ {n} کنارت نشست و به افق خیره شد",
+        "{n} با هر قدم جون تازه می‌گرفت؛ گردش حسابی چسبید",
+        "تو گردش، {n} همه‌ی رقبای محله رو با یه نگاهِ ساکت خاموش کرد",
+    ],
+}
+
+
+def _pet_names_of(row) -> dict:
+    try:
+        d = json.loads(row["pet_names"] or "{}")
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _pet_name_of(row, idx: int) -> str:
+    return _pet_names_of(row).get(str(idx)) or PETS[idx - 1]["name"]
+
+
+def _pet_stage(row) -> int:
+    return max(1, min(4, msg_level(int(row["msg_total"] or 0))))
+
+
+def _pet_src(idx: int, stage: int):
+    fid = _PET_FILEID.get((idx, stage))
+    if fid:
+        return fid
+    f = PET_DIR / f"pet{idx}_{stage}.jpg"
+    return f.read_bytes() if f.exists() else None
+
+
+def _pet_cache(idx: int, stage: int, message):
+    try:
+        if message is not None and getattr(message, "photo", None):
+            _PET_FILEID[(idx, stage)] = message.photo[-1].file_id
+    except Exception:
+        pass
+
+
+def _pet_cd_left(row, kind: str, now: float) -> int:
+    return max(0, int(float(row[f"pet_t_{kind}"] or 0) + PET_CD[kind] - now))
+
+
+def _pet_caption(row, note: str = "") -> str:
+    owned = int(row["pets_owned"] or 0)
+    now = time.time()
+    if owned <= 0:
+        return (f"<b>🐾 پت‌ها</b>\n\nهنوز پتی نداری! اولین همراهت «{PETS[0]['name']}» ست — "
+                f"قیمت {PET_PRICES[0]:,} تومن.\nبا هر ارتقای لول، پتت تکامل پیدا می‌کنه و قوی‌تر میشه.")
+    idx = max(1, min(owned, int(row["pet_active"] or 1)))
+    stage = _pet_stage(row)
+    name = html.escape(_pet_name_of(row, idx))
+
+    def st(kind):
+        left = _pet_cd_left(row, kind, now)
+        return "آماده ✅" if left <= 0 else f"{_duration_fa(left)} دیگه"
+
+    nxt = "با ارتقای لول بعدی تکامل پیدا می‌کنه" if stage < 4 else "به آخرین مرحله‌ی تکامل رسیده 👑"
+    head = f"{note}\n\n" if note else ""
+    return (f"{head}<b>🐾 {name}</b> · {PETS[idx - 1]['name']} {PETS[idx - 1]['titles'][stage - 1]}\n"
+            f"مرحله {stage} از ۴ — {nxt}\n"
+            f"محبت: <b>{int(row['pet_acts'] or 0):,}</b>\n\n"
+            f"نوازش: {st('pet')}\nغذا ({PET_FEED_COST:,}): {st('feed')}\nگردش: {st('walk')}\n\n"
+            f"هر کاری با پت ۳ تا ۵ انرژی بهت میده.")
+
+
+def _pet_kb(row, uid: int) -> InlineKeyboardMarkup:
+    owned = int(row["pets_owned"] or 0)
+    rows = []
+    if owned > 0:
+        rows.append([btn("نوازش", "success", callback_data=f"pt:pet:{uid}"),
+                     btn(f"غذا ({PET_FEED_COST // 1000}k)", "primary", callback_data=f"pt:feed:{uid}"),
+                     btn("گردش", "primary", icon=PET_WALK_EID, callback_data=f"pt:walk:{uid}")])
+        if owned > 1:
+            act = max(1, min(owned, int(row["pet_active"] or 1)))
+            sel = [btn(("✅ " if i == act else "") + _pet_name_of(row, i), None, callback_data=f"pt:sel:{uid}:{i}") for i in range(1, owned + 1)]
+            rows += [sel[i:i + 3] for i in range(0, len(sel), 3)]
+    if owned < len(PETS):
+        rows.append([btn(f"خرید {PETS[owned]['name']} — {PET_PRICES[owned]:,}", "danger", callback_data=f"pt:buy:{uid}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _pet_view_idx(row) -> int:
+    owned = int(row["pets_owned"] or 0)
+    return 1 if owned <= 0 else max(1, min(owned, int(row["pet_active"] or 1)))
+
+
+async def send_pet_panel(bot, chat_id: int, uid: int, reply_to=None, note: str = ""):
+    row = await get_user(uid)
+    cap, kb = _pet_caption(row, note), _pet_kb(row, uid)
+    idx, stage = _pet_view_idx(row), _pet_stage(row)
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    src = _pet_src(idx, stage)
+    if src is not None:
+        try:
+            m = await bot.send_photo(chat_id, src, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            _pet_cache(idx, stage, m)
+            return
+        except Exception:
+            log.warning("pet photo send failed", exc_info=True)
+    await bot.send_message(chat_id, cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+
+
+async def _pet_edit(q, uid: int, note: str = ""):
+    row = await get_user(uid)
+    cap, kb = _pet_caption(row, note), _pet_kb(row, uid)
+    idx, stage = _pet_view_idx(row), _pet_stage(row)
+    src = _pet_src(idx, stage)
+    try:
+        if src is not None and getattr(q.message, "photo", None):
+            m = await q.edit_message_media(InputMediaPhoto(src, caption=cap, parse_mode="HTML"), reply_markup=kb)
+            _pet_cache(idx, stage, m)
+        elif getattr(q.message, "photo", None):
+            await q.edit_message_caption(cap, parse_mode="HTML", reply_markup=kb)
+        else:
+            await q.edit_message_text(cap, parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            log.warning("pet panel edit failed", exc_info=True)
+
+
+async def _pet_do(uid: int, kind: str):
+    """نوازش/غذا/گردش → (status, info). status: ok | nopet | cd | poor"""
+    now = time.time()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            r = await c.fetchrow("SELECT balance, pets_owned, pet_active, pet_names, pet_t_pet, pet_t_feed, pet_t_walk FROM users WHERE user_id=$1 FOR UPDATE", uid)
+            if not r or int(r["pets_owned"] or 0) <= 0:
+                return "nopet", None
+            left = _pet_cd_left(r, kind, now)
+            if left > 0:
+                return "cd", left
+            if kind == "feed" and int(r["balance"] or 0) < PET_FEED_COST:
+                return "poor", None
+            gain = random.randint(*PET_ENERGY)
+            cost = PET_FEED_COST if kind == "feed" else 0
+            await c.execute(
+                f"UPDATE users SET pet_t_{kind}=$1, pet_acts=pet_acts+1, balance=balance-$2, energy=LEAST(energy+$3::double precision, $4::double precision) WHERE user_id=$5",
+                now, cost, float(gain), ENERGY_MAX, uid)
+            idx = max(1, min(int(r["pets_owned"]), int(r["pet_active"] or 1)))
+            return "ok", (gain, _pet_name_of(r, idx))
+
+
+def _pet_result_text(kind: str, name: str, gain: int) -> str:
+    line = random.choice(PET_LINES[kind]).format(n=f"<b>{html.escape(name)}</b>")
+    lead = f"{PET_WALK_CE} " if kind == "walk" else ""
+    return f"{lead}{line}\n\n⚡ +{gain} انرژی" + (f" · {PET_FEED_COST:,} تومن غذا" if kind == "feed" else "")
+
+
+_PET_FAIL = {"nopet": "هنوز پت نداری! بنویس «پت» و اولین پتت رو بخر.",
+             "poor": f"موجودی جیبت برای غذا کافی نیست ({PET_FEED_COST:,} تومن)."}
+
+
+async def pet_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    raw = norm_word(text)
+    m = re.match(r"^جینگو\s*اسم\s*پت\s+(.+)$", raw)
+    key = _word_key(text)
+    kinds = {"پتنوازش": "pet", "پتغذا": "feed", "پتگردش": "walk"}
+    if not m and key != "پت" and key not in kinds:
+        return False
+    await upsert_user(user.id, user.full_name)
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    if m:
+        new = m.group(1).strip()
+        if not (1 <= len(new) <= 16) or "\n" in new:
+            await msg.reply_text(BP("اسم پت باید بین ۱ تا ۱۶ حرف باشه."), parse_mode="HTML", reply_parameters=rp); return True
+        async with pool.acquire() as c:
+            async with c.transaction():
+                r = await c.fetchrow("SELECT pets_owned, pet_active, pet_names FROM users WHERE user_id=$1 FOR UPDATE", user.id)
+                if not r or int(r["pets_owned"] or 0) <= 0:
+                    await msg.reply_text(BP(_PET_FAIL["nopet"]), parse_mode="HTML", reply_parameters=rp); return True
+                idx = max(1, min(int(r["pets_owned"]), int(r["pet_active"] or 1)))
+                names = _pet_names_of(r); names[str(idx)] = new
+                await c.execute("UPDATE users SET pet_names=$1 WHERE user_id=$2", json.dumps(names, ensure_ascii=False), user.id)
+        await msg.reply_text(B(f"از این به بعد اسم پتت «{html.escape(new)}» ـه 🐾"), parse_mode="HTML", reply_parameters=rp)
+        return True
+    if key == "پت":
+        await send_pet_panel(context.bot, msg.chat_id, user.id, reply_to=msg.message_id)
+        return True
+    kind = kinds[key]
+    st, info = await _pet_do(user.id, kind)
+    if st == "ok":
+        gain, name = info
+        await _eq_say(msg, _pet_result_text(kind, name, gain))
+    elif st == "cd":
+        await msg.reply_text(B(f"پتت الان استراحت می‌کنه؛ {_duration_fa(info)} دیگه دوباره."), parse_mode="HTML", reply_parameters=rp)
+    else:
+        await msg.reply_text(B(_PET_FAIL[st]), parse_mode="HTML", reply_parameters=rp)
+    return True
+
+
+async def pet_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    p = q.data.split(":")
+    try:
+        act, uid = p[1], int(p[2])
+    except (IndexError, ValueError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این پنل مال شما نیست.", show_alert=True); return
+    await upsert_user(uid, q.from_user.full_name)
+    if act in ("pet", "feed", "walk"):
+        st, info = await _pet_do(uid, act)
+        if st == "ok":
+            await q.answer()
+            await _pet_edit(q, uid, _pet_result_text(act, info[1], info[0]))
+        elif st == "cd":
+            await q.answer(f"پتت استراحت می‌کنه؛ {_duration_fa(info)} دیگه.", show_alert=True)
+        else:
+            await q.answer(_PET_FAIL[st], show_alert=True)
+        return
+    if act == "sel":
+        try:
+            n = int(p[3])
+        except (IndexError, ValueError):
+            await q.answer(); return
+        r = await get_user(uid)
+        if 1 <= n <= int(r["pets_owned"] or 0):
+            await pool.execute("UPDATE users SET pet_active=$1 WHERE user_id=$2", n, uid)
+        await q.answer(); await _pet_edit(q, uid); return
+    if act == "buy":
+        alert = None
+        async with pool.acquire() as c:
+            async with c.transaction():
+                r = await c.fetchrow("SELECT balance, pets_owned FROM users WHERE user_id=$1 FOR UPDATE", uid)
+                owned = int(r["pets_owned"] or 0)
+                if owned >= len(PETS):
+                    alert = "همه‌ی پت‌ها رو داری!"
+                elif int(r["balance"] or 0) < PET_PRICES[owned]:
+                    alert = f"موجودی جیبت کافی نیست؛ {PET_PRICES[owned]:,} تومن لازمه."
+                else:
+                    await c.execute("UPDATE users SET balance=balance-$1, pets_owned=pets_owned+1, pet_active=$2 WHERE user_id=$3", PET_PRICES[owned], owned + 1, uid)
+        if alert:
+            await q.answer(alert, show_alert=True); return
+        await q.answer("پت جدیدت اومد! 🐾", show_alert=True)
+        await _pet_edit(q, uid, "پت جدیدت به خانواده پیوست!")
+        return
+    await q.answer()
+
+
 async def spy_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     msg, user = update.effective_message, update.effective_user
     key = _word_key(text)
@@ -9059,6 +9412,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await bodyguard_text(update, context, text):
         return
+    if await pet_text(update, context, text):
+        return
     if _word_key(text) in ("تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks"):
         await show_tasks(update, context)
         return
@@ -9261,21 +9616,23 @@ async def set_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ───────────────────────── کاراکتر من ─────────────────────────
-def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None, job_level: int = 0) -> str:
+def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None, job_level: int = 0, msg_total: int = 0) -> str:
     # سطح/تصویر کاراکتر با سطحی که برای شغل فعلی در جدول JOBS تعریف شده هماهنگ است.
     job = current_job(gender, jaghs, work_count, job_level) if gender in JOBS else None
-    lvl = JOBS[gender][job[0]][1] if job else level_for(jaghs)
+    real_lvl = msg_level(msg_total)
+    lvl = msg_char_level(msg_total)
     title, tagline = CHARACTERS[gender][lvl - 1]
     if title_override:   # کاراکتر ویژه: اسمش جای اسم شغلی میاد
         title, tagline = title_override, "کاراکتر ویژه ✨"
     lines = [
         f"{ce('me', 1, '🎖')} {html.escape(name)}",
         "",
-        f"سطح {lvl} از {len(LEVEL_THRESHOLDS)}: {html.escape(title)} {'' if title_override else char_emojis(gender, lvl)}",
+        f"سطح {real_lvl}: {html.escape(title)} {'' if title_override else char_emojis(gender, lvl)}",
         html.escape(tagline),
         "",
         f"{ce('wallet', 1, '💰')} دارایی: {balance:,} تومن",
         f"💼 کارهای انجام‌شده: {work_count:,}",
+        f"💬 پیام‌های گروه: {int(msg_total or 0):,}",
     ]
     _jl = max(0, min(int(job_level or 0), len(JOBS[gender]))) if gender in JOBS else 0
     if gender in JOBS and _jl < len(JOBS[gender]):
@@ -9440,13 +9797,13 @@ async def send_card(bot, chat_id: int, row, reply_to: int | None = None, text: s
     """کارت کاراکتر کاربر: عکس + کپشن (اسم، سطح، موجودی). اگه یه مرحله خطا بده میره سراغ مرحله‌ی بعد، ولی تا جایی که بشه عکس همراه کپشن میاد."""
     gender = row["gender"]
     job = current_job(gender, row["jaghs"], row["work_count"], _jlvl(row)) if row["gender"] else None
-    lvl = JOBS[gender][job[0]][1] if job else level_for(row["jaghs"])
+    lvl = msg_char_level(int(row["msg_total"] or 0))
     try:
         _sk = await special_current(int(row["user_id"]))
     except Exception:
         _sk = None
     text = text or card_text(row["name"] or "", gender, row["balance"], row["jaghs"], row["work_count"],
-                             job_level=_jlvl(row), title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
+                             job_level=_jlvl(row), msg_total=int(row["msg_total"] or 0), title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
 
     # کپشن بدون ایموجی پرمیوم (برای وقتی که تلگرام ایموجی رو قبول نکنه)
@@ -9514,7 +9871,7 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 _PM_BLOCK_WORDS = {
     "خونه", "خانه", "املاک", "دست", "هوش", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جاسوسی",
-    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس", "بادیگارد", "خریدبادیگارد",
+    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس", "بادیگارد", "خریدبادیگارد", "پت", "پتنوازش", "پتغذا", "پتگردش",
     "فروشگاه", "سکس", "موشک", "کراش",
 }
 
@@ -15728,10 +16085,23 @@ async def _log_group_msg(chat_id: int, user, msg, edited: bool = False):
         if fo is not None:
             fwd = (getattr(getattr(fo, "sender_user", None), "full_name", None) or getattr(fo, "sender_user_name", None)
                    or getattr(getattr(fo, "sender_chat", None), "title", None) or getattr(getattr(fo, "chat", None), "title", None) or "؟")
-        await pool.execute(
+        _ins = await pool.execute(
             "INSERT INTO group_msgs (chat_id, msg_id, user_id, name, username, text, ts, kind, file_id, reply_to, reply_name, reply_text, fwd) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (chat_id, msg_id) DO NOTHING",
             chat_id, msg.message_id, user.id, user.full_name, user.username, label, ts, kind, file_id, reply_to, reply_name, reply_text, fwd)
+        if _ins.endswith(" 1"):   # پیام تازه: به شمارنده‌ی سطح کاربر اضافه میشه؛ اگه سطحش عوض شد اعلام + جایزه
+            _tot = await pool.fetchval("UPDATE users SET msg_total = msg_total + 1 WHERE user_id = $1 RETURNING msg_total", user.id)
+            if _tot is not None and msg_level(_tot) > msg_level(_tot - 1):
+                _lv = msg_level(_tot)
+                await _give(user.id, LEVEL_UP_PRIZE)
+                _txt = levelup_text(_ulink(user.id, user.full_name), _lv, _tot)
+                try:
+                    await msg.reply_text(B(_txt), parse_mode="HTML")
+                except Exception:
+                    try:
+                        await msg.reply_text(B(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", _txt)), parse_mode="HTML")
+                    except Exception:
+                        log.warning("level-up message failed", exc_info=True)
         now = time.time()
         if MSG_LOG_DAYS > 0 and now - _LAST_PRUNE > 3600:
             _LAST_PRUNE = now
@@ -16071,7 +16441,7 @@ def _is_bot_text_command(text: str) -> bool:
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
         "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده",
         "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلدرسی", "دوئلدرس",
-        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
+        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
     if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in EDU_WORDS or key in LESSON_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
@@ -19253,6 +19623,7 @@ def main():
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
     app.add_handler(CallbackQueryHandler(sports_cb, pattern=r"^sg:"))
     app.add_handler(CallbackQueryHandler(equip_cb, pattern=r"^eq:"))
+    app.add_handler(CallbackQueryHandler(pet_cb, pattern=r"^pt:"))
     app.add_handler(CallbackQueryHandler(sex_cb, pattern=r"^sx:"))
     app.add_handler(CallbackQueryHandler(shop_cb, pattern=r"^shp:"))
     app.add_handler(MessageHandler(filters.Dice.SLOT_MACHINE & filters.ChatType.GROUPS, slot_dice_msg))
