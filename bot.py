@@ -356,6 +356,38 @@ def msg_char_level(n: int) -> int:
     return min(msg_level(n), len(LEVEL_THRESHOLDS))   # برای انتخاب کاراکتر/عکس (۱ تا ۱۰)
 
 
+# ───── سطح کاراکتر = بر اساس واحد درسی + مدرک (نه تعداد پیام) ─────
+# سطح L وقتی باز میشه که واحدها ≥ EDU_LEVEL_UNITS[L-1] باشه؛ ولی سقف سطح به مدرک بستگیه: بدون مدرک تا ۳، دیپلم تا ۵،
+# لیسانس تا ۷، فوق لیسانس تا ۸، دکترا تا ۹، پروفسوری تا ۱۰. (عکس‌ها هم همین ۱۰ سطحن)
+EDU_LEVEL_UNITS = [0, 15, 40, 80, 150, 250, 450, 650, 1390, 2700]
+EDU_LEVEL_CAP = [3, 5, 7, 8, 9, 10]   # سقف سطح برای مدرک ۰ تا ۵
+
+
+def edu_level(units, degree) -> int:
+    units = max(0, int(units or 0))
+    cap = EDU_LEVEL_CAP[max(0, min(int(degree or 0), len(EDU_LEVEL_CAP) - 1))]
+    lv = 1
+    for i, need in enumerate(EDU_LEVEL_UNITS, 1):
+        if units >= need:
+            lv = i
+    return min(lv, cap)
+
+
+def edu_level_pct(units, degree) -> float:
+    lv = edu_level(units, degree)
+    if lv >= len(EDU_LEVEL_UNITS):
+        return 100.0
+    lo, hi = EDU_LEVEL_UNITS[lv - 1], EDU_LEVEL_UNITS[lv]
+    return max(0.0, min(100.0, (int(units or 0) - lo) / max(1, hi - lo) * 100))
+
+
+def row_level(row) -> int:
+    try:
+        return edu_level(row["edu_units"], row["edu_degree"])
+    except Exception:
+        return 1
+
+
 def msg_level_pct(n: int) -> float:
     n = int(n or 0)
     lv = msg_level(n)
@@ -3773,7 +3805,7 @@ async def _g_user(qs, user):
         raise _ApiError("آیدی نامعتبر")
     now = time.time()
     u = await pool.fetchrow(
-        "SELECT user_id, name, username, balance, jaghs, started, gender, banned_until, work_count, last_ts, msg_total FROM users WHERE user_id = $1", uid)
+        "SELECT user_id, name, username, balance, jaghs, started, gender, banned_until, work_count, last_ts, msg_total, edu_units, edu_degree FROM users WHERE user_id = $1", uid)
     p = await pool.fetchrow("SELECT * FROM tg_profiles WHERE user_id = $1", uid)
     act = await pool.fetchrow("SELECT count(*) AS n, min(ts) AS first_ts, max(ts) AS last_ts FROM group_msgs WHERE user_id = $1", uid)
     lastmsg = await pool.fetchrow("SELECT name, username FROM group_msgs WHERE user_id = $1 ORDER BY ts DESC LIMIT 1", uid)
@@ -3791,7 +3823,7 @@ async def _g_user(qs, user):
     game = None
     if u:
         bu = u["banned_until"] or 0
-        lvl = msg_level(int(u["msg_total"] or 0))
+        lvl = row_level(u)
         ch = CHARACTERS.get(u["gender"] or "")
         game = {"balance": u["balance"], "jaghs": u["jaghs"], "started": u["started"], "level": lvl,
                 "character": ch[min(lvl, len(ch)) - 1][0] if ch else None, "work_count": u["work_count"],
@@ -5498,13 +5530,13 @@ async def _myself_cars(uid):
 async def _g_myself(qs, user):
     uid = int(user["id"])
     r = await pool.fetchrow(
-        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count,u.job_level,u.job_sel,u.msg_total "
+        "SELECT u.name,u.balance,u.bank_balance,u.jaghs,u.energy,u.gender,u.work_count,u.job_level,u.job_sel,u.msg_total,u.edu_units,u.edu_degree "
         "FROM users u WHERE u.user_id=$1", uid)
     if not r:
         raise _ApiError("اول ربات رو استارت کن تا پروفایلت ساخته بشه")
     gender = r["gender"] if r["gender"] in ("m", "f") else "m"
     job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0), _jsel(r))
-    lvl = msg_char_level(int(r["msg_total"] or 0))
+    lvl = row_level(r)
     _sk = await special_current(uid)
     photo_url = f"/api/myself/photo?l={lvl}&v={int(time.time() // 300)}" + (f"&s={_sk}" if _sk else "")
     pocket = int(r["balance"] or 0)
@@ -5633,14 +5665,14 @@ async def _g_myself_car_photo(qs, user):
 
 async def _g_myself_photo(qs, user):
     uid=int(user["id"])
-    r=await pool.fetchrow("SELECT gender,jaghs,work_count,job_level,job_sel,balance,bank_balance,msg_total FROM users WHERE user_id=$1",uid)
+    r=await pool.fetchrow("SELECT gender,jaghs,work_count,job_level,job_sel,balance,bank_balance,msg_total,edu_units,edu_degree FROM users WHERE user_id=$1",uid)
     if not r: return 404,"text/plain",b"not found",{}
     gender=r["gender"] if r["gender"] in ("m","f") else "m"
     _sk=await special_current(uid)
     if _sk in SPECIALS:   # کاراکتر ویژه جای عکس کاراکتر رو می‌گیره
         return 200,"image/jpeg",_special_img(_sk,gender),{"Cache-Control":"private, max-age=300"}
     job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0), _jsel(r))
-    lvl=msg_char_level(int(r["msg_total"] or 0))
+    lvl=row_level(r)
     data,typ=b"",None
     fid=CHAR_PHOTOS.get((gender,lvl))
     if fid and BOT_REF is not None:
@@ -6504,7 +6536,7 @@ def _guide_sections() -> list:
         _gq("🏦 بانک", f"<code>بانک</code>\n<code>واریز 100m</code> (کارمزد {BANK_FEE:,} تومن)\n<code>برداشت 100m</code> (بدون کارمزد)\n{BANK_INTEREST_RATE_PCT}٪ سود هر ۱۲ ساعت روی موجودی بانک؛ مقدار سود بعدی تو پنل بانک نوشته میشه."),
         _gq("👛 دارایی", "<code>دارایی</code>\nپول جیب، بانک و مجموع دارایی‌ت."),
         _gq("💼 شغل و شیفت", "<code>شغل</code> جدول شغل‌ها (مدرک و هزینه‌ی هر کدوم) + دکمه‌ی انتخاب شغل فعال و خرید شغل بعدی\n<code>کار</code> شیفت کاری (هر ۱۲ دقیقه و ۳۰ ثانیه یه بار) و گرفتن حقوق."),
-        _gq("🎖 کاراکتر", "<code>کاراکتر</code>\nکاراکتر و سطحت رو می‌بینی؛ با کسب امتیاز بیشتر سطحت بالا میره."),
+        _gq("🎖 کاراکتر", "<code>کاراکتر</code>\nکاراکتر و سطحت رو می‌بینی؛ سطح (۱ تا ۱۰) از واحد درسی و مدرکت میاد: با «تحصیل» واحد جمع کن و مدرک بگیر تا سطحت بالا بره."),
         _gq("🚗 ماشین و گاراژ", f"<code>ماشینم</code> پنل ماشین\n<code>گاراژ</code> جدول ماشین‌ها\nماشین‌ها به ترتیب خریده میشن. هر ۴ قطعه (موتور، بدنه، لاستیک، شیشه و رینگ) تا سطح {CAR_MAX_LEVEL} ارتقا می‌خوره و رنگ ماشین {CAR_COLOR_PRICE:,} تومنه. درآمد ساعتی میره تو صندوق (سقف {CAR_VAULT_CAP:,} تومن برای هر ماشین) و با دکمه «جمع کن» برداشت میشه."),
         _gq("🏠 خونه", "<code>خونه</code>\nخرید و تعمیر خونه و وسایلش و جمع کردن درآمدش."),
         _gq("🤗 بوس و بغل", f"روی پیام کاربر ریپلای کن و بنویس <code>بوس</code> یا <code>بغل</code>\nهر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد. به هر دو نفر انرژی و {HUG_MONEY[0]} تا {HUG_MONEY[1]} تومن (تو پروفیت) می‌رسه. بوس و بغل روی همسر بقیه ۳ انرژی منفی داره."),
@@ -7361,6 +7393,18 @@ def level_bar_line(pct: float) -> str:
     return f"{ce('level', 3, '📊')} سطح\n{_panel_bar('level', '🟪', '⬜', pct)}"
 
 
+def _lvl_hint(row) -> str:
+    """وقتی واحدهاش برای سطح بعد کافیه ولی مدرک لازم رو نداره، بهش می‌گه مدرک بگیره."""
+    try:
+        units, deg = int(row["edu_units"] or 0), int(row["edu_degree"] or 0)
+        lv = edu_level(units, deg)
+        if lv < len(EDU_LEVEL_UNITS) and units >= EDU_LEVEL_UNITS[lv] and deg < len(EDU_DEGREES):
+            return f"\n🔒 برای رفتن به سطح {lv + 1} باید مدرک «{EDU_DEGREES[deg][0]}» بگیری (از «تحصیل»)."
+    except Exception:
+        pass
+    return ""
+
+
 async def self_panel_text(uid: int, name: str = "") -> str:
     row = await get_user(uid)
     total = int(row["balance"] or 0) + int(row["bank_balance"] or 0)
@@ -7370,10 +7414,10 @@ async def self_panel_text(uid: int, name: str = "") -> str:
     lvl_pct = 0.0
     if g in JOBS:
         job = current_job(g, jaghs, work_count, _jsel(row))
-        lvl = msg_char_level(int(row["msg_total"] or 0))
+        lvl = row_level(row)
         char_name = CHARACTERS[g][lvl - 1][0]
         job_name = job[1] if job else "بیکار"
-        lvl_pct = msg_level_pct(int(row["msg_total"] or 0))   # پیشرفت سطح = پیام‌های گروه تا سطح بعدی
+        lvl_pct = edu_level_pct(row["edu_units"], row["edu_degree"])   # پیشرفت سطح = واحد درسی تا سطح بعدی
         sk = await special_current(uid)
         if sk in SPECIALS:   # کاراکتر ویژه‌ی فعال (مثل محبوبیت) جای اسم کاراکتر میاد
             char_name = SPECIALS[sk]["name"]
@@ -7382,12 +7426,12 @@ async def self_panel_text(uid: int, name: str = "") -> str:
     return B(
         f"{ce('me', 1, '🎖')} {html.escape(char_name)}\n\n"
         f"💼 شغل: {html.escape(job_name)}\n"
-        f"🏅 سطح {msg_level(int(row['msg_total'] or 0))} · "
+        f"🏅 سطح {row_level(row)} · "
         f'<tg-emoji emoji-id="6023744400608206043">🎓</tg-emoji> مدرک: {html.escape(_deg_name(_edeg(row)))}\n'
         f"{MONEY_CE} دارایی کل: {total:,} تومان\n\n"
         f"{self_energy_line(row.get('energy', 0))}\n\n"
         f"{jm_bar_line(row.get('jagh_machine', 0))}\n\n"
-        f"{level_bar_line(lvl_pct)}"
+        f"{level_bar_line(lvl_pct)}{_lvl_hint(row)}"
     )
 
 
@@ -7888,8 +7932,8 @@ async def _top_view(kind: str, ids: bool):
         opts = {"rich": ("پولدارها", TOP_RICH_EID), "lvl": ("بیشترین سطح‌ها", TOP_LVL_EID), "fam": ("فامیل‌سالارها", None)}
         return InlineKeyboardMarkup([[btn(("👨‍👩‍👧 " if k == "fam" else "") + opts[k][0], "primary", icon=opts[k][1], callback_data=f"tp:{k}") if opts[k][1] else btn("👨‍👩‍👧 " + opts[k][0], "primary", callback_data=f"tp:{k}") for k in opts if k != cur]])
     if kind == "lvl":
-        rows = await pool.fetch("SELECT user_id, name, username, msg_total FROM users WHERE msg_total > 0 AND user_id <> ALL($1::bigint[]) ORDER BY msg_total DESC LIMIT 10", list(ADMIN_IDS))
-        rows = [dict(r, lvl=msg_level(r["msg_total"])) for r in rows]
+        rows = await pool.fetch("SELECT user_id, name, username, edu_units, edu_degree FROM users WHERE edu_units > 0 AND user_id <> ALL($1::bigint[]) ORDER BY edu_degree DESC, edu_units DESC LIMIT 10", list(ADMIN_IDS))
+        rows = [dict(r, lvl=edu_level(r["edu_units"], r["edu_degree"])) for r in rows]
         body = _top_lines(rows, "lvl", "سطح", ids) if rows else "هنوز کسی تو لیست نیست!"
         text = f'<tg-emoji emoji-id="{TOP_LVL_EID}">⭐</tg-emoji> <b>۱۰ نفر با بیشترین سطح</b>\n\n{body}'
     elif kind == "fam":
@@ -9794,11 +9838,10 @@ async def set_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ───────────────────────── کاراکتر من ─────────────────────────
-def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None, job_level: int = 0, msg_total: int = 0) -> str:
+def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None, job_level: int = 0, msg_total: int = 0, level: int | None = None) -> str:
     # سطح/تصویر کاراکتر با سطحی که برای شغل فعلی در جدول JOBS تعریف شده هماهنگ است.
     job = current_job(gender, jaghs, work_count, job_level) if gender in JOBS else None
-    real_lvl = msg_level(msg_total)
-    lvl = msg_char_level(msg_total)
+    real_lvl = lvl = max(1, min(int(level or 1), len(LEVEL_THRESHOLDS)))   # سطح از واحد درسی و مدرک
     title, tagline = CHARACTERS[gender][lvl - 1]
     if title_override:   # کاراکتر ویژه: اسمش جای اسم شغلی میاد
         title, tagline = title_override, "کاراکتر ویژه ✨"
@@ -9975,13 +10018,13 @@ async def send_card(bot, chat_id: int, row, reply_to: int | None = None, text: s
     """کارت کاراکتر کاربر: عکس + کپشن (اسم، سطح، موجودی). اگه یه مرحله خطا بده میره سراغ مرحله‌ی بعد، ولی تا جایی که بشه عکس همراه کپشن میاد."""
     gender = row["gender"]
     job = current_job(gender, row["jaghs"], row["work_count"], _jsel(row)) if row["gender"] else None
-    lvl = msg_char_level(int(row["msg_total"] or 0))
+    lvl = row_level(row)
     try:
         _sk = await special_current(int(row["user_id"]))
     except Exception:
         _sk = None
     text = text or card_text(row["name"] or "", gender, row["balance"], row["jaghs"], row["work_count"],
-                             job_level=_jlvl(row), msg_total=int(row["msg_total"] or 0), title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
+                             job_level=_jlvl(row), msg_total=int(row["msg_total"] or 0), level=row_level(row), title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
 
     # کپشن بدون ایموجی پرمیوم (برای وقتی که تلگرام ایموجی رو قبول نکنه)
@@ -11015,6 +11058,11 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{_panel_bar('edu', '🟪', '⬜', _pct)}\n\n"
             f"{_rem} · کلاس بعدی {_duration_fa(left)} دیگه"
         )
+        _dg = int(row["edu_degree"] or 0)
+        _l0, _l1 = edu_level(int(new_units) - gain, _dg), edu_level(int(new_units), _dg)
+        if _l1 > _l0:
+            await _give(uid, LEVEL_UP_PRIZE)
+            result += f"\n\n🎉 <b>سطحت شد {_l1}!</b> {MONEY_CE} جایزه: {LEVEL_UP_PRIZE:,} تومن"
         await _edu_edit(q, result, bold=False)
     elif act == "deg":
         msg_alert = None
@@ -11033,12 +11081,12 @@ async def edu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         msg_alert = f"شهریه {fee:,} تومنه؛ موجودیت کافی نیست."
                     else:
                         await conn.execute("UPDATE users SET balance=balance-$2, edu_degree=$3 WHERE user_id=$1", uid, fee, d + 1)
-                        res = (nm, fee)
+                        res = (nm, fee, edu_level(int(r["edu_units"] or 0), d), edu_level(int(r["edu_units"] or 0), d + 1))
         if msg_alert:
             await q.answer(msg_alert, show_alert=True); return
         await q.answer("مدرک گرفتی! 🎓", show_alert=True)
         row = await get_user(uid)
-        await _edu_view(q, row, uid, f"{_tg(EID_TROPHY, '🎓')} <b>مدرک {html.escape(res[0])} گرفتی!</b> 🎉 شهریه‌ی پرداختی: {res[1]:,} تومان")
+        await _edu_view(q, row, uid, f"{_tg(EID_TROPHY, '🎓')} <b>مدرک {html.escape(res[0])} گرفتی!</b> 🎉 شهریه‌ی پرداختی: {res[1]:,} تومان" + (f"\n🎉 سطحت شد {res[3]}!" if res[3] > res[2] else ""))
     else:
         await q.answer()
 
@@ -16269,17 +16317,7 @@ async def _log_group_msg(chat_id: int, user, msg, edited: bool = False):
             chat_id, msg.message_id, user.id, user.full_name, user.username, label, ts, kind, file_id, reply_to, reply_name, reply_text, fwd)
         if _ins.endswith(" 1"):   # پیام تازه: به شمارنده‌ی سطح کاربر اضافه میشه؛ اگه سطحش عوض شد اعلام + جایزه
             _tot = await pool.fetchval("UPDATE users SET msg_total = msg_total + 1 WHERE user_id = $1 RETURNING msg_total", user.id)
-            if _tot is not None and msg_level(_tot) > msg_level(_tot - 1):
-                _lv = msg_level(_tot)
-                await _give(user.id, LEVEL_UP_PRIZE)
-                _txt = levelup_text(_ulink(user.id, user.full_name), _lv, _tot)
-                try:
-                    await msg.reply_text(B(_txt), parse_mode="HTML")
-                except Exception:
-                    try:
-                        await msg.reply_text(B(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", _txt)), parse_mode="HTML")
-                    except Exception:
-                        log.warning("level-up message failed", exc_info=True)
+            # (سطح دیگه به تعداد پیام وابسته نیست؛ سطح‌ها از واحد درسی و مدرک میان)
         now = time.time()
         if MSG_LOG_DAYS > 0 and now - _LAST_PRUNE > 3600:
             _LAST_PRUNE = now
