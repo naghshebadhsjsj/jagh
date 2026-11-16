@@ -525,6 +525,7 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_feed DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_walk DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_acts INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_stats TEXT NOT NULL DEFAULT '{}'")
         if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'msg_total_seed_v1'"):   # یک‌بار: پیام‌های قبلیِ ثبت‌شده‌ی گروه‌ها شمرده میشه
             await c.execute("UPDATE users u SET msg_total = COALESCE((SELECT count(*) FROM group_msgs g WHERE g.user_id = u.user_id), 0)")
             await c.execute("INSERT INTO bot_settings (key, value) VALUES ('msg_total_seed_v1', '1') ON CONFLICT (key) DO NOTHING")
@@ -8290,21 +8291,34 @@ async def bodyguard_text(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
 
 # ───────────────────────── پت‌ها ─────────────────────────
 # «پت» پنل | «پت نوازش» | «پت غذا» (۱۲۳ هزار) | «پت گردش» | «جینگو اسم پت جسی» اسم پت فعال رو عوض می‌کنه.
-# پت‌ها به ترتیب خریده میشن (اولی بعدش دومی و ...). مرحله‌ی پت = لول کاربر (۱ تا ۴؛ از لول ۴ به بعد آخریه) و با هر ارتقا عوض میشه.
-# عکس‌ها: پوشه‌ی pets کنار bot.py با اسم pet{شماره‌ی پت}_{مرحله}.jpg
+# پت‌ها به ترتیب خریده میشن. رنک هر پت (۱ تا ۴ = مرحله‌ی عکسش) رو خود کاربر با پول ارتقا میده و هر ارتقا گرون‌تره.
+# هر پت: نوار محبوبیت (با هر کار بالا میره) و نوار شکم (با غذا پر میشه و آروم آروم خالی میشه، نوار پروفیت).
+# عکس‌ها: پوشه‌ی pets کنار bot.py (یا خود کنار bot.py) با اسم pet{شماره‌ی پت}_{مرحله}.jpg
+BAR_SETS["pop"] = ("6023909812683676676", "6021830176634051965", "6021680475548952350")   # نوار محبوبیت
+BAR_CAP_KEY["pop"] = "pop"
 PETS = [
-    {"name": "گربه", "titles": ["بچه‌گربه‌ی بازیگوش", "جوونِ چابک", "نگهبان", "همراهِ افسانه‌ای"]},
-    {"name": "خرگوش", "titles": ["خرگوشِ کوچولو", "خرگوشِ شنل‌دار", "خرگوشِ زره‌پوش", "خرگوشِ افسانه‌ای"]},
-    {"name": "سگ", "titles": ["توله‌ی ریزه", "سگ جوونِ پرانرژی", "نگهبانِ بااعتمادبه‌نفس", "همراهِ افسانه‌ایِ باشکوه"]},
-    {"name": "پاندا", "titles": ["پانداِ شیطون", "پانداِ چابک", "پانداِ نگهبان", "پانداِ افسانه‌ای"]},
-    {"name": "تک‌شاخ", "titles": ["کره‌ی دوست‌داشتنی", "تک‌شاخِ جوونِ چابک", "نگهبانِ باوقار", "افسانه‌یِ باشکوه"]},
+    {"name": "گربه", "eid": "5325695795624682172", "fb": "🐱", "titles": ["بچه‌گربه‌ی بازیگوش", "جوونِ چابک", "نگهبان", "همراهِ افسانه‌ای"]},
+    {"name": "خرگوش", "eid": "5327758359179306134", "fb": "🐰", "titles": ["خرگوشِ کوچولو", "خرگوشِ شنل‌دار", "خرگوشِ زره‌پوش", "خرگوشِ افسانه‌ای"]},
+    {"name": "سگ", "eid": "5325607607061194560", "fb": "🐶", "titles": ["توله‌ی ریزه", "سگ جوونِ پرانرژی", "نگهبانِ بااعتمادبه‌نفس", "همراهِ افسانه‌ایِ باشکوه"]},
+    {"name": "پاندا", "eid": "5323543596102592063", "fb": "🐼", "titles": ["پانداِ شیطون", "پانداِ چابک", "پانداِ نگهبان", "پانداِ افسانه‌ای"]},
+    {"name": "تک‌شاخ", "eid": "5323759555648170266", "fb": "🦄", "titles": ["کره‌ی دوست‌داشتنی", "تک‌شاخِ جوونِ چابک", "نگهبانِ باوقار", "افسانه‌یِ باشکوه"]},
 ]
 PET_PRICES = [3_000_000, 15_000_000, 50_000_000, 120_000_000, 300_000_000]   # قیمت پت اول تا پنجم
+PET_UPGRADE_BASE = [2_000_000, 8_000_000, 25_000_000]   # ارتقا از رنک ۱→۲، ۲→۳، ۳→۴ (ضرب در شماره‌ی پت: پت‌های بعدی گرون‌ترن)
 PET_FEED_COST = 123_000
 PET_CD = {"pet": 20 * 60, "feed": 30 * 60, "walk": 60 * 60}   # فاصله‌ی نوازش / غذا / گردش
 PET_ENERGY = (3, 5)
+PET_POP_GAIN = {"pet": 3, "feed": 2, "walk": 5}
+PET_POP_CAP = 1000          # ۱۰۰٪ محبوبیت
+PET_BELLY_DECAY = 4.0       # شکم ساعتی چند درصد خالی میشه
+PET_BELLY_FEED = 35.0       # هر غذا چند درصد شکم رو پر می‌کنه
 PET_WALK_EID = "5364128318335499401"
+PET_PET_EID = "6019238739396535767"
+PET_FEED_EID = "5994341797529131089"
 PET_WALK_CE = f'<tg-emoji emoji-id="{PET_WALK_EID}">🚶</tg-emoji>'
+PET_PET_CE = f'<tg-emoji emoji-id="{PET_PET_EID}">🤍</tg-emoji>'
+PET_FEED_CE = f'<tg-emoji emoji-id="{PET_FEED_EID}">🍖</tg-emoji>'
+PET_LEAD = {"pet": PET_PET_CE, "feed": PET_FEED_CE, "walk": PET_WALK_CE}
 PET_DIR = Path(__file__).parent / "pets"
 _PET_FILEID: dict = {}
 _PET_WARNED: dict = {}
@@ -8342,6 +8356,11 @@ PET_LINES = {
 }
 
 
+def _pet_ce(idx: int) -> str:
+    pt = PETS[idx - 1]
+    return f'<tg-emoji emoji-id="{pt["eid"]}">{pt["fb"]}</tg-emoji>'
+
+
 def _pet_names_of(row) -> dict:
     try:
         d = json.loads(row["pet_names"] or "{}")
@@ -8354,8 +8373,35 @@ def _pet_name_of(row, idx: int) -> str:
     return _pet_names_of(row).get(str(idx)) or PETS[idx - 1]["name"]
 
 
+def _pet_stats_of(row) -> dict:
+    try:
+        d = json.loads(row["pet_stats"] or "{}")
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _pet_st(row, idx: int, now: float | None = None) -> dict:
+    """رنک، محبوبیت و شکمِ فعلیِ پتِ شماره‌ی idx (شکم با گذشت زمان کم شده)."""
+    now = now or time.time()
+    d = _pet_stats_of(row).get(str(idx)) or {}
+    belly0 = float(d.get("belly", 50.0))   # پت تازه‌خریده نصفه گرسنه‌ست
+    bt = float(d.get("bt") or now)
+    belly = max(0.0, min(100.0, belly0 - max(0.0, now - bt) / 3600 * PET_BELLY_DECAY))
+    return {"rank": max(1, min(4, int(d.get("rank", 1)))), "pop": int(d.get("pop", 0)), "belly": belly}
+
+
+def _pet_view_idx(row) -> int:
+    owned = int(row["pets_owned"] or 0)
+    return 1 if owned <= 0 else max(1, min(owned, int(row["pet_active"] or 1)))
+
+
 def _pet_stage(row) -> int:
-    return max(1, min(4, msg_level(int(row["msg_total"] or 0))))
+    return _pet_st(row, _pet_view_idx(row))["rank"]
+
+
+def _pet_upgrade_price(idx: int, rank: int) -> int | None:
+    return None if rank >= 4 else PET_UPGRADE_BASE[rank - 1] * idx
 
 
 def _pet_src(idx: int, stage: int):
@@ -8365,7 +8411,7 @@ def _pet_src(idx: int, stage: int):
     for f in (PET_DIR / f"pet{idx}_{stage}.jpg", PET_DIR.parent / f"pet{idx}_{stage}.jpg"):   # تو پوشه‌ی pets یا کنار bot.py
         if f.exists():
             return f.read_bytes()
-    if (idx, stage) not in _PET_FILEID and not _PET_WARNED.get((idx, stage)):
+    if not _PET_WARNED.get((idx, stage)):
         _PET_WARNED[(idx, stage)] = True
         log.warning("pet image not found: pet%s_%s.jpg (looked in %s and next to bot.py)", idx, stage, PET_DIR)
     return None
@@ -8387,22 +8433,26 @@ def _pet_caption(row, note: str = "") -> str:
     owned = int(row["pets_owned"] or 0)
     now = time.time()
     if owned <= 0:
-        return (f"<b>🐾 پت‌ها</b>\n\nهنوز پتی نداری! اولین همراهت «{PETS[0]['name']}» ست — "
-                f"قیمت {PET_PRICES[0]:,} تومن.\nبا هر ارتقای لول، پتت تکامل پیدا می‌کنه و قوی‌تر میشه.")
-    idx = max(1, min(owned, int(row["pet_active"] or 1)))
-    stage = _pet_stage(row)
+        return (f"<b>🐾 پت‌ها</b>\n\nهنوز پتی نداری! اولین همراهت {_pet_ce(1)} «{PETS[0]['name']}» ست — "
+                f"قیمت {PET_PRICES[0]:,} تومن.\nرنک پتت رو با پول ارتقا بده تا تکامل پیدا کنه و قوی‌تر بشه.")
+    idx = _pet_view_idx(row)
+    st_ = _pet_st(row, idx, now)
+    stage = st_["rank"]
     name = html.escape(_pet_name_of(row, idx))
 
-    def st(kind):
+    def cd(kind):
         left = _pet_cd_left(row, kind, now)
         return "آماده ✅" if left <= 0 else f"{_duration_fa(left)} دیگه"
 
-    nxt = "با ارتقای لول بعدی تکامل پیدا می‌کنه" if stage < 4 else "به آخرین مرحله‌ی تکامل رسیده 👑"
+    up = _pet_upgrade_price(idx, stage)
+    nxt = f"ارتقای بعدی: {up:,} تومن" if up else "به آخرین رنک رسیده 👑"
     head = f"{note}\n\n" if note else ""
-    return (f"{head}<b>🐾 {name}</b> · {PETS[idx - 1]['name']} {PETS[idx - 1]['titles'][stage - 1]}\n"
-            f"مرحله {stage} از ۴ — {nxt}\n"
-            f"محبت: <b>{int(row['pet_acts'] or 0):,}</b>\n\n"
-            f"نوازش: {st('pet')}\nغذا ({PET_FEED_COST:,}): {st('feed')}\nگردش: {st('walk')}\n\n"
+    pop_pct = min(100.0, st_["pop"] / PET_POP_CAP * 100)
+    return (f"{head}{_pet_ce(idx)} <b>{name}</b> · {PETS[idx - 1]['name']} {PETS[idx - 1]['titles'][stage - 1]}\n"
+            f"رنک {stage} از ۴ — {nxt}\n\n"
+            f"محبوبیت\n{_panel_bar('pop', '🟪', '▫️', pop_pct)}\n\n"
+            f"{PET_FEED_CE} شکم\n{_panel_bar('jm', '🟪', '▫️', st_['belly'])}\n\n"
+            f"نوازش: {cd('pet')}\nغذا ({PET_FEED_COST:,}): {cd('feed')}\nگردش: {cd('walk')}\n\n"
             f"هر کاری با پت ۳ تا ۵ انرژی بهت میده.")
 
 
@@ -8410,21 +8460,20 @@ def _pet_kb(row, uid: int) -> InlineKeyboardMarkup:
     owned = int(row["pets_owned"] or 0)
     rows = []
     if owned > 0:
-        rows.append([btn("نوازش", "success", callback_data=f"pt:pet:{uid}"),
-                     btn(f"غذا ({PET_FEED_COST // 1000}k)", "primary", callback_data=f"pt:feed:{uid}"),
+        idx = _pet_view_idx(row)
+        rows.append([btn("نوازش", "success", icon=PET_PET_EID, callback_data=f"pt:pet:{uid}"),
+                     btn(f"غذا ({PET_FEED_COST // 1000}k)", "primary", icon=PET_FEED_EID, callback_data=f"pt:feed:{uid}"),
                      btn("گردش", "primary", icon=PET_WALK_EID, callback_data=f"pt:walk:{uid}")])
+        up = _pet_upgrade_price(idx, _pet_st(row, idx)["rank"])
+        if up:
+            rows.append([btn(f"⬆️ ارتقای رنک — {up:,}", "success", callback_data=f"pt:up:{uid}")])
         if owned > 1:
-            act = max(1, min(owned, int(row["pet_active"] or 1)))
-            sel = [btn(("✅ " if i == act else "") + _pet_name_of(row, i), None, callback_data=f"pt:sel:{uid}:{i}") for i in range(1, owned + 1)]
-            rows += [sel[i:i + 3] for i in range(0, len(sel), 3)]
+            act = idx
+            sel = [btn(("✅ " if i == act else "") + _pet_name_of(row, i), None, icon=PETS[i - 1]["eid"], callback_data=f"pt:sel:{uid}:{i}") for i in range(1, owned + 1)]
+            rows += [sel[k:k + 3] for k in range(0, len(sel), 3)]
     if owned < len(PETS):
-        rows.append([btn(f"خرید {PETS[owned]['name']} — {PET_PRICES[owned]:,}", "danger", callback_data=f"pt:buy:{uid}")])
+        rows.append([btn(f"خرید {PETS[owned]['name']} — {PET_PRICES[owned]:,}", "danger", icon=PETS[owned]["eid"], callback_data=f"pt:buy:{uid}")])
     return InlineKeyboardMarkup(rows)
-
-
-def _pet_view_idx(row) -> int:
-    owned = int(row["pets_owned"] or 0)
-    return 1 if owned <= 0 else max(1, min(owned, int(row["pet_active"] or 1)))
 
 
 async def send_pet_panel(bot, chat_id: int, uid: int, reply_to=None, note: str = ""):
@@ -8462,35 +8511,46 @@ async def _pet_edit(q, uid: int, note: str = ""):
 
 
 async def _pet_do(uid: int, kind: str):
-    """نوازش/غذا/گردش → (status, info). status: ok | nopet | cd | poor"""
+    """نوازش/غذا/گردش → (status, info). status: ok | nopet | cd | poor | full"""
     now = time.time()
     async with pool.acquire() as c:
         async with c.transaction():
-            r = await c.fetchrow("SELECT balance, pets_owned, pet_active, pet_names, pet_t_pet, pet_t_feed, pet_t_walk FROM users WHERE user_id=$1 FOR UPDATE", uid)
+            r = await c.fetchrow("SELECT balance, pets_owned, pet_active, pet_names, pet_stats, pet_t_pet, pet_t_feed, pet_t_walk FROM users WHERE user_id=$1 FOR UPDATE", uid)
             if not r or int(r["pets_owned"] or 0) <= 0:
                 return "nopet", None
             left = _pet_cd_left(r, kind, now)
             if left > 0:
                 return "cd", left
-            if kind == "feed" and int(r["balance"] or 0) < PET_FEED_COST:
-                return "poor", None
+            idx = max(1, min(int(r["pets_owned"]), int(r["pet_active"] or 1)))
+            st_ = _pet_st(r, idx, now)
+            if kind == "feed":
+                if st_["belly"] >= 90:
+                    return "full", None
+                if int(r["balance"] or 0) < PET_FEED_COST:
+                    return "poor", None
             gain = random.randint(*PET_ENERGY)
             cost = PET_FEED_COST if kind == "feed" else 0
+            stats = _pet_stats_of(r)
+            d = dict(stats.get(str(idx)) or {})
+            d["rank"] = st_["rank"]
+            d["pop"] = st_["pop"] + PET_POP_GAIN[kind]
+            d["belly"] = min(100.0, st_["belly"] + PET_BELLY_FEED) if kind == "feed" else st_["belly"]
+            d["bt"] = now
+            stats[str(idx)] = d
             await c.execute(
-                f"UPDATE users SET pet_t_{kind}=$1, pet_acts=pet_acts+1, balance=balance-$2, energy=LEAST(energy+$3::double precision, $4::double precision) WHERE user_id=$5",
-                now, cost, float(gain), ENERGY_MAX, uid)
-            idx = max(1, min(int(r["pets_owned"]), int(r["pet_active"] or 1)))
+                f"UPDATE users SET pet_t_{kind}=$1, pet_acts=pet_acts+1, balance=balance-$2, energy=LEAST(energy+$3::double precision, $4::double precision), pet_stats=$5 WHERE user_id=$6",
+                now, cost, float(gain), ENERGY_MAX, json.dumps(stats), uid)
             return "ok", (gain, _pet_name_of(r, idx))
 
 
 def _pet_result_text(kind: str, name: str, gain: int) -> str:
     line = random.choice(PET_LINES[kind]).format(n=f"<b>{html.escape(name)}</b>")
-    lead = f"{PET_WALK_CE} " if kind == "walk" else ""
-    return f"{lead}{line}\n\n⚡ +{gain} انرژی" + (f" · {PET_FEED_COST:,} تومن غذا" if kind == "feed" else "")
+    return f"{PET_LEAD[kind]} {line}\n\n⚡ +{gain} انرژی" + (f" · {PET_FEED_COST:,} تومن غذا" if kind == "feed" else "")
 
 
 _PET_FAIL = {"nopet": "هنوز پت نداری! بنویس «پت» و اولین پتت رو بخر.",
-             "poor": f"موجودی جیبت برای غذا کافی نیست ({PET_FEED_COST:,} تومن)."}
+             "poor": f"موجودی جیبت برای غذا کافی نیست ({PET_FEED_COST:,} تومن).",
+             "full": "شکم پتت الان پره؛ یکم صبر کن گرسنه بشه."}
 
 
 async def pet_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
@@ -8561,6 +8621,32 @@ async def pet_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 1 <= n <= int(r["pets_owned"] or 0):
             await pool.execute("UPDATE users SET pet_active=$1 WHERE user_id=$2", n, uid)
         await q.answer(); await _pet_edit(q, uid); return
+    if act == "up":
+        alert = None
+        async with pool.acquire() as c:
+            async with c.transaction():
+                r = await c.fetchrow("SELECT balance, pets_owned, pet_active, pet_stats FROM users WHERE user_id=$1 FOR UPDATE", uid)
+                if int(r["pets_owned"] or 0) <= 0:
+                    alert = _PET_FAIL["nopet"]
+                else:
+                    idx = max(1, min(int(r["pets_owned"]), int(r["pet_active"] or 1)))
+                    st_ = _pet_st(r, idx)
+                    price = _pet_upgrade_price(idx, st_["rank"])
+                    if price is None:
+                        alert = "پتت به بالاترین رنک رسیده!"
+                    elif int(r["balance"] or 0) < price:
+                        alert = f"موجودی جیبت کافی نیست؛ {price:,} تومن لازمه."
+                    else:
+                        stats = _pet_stats_of(r)
+                        d = dict(stats.get(str(idx)) or {})
+                        d.update(rank=st_["rank"] + 1, pop=st_["pop"], belly=st_["belly"], bt=time.time())
+                        stats[str(idx)] = d
+                        await c.execute("UPDATE users SET balance=balance-$1, pet_stats=$2 WHERE user_id=$3", price, json.dumps(stats), uid)
+        if alert:
+            await q.answer(alert, show_alert=True); return
+        await q.answer("رنک پتت ارتقا پیدا کرد! ✨")
+        await _pet_edit(q, uid, "پتت تکامل پیدا کرد و قوی‌تر شد!")
+        return
     if act == "buy":
         alert = None
         async with pool.acquire() as c:
