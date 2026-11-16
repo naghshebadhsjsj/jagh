@@ -583,6 +583,7 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS bail_amount BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_cost BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_step INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS heist_jail_until DOUBLE PRECISION NOT NULL DEFAULT 0")   # زندانِ سرقت گروهی (فقط خلاف/سرقت رو قفل می‌کنه، نه کل ربات)
         await c.execute("CREATE TABLE IF NOT EXISTS tasks (task_id BIGSERIAL PRIMARY KEY, period TEXT NOT NULL CHECK(period IN ('daily', 'weekly')), title TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
         await c.execute("CREATE TABLE IF NOT EXISTS task_completions (task_id BIGINT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, period_key TEXT NOT NULL, completed BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(task_id, user_id, period_key))")
         await c.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS metric TEXT")
@@ -598,6 +599,11 @@ async def init_db(app: Application):
         if not await c.fetchval("SELECT 1 FROM bot_migrations WHERE name='tasks_no_jagh'"):
             await c.execute("UPDATE tasks SET active = FALSE WHERE metric = 'jagh'")   # تسک «امتیاز بزن» دیگه قابل انجام نیست
             await c.execute("INSERT INTO bot_migrations(name) VALUES('tasks_no_jagh') ON CONFLICT DO NOTHING")
+        if not await c.fetchval("SELECT 1 FROM bot_migrations WHERE name='tasks_duel_darsi'"):   # عنوان قدیمیِ «دوئل جقی» → «دوئل درسی»
+            await c.execute("UPDATE tasks SET title = regexp_replace(title, 'دوئل[[:space:]\u200c]*جق(\u200c?[یي])?', 'دوئل درسی', 'g') WHERE title LIKE '%جق%'")
+            for _dr in await c.fetch("SELECT task_id, target FROM tasks WHERE metric = 'duel_win' AND title LIKE '%جق%'"):
+                await c.execute("UPDATE tasks SET title = $1 WHERE task_id = $2", task_auto_title("duel_win", _dr["target"]), _dr["task_id"])
+            await c.execute("INSERT INTO bot_migrations(name) VALUES('tasks_duel_darsi') ON CONFLICT DO NOTHING")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_duel DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS chats (chat_id BIGINT PRIMARY KEY, title TEXT)")
         await c.execute("CREATE TABLE IF NOT EXISTS group_msgs (chat_id BIGINT NOT NULL, msg_id BIGINT NOT NULL, user_id BIGINT NOT NULL, name TEXT, username TEXT, text TEXT, ts DOUBLE PRECISION NOT NULL, PRIMARY KEY (chat_id, msg_id))")
@@ -8174,6 +8180,19 @@ def task_auto_title(metric: str, target: int) -> str:
     return m[2].format(n=f"{int(target):,}") if m else "تسک"
 
 
+_OLD_DUEL_RE = re.compile("دوئل[\\s\u200c]*ج[\u064b-\u0652]*ق[\u064b-\u0652]*(?:\u200c?[یي])?")
+
+
+def _fix_task_title(title) -> str:
+    """هر عنوان قدیمیِ «دوئل جقی» همیشه «دوئل درسی» نشون داده میشه."""
+    return _OLD_DUEL_RE.sub("دوئل درسی", str(title or ""))
+
+
+def _task_clock() -> str:
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Tehran")).strftime("%H:%M:%S")
+
+
 def task_period_key(period: str) -> str:
     from zoneinfo import ZoneInfo
     now = datetime.now(ZoneInfo("Asia/Tehran"))
@@ -8245,7 +8264,7 @@ async def task_event(bot, chat_id: int, uid: int, metric: str, n: int = 1, name:
                     if reward > 0:
                         await c.execute("INSERT INTO users(user_id,name) VALUES($1,'') ON CONFLICT(user_id) DO NOTHING", uid)
                         await c.execute("UPDATE users SET balance = balance + $1::bigint WHERE user_id = $2::bigint", reward, uid)
-                    done.append((r["period"], r["title"], reward))
+                    done.append((r["period"], _fix_task_title(r["title"]), reward))
         if not done:
             return
         if name is None:
@@ -8289,7 +8308,8 @@ async def build_tasks_view(uid: int):
     daily_left, weekly_left = task_countdown()
     head = [f"{TASK_ICON} <b>تسک‌های روزانه و هفتگی</b>",
             f"{HG_CE} تا پایان روز: {daily_left}",
-            f"{HG_CE} تا پایان هفته: {weekly_left}"]
+            f"{HG_CE} تا پایان هفته: {weekly_left}",
+            f"{HG_CE} آخرین بروزرسانی: {_task_clock()}"]   # هر بار «بروزرسانی» بزنی این ساعت عوض میشه، پس معلومه واقعاً بروز شده
     lines, buttons, size, hidden = [], [], sum(len(x) for x in head), 0
     last_period = None
     for r in rows:
@@ -8302,7 +8322,7 @@ async def build_tasks_view(uid: int):
             block.append(f"{TASK_ICON} <b>{'تسک‌های روزانه' if period == 'daily' else 'تسک‌های هفتگی'}</b>")
         else:
             block.append("________")   # خط جداکننده‌ی بین هر تسک
-        title, reward = html.escape(r["title"]), int(r["reward"] or 0)
+        title, reward = html.escape(_fix_task_title(r["title"])), int(r["reward"] or 0)
         if r["metric"]:
             tgt = max(1, int(r["target"] or 1)); cur = min(int(p["progress"]), tgt) if p else 0
             kind = TASK_METRICS.get(r["metric"], ("", "count"))[1]
@@ -16491,6 +16511,14 @@ def rob_view(owner: int, profile, now: float):
     head = f"{SWORDS_CE} <b>بازار خلاف</b>\n\n{HG_CE} رد خلاف: <b>{trace}٪</b> از ۱۰۰٪\n"
     lock = f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji>"
     timer_btn = btn("تایمر", "primary", icon=EID_HOURGLASS, callback_data=f"rb:timer:{owner}:club")
+    try:
+        _hj = float(profile['heist_jail_until'] or 0)
+    except Exception:
+        _hj = 0.0
+    if _hj > now:   # گیر افتادی تو سرقت گروهی: فقط خلاف/سرقت قفله، بقیه‌ی ربات باز می‌مونه
+        text = head + "\n" + _heist_jail_text(_hj - now)
+        kb = [[btn(f"پرداخت وثیقه ({HEIST_BAIL:,}) و آزادی", "success", icon=EID_MONEY, callback_data=f"rb:hbail:{owner}:club")]]
+        return text, InlineKeyboardMarkup(kb)
     if profile['arrest_until'] > now:
         bail = int(profile['bail_amount'] or 0) or ROBBERIES['club']['bail']
         text = (head + f"\n{lock} بازداشتی! تا آزادی یا پرداخت وثیقه نمی‌تونی خلاف کنی.\n"
@@ -16554,6 +16582,16 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text, kb = rob_view(owner, await _rob_profile(owner), time.time())
         await q.answer()
         await edit_html(q, B(text), kb); return
+    if action == "hbail":   # وثیقه‌ی زندانِ سرقت گروهی
+        st, _hbal = await _heist_pay_bail(owner)
+        if st == "poor":
+            await q.answer(f"وثیقه {HEIST_BAIL:,} تومنه؛ پول جیبت ({_hbal:,}) کافی نیست.", show_alert=True); return
+        await q.answer("🔓 وثیقه پرداخت شد و آزاد شدی!" if st == "ok" else "تو الان تو زندانِ سرقت نیستی.", show_alert=True)
+        text, kb = rob_view(owner, await _rob_profile(owner), time.time())
+        if st == "ok":
+            text = (f"{ce('lock', 2, '🔓')} <b>آزاد شدی!</b> وثیقه‌ی پرداختی: <b>{HEIST_BAIL:,} تومان</b>\n"
+                    f"موجودی جدید: <b>{_hbal:,} تومان</b>\n\n") + text
+        await edit_html(q, B(text), kb); return
 
     now = time.time(); await upsert_user(owner, q.from_user.full_name)
     async with pool.acquire() as conn:
@@ -16590,6 +16628,8 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await conn.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", bail_cost, owner)
                 await conn.execute("UPDATE robbery_profile SET arrest_until=0, bail_amount=0 WHERE user_id=$1", owner)
             elif action == "do":
+                if float(profile['heist_jail_until'] or 0) > now:
+                    await q.answer(_heist_jail_alert(float(profile['heist_jail_until']) - now), show_alert=True); return
                 if profile['trace'] >= ROBBERY_TRACE_LIMIT and profile['trace_until'] <= now:
                     await conn.execute("UPDATE robbery_profile SET trace=0 WHERE user_id=$1", owner)
                     profile = dict(profile)
@@ -16758,7 +16798,7 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _BG_TASKS.add(_t2)
         _t2.add_done_callback(_BG_TASKS.discard)
     if (user and not user.is_bot and user.id not in ADMIN_IDS and user.id in BANNED
-            and not (update.callback_query and (update.callback_query.data or "") == "hs:bail")):
+            and not (update.callback_query and (update.callback_query.data or "").startswith("hs:bail"))):
         until = BANNED[user.id]
         if until <= time.time():  # محرومیت تموم شده
             BANNED.pop(user.id, None)
@@ -17709,6 +17749,11 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
     if target.id in ADMIN_IDS or target.id in OWNER_IDS or target.id in STAFF:
         await msg.reply_text(B(f"{THEFT_CE} از حساب‌های پشتیبانی نمی‌شه دزدی کرد 🛡"), parse_mode="HTML",
                              reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+        return True
+    _hl = await _heist_jail_left(user.id)
+    if _hl > 0:
+        await send_html(context.bot, msg.chat_id, B(_heist_jail_text(_hl)), reply_markup=_heist_bail_kb(),
+                        reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
         return True
     await upsert_user(user.id, user.full_name)
     await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
@@ -18798,12 +18843,14 @@ async def affair_cb(update,context):
 # ───────────────────────── 🏦 سرقت گروهی از خزانه‌ی بانک (میز ۴ نفره) ─────────────────────────
 # «جینگو سرقت» → انتخاب محل → میز ۴ نفره (سازنده نفر اول) → ۴ مرحله‌ی پشت‌سرهم تو یه پنل:
 #   ۱) در باز کن: مسئله‌ی ریاضی با دکمه‌های عددی | ۲) پول جمع کن: ۹ خونه، نگهبان | ۳) فرار: دوربین | ۴) راننده: ۳ سؤال
-# کل زمان ۲ دقیقه و ۴۵ ثانیه. موفق → جایزه مساوی بین چهار نفر | شکست → ۱۵ دقیقه محرومیت (زندان) یا وثیقه‌ی ۱ میلیون.
+# کل زمان ۲ دقیقه و ۴۵ ثانیه. موفق → جایزه مساوی بین چهار نفر | شکست → ۱۵ دقیقه زندان (فقط از خلاف و سرقت محروم میشن، کل ربات باز می‌مونه) یا وثیقه‌ی ۱ میلیون.
 HEIST_TOTAL = 165
 HEIST_TICK = 3
 HEIST_WAIT_TTL = 300
 HEIST_BAIL = 1_000_000
 HEIST_JAIL_SECS = 15 * 60
+HEIST_GUARD_CHANCE = 0.4    # احتمال اینکه نگهبان تو هر تیک (۳ ثانیه) سر راه باشه
+HEIST_CAMERA_CHANCE = 0.4   # احتمال روشن بودن دوربین تو هر تیک
 HEIST_PAY = {"money": 5 * 50_000, "ruby": 3 * 100_000}   # هر خونه‌ی پول = ۵ تا ×۵۰ هزار | هر خونه‌ی یاقوت = ۳ تا ×۱۰۰ هزار
 HEIST_BANK_EID = "5776167758223905926"
 HEIST_MONEY_EID = "5776085234722281318"
@@ -18813,13 +18860,57 @@ HEIST_RUBY_CE = f'<tg-emoji emoji-id="{HEIST_RUBY_EID}">💎</tg-emoji>'
 HEIST_BANK_CE = f'<tg-emoji emoji-id="{HEIST_BANK_EID}">🏦</tg-emoji>'
 HEIST_ROLES = ["در باز کن", "پول جمع کن", "فرار", "راننده"]
 HEIST_TABLES: dict = {}
-HEIST_JAILED: dict = {}   # user_id -> زمان پایان محرومیتِ سرقت (فقط همین محرومیت با وثیقه آزاد میشه)
+HEIST_FAILED: dict = {}   # شماره‌ی سرقتِ شکست‌خورده -> {"ids", "text", "freed"} تا پنل وقتی کسی وثیقه داد آپدیت بشه
 _HEIST_SEQ = [0]
 _HS_OBST = {
     "L": ["سمت چپ پلیسه", "سمت چپ جاده بسته‌ست", "سمت چپ ترافیک قفله"],
     "M": ["وسط کوه ریزش کرده", "وسط سد پلیسیه", "وسط جاده گودال عمیقه"],
     "R": ["سمت راست پل خرابه", "سمت راست آتیش گرفته", "سمت راست راهبندانه"],
 }
+
+
+async def _heist_jail_left(uid: int) -> float:
+    """چند ثانیه از زندانِ سرقتِ گروهی مونده (۰ = آزاده). فقط خلاف و سرقت قفل میشن؛ بقیه‌ی ربات باز می‌مونه."""
+    try:
+        v = await pool.fetchval("SELECT heist_jail_until FROM robbery_profile WHERE user_id=$1::bigint", uid)
+    except Exception:
+        log.warning("heist jail check failed", exc_info=True)
+        return 0.0
+    return max(0.0, float(v or 0) - time.time())
+
+
+def _heist_jail_text(left: float) -> str:
+    return (f"🚨 <b>تو در سرقت از خزانه‌ی بانک مرکزی گیر افتادی!</b>\n\n"
+            f"{HG_CE} زمان باقی‌مانده: <b>{_duration_fa(int(left) + 1)}</b>\n"
+            f"💰 می‌تونی وثیقه‌ی <b>{HEIST_BAIL:,}</b> تومانی بدی و همین الان آزاد بشی.")
+
+
+def _heist_jail_alert(left: float) -> str:
+    return (f"🚨 تو در سرقت از خزانه‌ی بانک مرکزی گیر افتادی! {_duration_fa(int(left) + 1)} مونده؛ "
+            f"با نوشتن «جینگو سرقت» می‌تونی وثیقه بدی و آزاد بشی.")
+
+
+def _heist_bail_kb(gid=None) -> InlineKeyboardMarkup:
+    data = f"hs:bail:{gid}" if gid else "hs:bail"
+    return InlineKeyboardMarkup([[btn(f"💰 پرداخت وثیقه ({HEIST_BAIL:,})", "success", callback_data=data)]])
+
+
+async def _heist_pay_bail(uid: int):
+    """("ok", موجودی جدید) | ("free", 0) | ("poor", موجودی فعلی)"""
+    now = time.time()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            until = await c.fetchval("SELECT heist_jail_until FROM robbery_profile WHERE user_id=$1::bigint FOR UPDATE", uid)
+            if not until or float(until) <= now:
+                return "free", 0
+            bal = await c.fetchval(
+                "UPDATE users SET balance=balance-$1::bigint WHERE user_id=$2::bigint AND balance>=$1::bigint RETURNING balance",
+                HEIST_BAIL, uid)
+            if bal is None:
+                cur = await c.fetchval("SELECT balance FROM users WHERE user_id=$1::bigint", uid)
+                return "poor", int(cur or 0)
+            await c.execute("UPDATE robbery_profile SET heist_jail_until=0 WHERE user_id=$1::bigint", uid)
+            return "ok", int(bal)
 
 
 def _heist_in_game(uid: int):
@@ -18862,7 +18953,7 @@ def _heist_role_label(i: int) -> str:
 
 
 def _heist_render(g):
-    """(متن، کیبورد) پنل بر اساس وضعیت میز/مرحله."""
+    """(متن، کیبورد) پنل بر اساس وضعیت میز/مرحله. وضعیت لحظه‌ایِ نگهبان/دوربین همیشه بالای متنه، نه رو دکمه‌ها."""
     cid = g["id"]
     ps = g["players"]
     if g["state"] == "wait":
@@ -18871,12 +18962,19 @@ def _heist_render(g):
             who = _ulink(ps[i]["id"], ps[i]["name"] or "کاربر") if i < len(ps) else "—"
             lines.append(f"{i + 1}. {_heist_role_label(i)}: {who}")
         lines += ["", f"⏱ کل زمان سرقت: <b>۲ دقیقه و ۴۵ ثانیه</b> | جایزه بین هر ۴ نفر مساوی تقسیم میشه.",
-                  f"🚔 شکست = ۱۵ دقیقه زندان (محرومیت از ربات) یا وثیقه‌ی <b>{HEIST_BAIL:,}</b> تومان."]
+                  f"🚔 شکست = ۱۵ دقیقه زندان (فقط از خلاف و سرقت محروم میشی، بقیه‌ی ربات باز می‌مونه) یا وثیقه‌ی <b>{HEIST_BAIL:,}</b> تومان."]
         kb = InlineKeyboardMarkup([[btn("🪑 می‌شینم", "success", callback_data=f"hs:j:{cid}"),
                                     btn("❌ بستن میز", "danger", callback_data=f"hs:x:{cid}")]])
         return B("\n".join(lines)), kb
     st = g["stage"]
-    head = [f"{HEIST_BANK_CE} <b>سرقت از خزانه‌ی بانک</b> — ⏱ <b>{_heist_time(g)}</b>", ""]
+    head = [f"{HEIST_BANK_CE} <b>سرقت از خزانه‌ی بانک</b> — ⏱ <b>{_heist_time(g)}</b>"]
+    if st == 2:   # نگهبان: بالای متن
+        head.append("👮 <b>نگهبان اینجاست! صبر کن بره...</b>" if g.get("guard") else "🟢 <b>نگهبانی نیست؛ الان برداشت کن!</b>")
+    elif st == 3:   # دوربین (جابجایی): بالای متن
+        head.append("🚨 <b>دوربین روشنه! صبر کن خاموش شه...</b>" if g.get("camera") else "🟢 <b>دوربین خاموشه؛ الان ببر به ماشین!</b>")
+    if g.get("last"):   # نتیجه‌ی آخرین دکمه‌ای که کسی زد؛ تو خودِ پنل دیده میشه، نه فقط تو پاپ‌آپ
+        head.append(f"📢 {g['last']}")
+    head.append("")
     for i in range(4):
         head.append(f"{'▶️' if i == st - 1 else '▫️'} {_heist_role_label(i)}: {_ulink(ps[i]['id'], ps[i]['name'] or 'کاربر')}")
     head.append("")
@@ -18891,7 +18989,7 @@ def _heist_render(g):
                      btn("✅ تایید", "success", callback_data=f"hs:k:{cid}:ok")])
     elif st == 2:
         head += ["💰 <b>مرحله ۲ — جمع‌کردن پول</b>",
-                 "۳ تا خونه رو انتخاب کن؛ فقط وقتی نگهبانِ اون خونه نیست (❓) می‌تونی برداری. 👮 یعنی نگهبان هست!",
+                 "۳ تا خونه رو انتخاب کن؛ فقط وقتی بالای پنل نوشته «نگهبانی نیست» می‌تونی برداری.",
                  "اگه خونه‌ی خالی برداری، همه‌چی از اول شروع میشه.",
                  f"برداشته‌شده ({len(g['picked'])}/۳): {_heist_icons(g['picked'])}"]
         for r in range(3):
@@ -18901,17 +18999,14 @@ def _heist_render(g):
                     k = g["cells"][i]
                     row.append(btn("پول" if k == "money" else "یاقوت", "success" if k == "money" else "primary",
                                    icon=HEIST_MONEY_EID if k == "money" else HEIST_RUBY_EID, callback_data=f"hs:c:{cid}:{i}"))
-                elif g["guards"][i]:
-                    row.append(btn("👮", "danger", callback_data=f"hs:c:{cid}:{i}"))
                 else:
                     row.append(btn("❓", "primary", callback_data=f"hs:c:{cid}:{i}"))
             rows.append(row)
         rows.append([btn("✋ کافیه", "success", callback_data=f"hs:e:{cid}")])
     elif st == 3:
-        cam = "🔴 روشنه — نزن!" if g["camera"] else "🟢 خاموشه — بزن!"
-        head += [f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji> <b>مرحله ۳ — فرار</b>',
+        head += [f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji> <b>مرحله ۳ — فرار (جابجایی به ماشین)</b>',
                  "محصولات رو یکی‌یکی به ماشین برسون. اگه دوربین روشن باشه آژیر می‌زنه، همه‌ی محصولات از دستت می‌افته و باید از اول شروع کنی!",
-                 f"📷 دوربین: <b>{cam}</b>", f"🚗 منتقل‌شده به ماشین: <b>{g['moved']}/{len(g['items'])}</b>"]
+                 f"🚗 منتقل‌شده به ماشین: <b>{g['moved']}/{len(g['items'])}</b>"]
         rows.append([btn("انتقال به ماشین", "danger", icon=THEFT_EID, callback_data=f"hs:m:{cid}"),
                      btn("✋ کافیه", "success", callback_data=f"hs:e:{cid}")])
     else:
@@ -18925,18 +19020,54 @@ def _heist_render(g):
     return B("\n".join(head)), InlineKeyboardMarkup(rows)
 
 
+def _kb_no_icons(kb):
+    """همون کیبورد بدون ایموجی پرمیومِ دکمه‌ها (اگه تلگرام آیکن یه دکمه رو رد کرد)."""
+    try:
+        rows = []
+        for row in kb.inline_keyboard:
+            new_row = []
+            for b in row:
+                kw = {k: v for k, v in (getattr(b, "api_kwargs", None) or {}).items() if k != "icon_custom_emoji_id"}
+                new_row.append(InlineKeyboardButton(b.text, callback_data=b.callback_data, url=b.url, api_kwargs=kw or None))
+            rows.append(new_row)
+        return InlineKeyboardMarkup(rows)
+    except Exception:
+        return kb
+
+
+def _retry_secs(e) -> float:
+    ra = getattr(e, "retry_after", 1)
+    try:
+        return float(ra.total_seconds()) if hasattr(ra, "total_seconds") else float(ra)
+    except Exception:
+        return 1.0
+
+
 async def _heist_edit(bot, g, text: str, kb=None) -> bool:
-    for t in (text, re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)):
-        try:
-            await bot.edit_message_text(t, chat_id=g["chat"], message_id=g["msg"], parse_mode="HTML", reply_markup=kb)
-            return True
-        except RetryAfter:
-            return False
-        except BadRequest as e:
-            if "not modified" in str(e).lower():
+    plain = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)
+    attempts = [(text, kb), (plain, kb)]
+    if kb is not None:
+        attempts.append((plain, _kb_no_icons(kb)))
+    for t, k in attempts:
+        for tries in range(2):
+            try:
+                await bot.edit_message_text(t, chat_id=g["chat"], message_id=g["msg"], parse_mode="HTML", reply_markup=k)
                 return True
-        except Exception:
-            log.warning("heist edit failed", exc_info=True)
+            except RetryAfter as e:
+                wait = _retry_secs(e)
+                if tries == 0 and wait <= 3:   # فلود: کمی صبر و یه بار دیگه، تا پنل بعد از دکمه حتماً آپدیت بشه
+                    await asyncio.sleep(wait + 0.2)
+                    continue
+                log.warning("heist edit flood-limited (%.0fs)", wait)
+                return False
+            except BadRequest as e:
+                if "not modified" in str(e).lower():
+                    return True
+                log.warning("heist edit rejected: %s", e)
+                break
+            except Exception:
+                log.warning("heist edit failed", exc_info=True)
+                break
     return False
 
 
@@ -18963,17 +19094,18 @@ async def _heist_expire(bot, g):
 
 
 async def _heist_jail(uids):
+    """زندانِ سرقت: فقط خلاف و سرقت قفل میشن (تو دیتابیس می‌مونه)؛ از کل ربات محروم نمیشن."""
     until = time.time() + HEIST_JAIL_SECS
     for uid in uids:
         if uid in ADMIN_IDS:
             continue
         try:
-            await pool.execute("UPDATE users SET banned_until=GREATEST(banned_until,$2::double precision) WHERE user_id=$1::bigint", uid, until)
+            await pool.execute(
+                "INSERT INTO robbery_profile(user_id, heist_jail_until) VALUES($1::bigint, $2::double precision) "
+                "ON CONFLICT (user_id) DO UPDATE SET heist_jail_until = GREATEST(robbery_profile.heist_jail_until, EXCLUDED.heist_jail_until)",
+                uid, until)
         except Exception:
             log.warning("heist jail save failed", exc_info=True)
-        BANNED[uid] = max(BANNED.get(uid, 0), until)
-        if BANNED[uid] == until:
-            HEIST_JAILED[uid] = until
 
 
 async def _heist_fail(bot, g, reason: str):
@@ -18981,10 +19113,12 @@ async def _heist_fail(bot, g, reason: str):
     ids = [p["id"] for p in g["players"]]
     await _heist_jail(ids)
     names = "، ".join(_ulink(p["id"], p["name"] or "کاربر") for p in g["players"])
-    text = (f"🚨 <b>سرقت شکست خورد!</b>\n\n{reason}\n\n⛓ {names} گیر افتادن و <b>۱۵ دقیقه</b> از همه‌ی دستورات ربات محروم شدن.\n"
+    text = (f"🚨 <b>سرقت شکست خورد!</b>\n\n{reason}\n\n⛓ {names} در سرقت از خزانه‌ی بانک مرکزی گیر افتادن و <b>۱۵ دقیقه</b> از خلاف و سرقت محروم شدن (بقیه‌ی ربات براشون باز می‌مونه).\n"
             f"💰 هر نفر می‌تونه با دکمه‌ی زیر وثیقه‌ی <b>{HEIST_BAIL:,}</b> تومانی بده و زودتر آزاد بشه.")
-    kb = InlineKeyboardMarkup([[btn(f"💰 پرداخت وثیقه ({HEIST_BAIL:,})", "success", callback_data="hs:bail")]])
-    await _heist_edit(bot, g, B(text), kb)
+    HEIST_FAILED[g["id"]] = {"ids": ids, "text": text, "freed": []}
+    if len(HEIST_FAILED) > 300:
+        HEIST_FAILED.pop(next(iter(HEIST_FAILED)), None)
+    await _heist_edit(bot, g, B(text), _heist_bail_kb(g["id"]))
 
 
 async def _heist_success(bot, g):
@@ -19014,9 +19148,9 @@ async def _heist_runner(bot, g):
                     await _heist_fail(bot, g, "⏱ وقت تموم شد و پلیس رسید!")
                     break
                 if g["stage"] == 2:
-                    g["guards"] = [(i not in g["open"]) and random.random() < 0.5 for i in range(9)]
+                    g["guard"] = random.random() < HEIST_GUARD_CHANCE
                 elif g["stage"] == 3:
-                    g["camera"] = random.random() < 0.4
+                    g["camera"] = random.random() < HEIST_CAMERA_CHANCE
                 await _heist_show(bot, g)
     except asyncio.CancelledError:
         raise
@@ -19038,7 +19172,7 @@ def _heist_stage2(g):
     g["stage"] = 2
     g["cells"] = _heist_layout()
     g["open"], g["picked"] = set(), []
-    g["guards"] = [random.random() < 0.5 for _ in range(9)]
+    g["guard"] = random.random() < HEIST_GUARD_CHANCE
 
 
 def _heist_stage3(g):
@@ -19066,6 +19200,11 @@ async def heist_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
     msg, user = update.effective_message, update.effective_user
     if update.effective_chat.type == "private":
         await msg.reply_text("سرقت گروهی فقط تو گروه کار می‌کنه."); return True
+    _hl = await _heist_jail_left(user.id)
+    if _hl > 0:   # گیر افتاده: پیام زندان + دکمه‌ی وثیقه
+        await send_html(context.bot, msg.chat_id, B(_heist_jail_text(_hl)), reply_markup=_heist_bail_kb(),
+                        reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+        return True
     kb = InlineKeyboardMarkup([[btn("سرقت از خزانه بانک", "danger", icon=HEIST_BANK_EID, callback_data=f"hs:pk:{user.id}:bank")]])
     await send_html(context.bot, msg.chat_id,
                     B("🏦 <b>سرقت گروهی</b>\n\nمحل سرقت رو انتخاب کن 👇\nمیز ۴ نفره می‌سازی و سه نفر دیگه باید بیان بشینن."),
@@ -19083,6 +19222,9 @@ async def _heist_pick(q, context, parts):
         await _hs_ans(q, "این پنل مال تو نیست؛ خودت بنویس «جینگو سرقت» 😅", True); return
     if _heist_in_game(user.id) is not None:
         await _hs_ans(q, "تو الان تو یه سرقت دیگه‌ای هستی.", True); return
+    _hl = await _heist_jail_left(user.id)
+    if _hl > 0:
+        await _hs_ans(q, _heist_jail_alert(_hl), True); return
     await upsert_user(user.id, user.full_name)
     _HEIST_SEQ[0] += 1
     g = {"id": _HEIST_SEQ[0], "chat": q.message.chat_id, "msg": q.message.message_id, "owner": user.id,
@@ -19094,18 +19236,33 @@ async def _heist_pick(q, context, parts):
     _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
 
 
-async def _heist_bail(q, user):
-    until = HEIST_JAILED.get(user.id)
-    if not until or BANNED.get(user.id) != until or until <= time.time():
-        HEIST_JAILED.pop(user.id, None)
-        await _hs_ans(q, "تو الان زندانیِ سرقت نیستی.", True); return
-    bal = await pool.fetchval("UPDATE users SET balance=balance-$1::bigint WHERE user_id=$2::bigint AND balance>=$1::bigint RETURNING balance", HEIST_BAIL, user.id)
-    if bal is None:
-        await _hs_ans(q, f"وثیقه {HEIST_BAIL:,} تومنه؛ پول جیبت کافی نیست.", True); return
-    await pool.execute("UPDATE users SET banned_until=0 WHERE user_id=$1::bigint", user.id)
-    BANNED.pop(user.id, None)
-    HEIST_JAILED.pop(user.id, None)
+async def _heist_bail(q, user, gid=None):
+    rec = HEIST_FAILED.get(gid) if gid else None
+    if rec is not None and user.id not in rec["ids"]:
+        await _hs_ans(q, "این وثیقه مالِ تیمِ همون سرقته؛ تو جزوشون نبودی 😅", True); return
+
+    async def _still_jailed() -> bool:
+        rows = await pool.fetch("SELECT 1 FROM robbery_profile WHERE user_id = ANY($1::bigint[]) AND heist_jail_until > $2::double precision",
+                                rec["ids"], time.time())
+        return bool(rows)
+
+    st, bal = await _heist_pay_bail(user.id)
+    if st == "free":
+        await _hs_ans(q, "تو الان تو زندانِ سرقت نیستی.", True)
+        if rec is None:
+            await edit_html(q, B("🔓 <b>تو الان تو زندانِ سرقت نیستی؛ آزادی!</b>"))
+        elif not await _still_jailed():
+            await edit_html(q, B("\n\n".join([rec["text"]] + rec["freed"] + ["🔓 همه آزاد شدن."])))
+        return
+    if st == "poor":
+        await _hs_ans(q, f"وثیقه {HEIST_BAIL:,} تومنه؛ پول جیبت ({bal:,}) کافی نیست.", True); return
     await _hs_ans(q, "🔓 وثیقه پرداخت شد و آزاد شدی!", True)
+    if rec is None:   # پیام شخصیِ زندان: نتیجه رو همون‌جا نشون بده و دکمه رو بردار
+        await edit_html(q, B(f"{ce('lock', 2, '🔓')} <b>آزاد شدی!</b>\nوثیقه‌ی پرداختی: <b>{HEIST_BAIL:,} تومان</b>\n"
+                             f"موجودی جدید: <b>{bal:,} تومان</b>\nحالا دوباره می‌تونی خلاف و سرقت کنی."))
+        return
+    rec["freed"].append(f"🔓 {_ulink(user.id, user.full_name)} با پرداخت وثیقه ({HEIST_BAIL:,} تومان) آزاد شد!")
+    await edit_html(q, B(rec["text"] + "\n\n" + "\n".join(rec["freed"])), _heist_bail_kb(gid) if await _still_jailed() else None)
 
 
 async def heist_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -19113,7 +19270,7 @@ async def heist_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = (q.data or "").split(":")
     act = parts[1] if len(parts) > 1 else ""
     if act == "bail":
-        await _heist_bail(q, q.from_user); return
+        await _heist_bail(q, q.from_user, int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None); return
     if act == "pk":
         await _heist_pick(q, context, parts); return
     try:
@@ -19133,8 +19290,11 @@ async def _heist_dispatch(q, context, g, act, parts):
     note, alert = None, False
     if g["state"] == "wait":
         if act == "j":
+            _jl = await _heist_jail_left(user.id)
             if _heist_in_game(user.id) is not None:
                 note, alert = "تو الان تو یه سرقت (همین میز یا یه میز دیگه) هستی.", True
+            elif _jl > 0:
+                note, alert = _heist_jail_alert(_jl), True
             elif len(g["players"]) >= 4:
                 note, alert = "میز پر شده.", True
             else:
@@ -19177,14 +19337,14 @@ async def _heist_dispatch(q, context, g, act, parts):
         i = int(parts[3])
         if i in g["open"]:
             note, alert = "این خونه رو قبلاً برداشتی.", True
-        elif g["guards"][i]:
-            note, alert = "👮 نگهبان اونجاست! صبر کن بره.", True
+        elif g.get("guard"):
+            note, alert = "👮 نگهبان اینجاست! صبر کن بره.", True
         else:
             g["open"].add(i)
             kind = g["cells"][i]
             if kind is None:
                 g["cells"] = _heist_layout(); g["open"] = set(); g["picked"] = []
-                g["guards"] = [random.random() < 0.5 for _ in range(9)]
+                g["guard"] = random.random() < HEIST_GUARD_CHANCE
                 note, alert = "❌ خونه خالی بود! همه‌چی از اول شروع شد.", True
             else:
                 g["picked"].append(kind)
@@ -19222,6 +19382,8 @@ async def _heist_dispatch(q, context, g, act, parts):
             await _heist_fail(bot, g, "🚔 مسیر رو اشتباه رفتی و پلیس راهتون رو بست!"); return
     else:
         note, alert = "این دکمه دیگه فعال نیست.", True
+    if note:
+        g["last"] = f"{_ulink(user.id, user.full_name)}: {note}"
     await _hs_ans(q, note, alert)
     await _heist_show(bot, g)
 
