@@ -579,6 +579,13 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS adoption_requests (child_id BIGINT PRIMARY KEY, parent_id BIGINT NOT NULL, spouse_id BIGINT NOT NULL, chat_id BIGINT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS casino_records (chat_id BIGINT NOT NULL, game TEXT NOT NULL, user_id BIGINT NOT NULL, name TEXT, record BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(chat_id, game))")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_state (user_id BIGINT NOT NULL, robbery_type TEXT NOT NULL, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, blocked_until DOUBLE PRECISION NOT NULL DEFAULT 0, PRIMARY KEY (user_id, robbery_type))")
+        await c.execute("""CREATE TABLE IF NOT EXISTS heist_skills (
+            user_id BIGINT NOT NULL,
+            role INT NOT NULL CHECK(role BETWEEN 0 AND 3),
+            xp BIGINT NOT NULL DEFAULT 0,
+            actions BIGINT NOT NULL DEFAULT 0,
+            PRIMARY KEY(user_id, role)
+        )""")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_profile (user_id BIGINT PRIMARY KEY, trace INTEGER NOT NULL DEFAULT 0, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, arrest_until DOUBLE PRECISION NOT NULL DEFAULT 0, trace_until DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS bail_amount BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_cost BIGINT NOT NULL DEFAULT 0")
@@ -18845,13 +18852,15 @@ async def affair_cb(update,context):
 #   ۱) در باز کن: مسئله‌ی ریاضی با دکمه‌های عددی | ۲) پول جمع کن: ۹ خونه، نگهبان | ۳) فرار: دوربین | ۴) راننده: ۳ سؤال
 # کل زمان ۲ دقیقه و ۴۵ ثانیه. موفق → جایزه مساوی بین چهار نفر | شکست → ۱۵ دقیقه زندان (فقط از خلاف و سرقت محروم میشن، کل ربات باز می‌مونه) یا وثیقه‌ی ۱ میلیون.
 HEIST_TOTAL = 165
-HEIST_TICK = 3
+HEIST_TICK = 5
 HEIST_WAIT_TTL = 300
 HEIST_BAIL = 1_000_000
 HEIST_JAIL_SECS = 15 * 60
 HEIST_GUARD_CHANCE = 0.4    # احتمال اینکه نگهبان تو هر تیک (۳ ثانیه) سر راه باشه
 HEIST_CAMERA_CHANCE = 0.4   # احتمال روشن بودن دوربین تو هر تیک
-HEIST_PAY = {"money": 5 * 50_000, "ruby": 3 * 100_000}   # هر خونه‌ی پول = ۵ تا ×۵۰ هزار | هر خونه‌ی یاقوت = ۳ تا ×۱۰۰ هزار
+HEIST_PAY = {"money": 50_000, "ruby": 100_000}   # هر واحد پول ۵۰ هزار و هر واحد یاقوت ۱۰۰ هزار تومان
+HEIST_XP_PER_SUCCESS = 24
+HEIST_XP_PER_LEVEL = 150
 HEIST_BANK_EID = "5776167758223905926"
 HEIST_MONEY_EID = "5776085234722281318"
 HEIST_RUBY_EID = "5778327448168961624"
@@ -18920,6 +18929,15 @@ def _heist_in_game(uid: int):
     return None
 
 
+async def _heist_load_skill(uid: int, role: int) -> int:
+    try:
+        return int(await pool.fetchval(
+            "SELECT xp FROM heist_skills WHERE user_id=$1::bigint AND role=$2::int", uid, role) or 0)
+    except Exception:
+        log.warning("heist skill load failed", exc_info=True)
+        return 0
+
+
 def _heist_questions() -> list:
     qs = []
     for _ in range(3):
@@ -18952,72 +18970,108 @@ def _heist_role_label(i: int) -> str:
     return ["🔓", "💰", f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji>', "🚗"][i] + " " + HEIST_ROLES[i]
 
 
+def _heist_skill_view(p: dict, role: int) -> tuple[int, int, str]:
+    xp = int((p.get("skills") or {}).get(role, 0))
+    level = 1 + xp // HEIST_XP_PER_LEVEL
+    progress = xp % HEIST_XP_PER_LEVEL
+    filled = min(5, int(progress * 5 / HEIST_XP_PER_LEVEL))
+    return level, progress, "▰" * filled + "▱" * (5 - filled)
+
+
+def _heist_player_block(p: dict, i: int, active: bool = False) -> list[str]:
+    uid, name = int(p["id"]), html.escape(p.get("name") or "کاربر")
+    level, xp, bar = _heist_skill_view(p, i)
+    labels = [
+        "🗝 رقم‌های معمای گاوصندوق",
+        "⚡ شتاب برداشت",
+        "⚡ شتاب جابه‌جایی",
+        "🔑 شتاب رانندگی",
+    ]
+    prefix = "▶️ " if active else ""
+    return [
+        f"{prefix}<b>[{uid}] {HEIST_ROLES[i]} ({name})</b>",
+        f"┘─ ⭐ سطح: {level}  {bar}",
+        f"  └─ {labels[i]}: {xp}/{HEIST_XP_PER_LEVEL} XP",
+    ]
+
+
 def _heist_render(g):
-    """(متن، کیبورد) پنل بر اساس وضعیت میز/مرحله. وضعیت لحظه‌ایِ نگهبان/دوربین همیشه بالای متنه، نه رو دکمه‌ها."""
-    cid = g["id"]
-    ps = g["players"]
+    """پنل کم‌متن سرقت؛ اطلاعات نقش‌ها و نوار پیشرفت هر مهارت."""
+    cid, ps = g["id"], g["players"]
+    lines = [f"{HEIST_BANK_CE} <b>سرقت از خزانه بانک</b>"]
     if g["state"] == "wait":
-        lines = [f"{HEIST_BANK_CE} <b>سرقت از خزانه‌ی بانک</b>", f"میز ۴ نفره — <b>{len(ps)}/۴</b>", ""]
+        lines.append(f"میز: <b>{len(ps)}/۴</b>")
+        lines.append(f"<b>جینگو خلافکار[{g['owner']}]</b>")
+        lines.append("〰️〰️〰️〰️〰️")
         for i in range(4):
-            who = _ulink(ps[i]["id"], ps[i]["name"] or "کاربر") if i < len(ps) else "—"
-            lines.append(f"{i + 1}. {_heist_role_label(i)}: {who}")
-        lines += ["", f"⏱ کل زمان سرقت: <b>۲ دقیقه و ۴۵ ثانیه</b> | جایزه بین هر ۴ نفر مساوی تقسیم میشه.",
-                  f"🚔 شکست = ۱۵ دقیقه زندان (فقط از خلاف و سرقت محروم میشی، بقیه‌ی ربات باز می‌مونه) یا وثیقه‌ی <b>{HEIST_BAIL:,}</b> تومان."]
-        kb = InlineKeyboardMarkup([[btn("🪑 می‌شینم", "success", callback_data=f"hs:j:{cid}"),
-                                    btn("❌ بستن میز", "danger", callback_data=f"hs:x:{cid}")]])
-        return B("\n".join(lines)), kb
+            if i < len(ps):
+                lines.extend(_heist_player_block(ps[i], i))
+            else:
+                lines.append(f"<b>{HEIST_ROLES[i]}</b>: خالی")
+            if i != 3:
+                lines.append("〰️〰️〰️")
+        lines += ["", "❗️ برای شروع سرقت، سازنده میز باید دکمه شروع را بزند."]
+        rows = []
+        if len(ps) < 4:
+            rows.append([btn("🪑 می‌شینم", "success", callback_data=f"hs:j:{cid}")])
+        else:
+            rows.append([btn("🚨 شروع سرقت", "success", callback_data=f"hs:start:{cid}")])
+        rows.append([btn("❌ بستن میز", "danger", callback_data=f"hs:x:{cid}")])
+        return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
     st = g["stage"]
-    head = [f"{HEIST_BANK_CE} <b>سرقت از خزانه‌ی بانک</b> — ⏱ <b>{_heist_time(g)}</b>"]
-    if st == 2:   # نگهبان: بالای متن
-        head.append("👮 <b>نگهبان اینجاست! صبر کن بره...</b>" if g.get("guard") else "🟢 <b>نگهبانی نیست؛ الان برداشت کن!</b>")
-    elif st == 3:   # دوربین (جابجایی): بالای متن
-        head.append("🚨 <b>دوربین روشنه! صبر کن خاموش شه...</b>" if g.get("camera") else "🟢 <b>دوربین خاموشه؛ الان ببر به ماشین!</b>")
-    if g.get("last"):   # نتیجه‌ی آخرین دکمه‌ای که کسی زد؛ تو خودِ پنل دیده میشه، نه فقط تو پاپ‌آپ
-        head.append(f"📢 {g['last']}")
-    head.append("")
-    for i in range(4):
-        head.append(f"{'▶️' if i == st - 1 else '▫️'} {_heist_role_label(i)}: {_ulink(ps[i]['id'], ps[i]['name'] or 'کاربر')}")
-    head.append("")
+    lines[0] += f" — ⏱ <b>{_heist_time(g)}</b>"
+    if st == 2:
+        lines.append("👮 <b>نگهبان اینجاست؛ صبر کن بره.</b>" if g.get("guard") else "🟢 <b>نگهبان نیست.</b>")
+    elif st == 3:
+        lines.append("🚨 <b>دوربین روشنه؛ صبر کن خاموش شه.</b>" if g.get("camera") else "🟢 <b>دوربین خاموشه.</b>")
+    if g.get("last"):
+        lines.append(f"📢 {g['last']}")
+    lines.append("")
+    lines.append(f"<b>نوبت: {HEIST_ROLES[st - 1]}</b>")
     rows = []
     if st == 1:
-        head += ["🔓 <b>مرحله ۱ — باز کردن در خزانه</b>", "مسئله رو حل کن و جواب رو با دکمه‌های عددی بزن:",
-                 f"<code>{g['a']} + {g['b']} = ؟</code>", f"جواب تو: <code>{g['typed'] or '—'}</code>"]
+        lines += ["🔓 <b>باز کردن گاوصندوق</b>", f"<code>{g['a']} + {g['b']} = ؟</code>",
+                  f"جواب: <code>{g['typed'] or '—'}</code>"]
         nums = [str(i) for i in range(1, 10)]
         for r in range(3):
             rows.append([btn(n, "primary", callback_data=f"hs:k:{cid}:{n}") for n in nums[r * 3:r * 3 + 3]])
-        rows.append([btn("⌫", "danger", callback_data=f"hs:k:{cid}:b"), btn("0", "primary", callback_data=f"hs:k:{cid}:0"),
-                     btn("✅ تایید", "success", callback_data=f"hs:k:{cid}:ok")])
+        rows.append([btn("⌫", "danger", callback_data=f"hs:k:{cid}:b"),
+                     btn("0", "primary", callback_data=f"hs:k:{cid}:0"),
+                     btn("تأیید", "success", callback_data=f"hs:k:{cid}:ok")])
     elif st == 2:
-        head += ["💰 <b>مرحله ۲ — جمع‌کردن پول</b>",
-                 "۳ تا خونه رو انتخاب کن؛ فقط وقتی بالای پنل نوشته «نگهبانی نیست» می‌تونی برداری.",
-                 "اگه خونه‌ی خالی برداری، همه‌چی از اول شروع میشه.",
-                 f"برداشته‌شده ({len(g['picked'])}/۳): {_heist_icons(g['picked'])}"]
+        lines += ["💰 <b>جمع‌آوری</b>", "۳ خانه را انتخاب کن؛ خانه خالی یعنی شروع دوباره.",
+                  f"برداشت: <b>{len(g['picked'])}/۳ خانه</b>  {_heist_icons(g['picked'])}"]
         for r in range(3):
             row = []
             for i in range(r * 3, r * 3 + 3):
                 if i in g["open"]:
                     k = g["cells"][i]
                     row.append(btn("پول" if k == "money" else "یاقوت", "success" if k == "money" else "primary",
-                                   icon=HEIST_MONEY_EID if k == "money" else HEIST_RUBY_EID, callback_data=f"hs:c:{cid}:{i}"))
+                                   icon=HEIST_MONEY_EID if k == "money" else HEIST_RUBY_EID,
+                                   callback_data=f"hs:c:{cid}:{i}"))
                 else:
                     row.append(btn("❓", "primary", callback_data=f"hs:c:{cid}:{i}"))
             rows.append(row)
-        rows.append([btn("✋ کافیه", "success", callback_data=f"hs:e:{cid}")])
+        rows.append([btn("کافیه", "success", callback_data=f"hs:e:{cid}")])
     elif st == 3:
-        head += [f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji> <b>مرحله ۳ — فرار (جابجایی به ماشین)</b>',
-                 "محصولات رو یکی‌یکی به ماشین برسون. اگه دوربین روشن باشه آژیر می‌زنه، همه‌ی محصولات از دستت می‌افته و باید از اول شروع کنی!",
-                 f"🚗 منتقل‌شده به ماشین: <b>{g['moved']}/{len(g['items'])}</b>"]
-        rows.append([btn("انتقال به ماشین", "danger", icon=THEFT_EID, callback_data=f"hs:m:{cid}"),
-                     btn("✋ کافیه", "success", callback_data=f"hs:e:{cid}")])
+        total, moved = len(g["items"]), int(g["moved"])
+        filled = min(5, int(moved * 5 / max(1, total)))
+        bar = "▰" * filled + "▱" * (5 - filled)
+        lines += [f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji> <b>جابه‌جایی به ماشین</b>',
+                  f"🚗 {moved}/{total} واحد منتقل شد", f"نوار جابه‌جایی: {bar}"]
+        rows.append([btn("انتقال یک واحد", "danger", icon=THEFT_EID, callback_data=f"hs:m:{cid}")])
+        rows.append([btn("کافیه", "success", callback_data=f"hs:e:{cid}")])
     else:
         q = g["qs"][g["qi"]]
-        head += [f"🚗 <b>مرحله ۴ — رانندگی</b> (سؤال {g['qi'] + 1}/۳)",
-                 f"غنیمت توی ماشین: {_heist_icons(g['loot'])} — <b>{_heist_loot_value(g['loot']):,}</b> تومان", "",
-                 f"🛣 {q['t']}"]
-        rows.append([btn("↪️ بپیچ راست", "primary", callback_data=f"hs:d:{cid}:0"),
-                     btn("⬆️ بپیچ وسط", "primary", callback_data=f"hs:d:{cid}:1"),
-                     btn("↩️ بپیچ چپ", "primary", callback_data=f"hs:d:{cid}:2")])
-    return B("\n".join(head)), InlineKeyboardMarkup(rows)
+        qi = int(g["qi"])
+        bar = "▰" * qi + "▱" * (3 - qi)
+        lines += [f"🚗 <b>رانندگی — سؤال {qi + 1}/۳</b>", f"نوار رانندگی: {bar}",
+                  f"غنیمت: {_heist_icons(g['loot'])}", q["t"]]
+        rows.append([btn("راست", "primary", callback_data=f"hs:d:{cid}:0"),
+                     btn("وسط", "primary", callback_data=f"hs:d:{cid}:1"),
+                     btn("چپ", "primary", callback_data=f"hs:d:{cid}:2")])
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
 
 
 def _kb_no_icons(kb):
@@ -19128,11 +19182,17 @@ async def _heist_success(bot, g):
     share = total // 4
     ids = [p["id"] for p in g["players"]]
     await pool.execute("UPDATE users SET balance=balance+$1::bigint WHERE user_id=ANY($2::bigint[])", share, ids)
+    for role, player in enumerate(g["players"]):
+        await pool.execute(
+            """INSERT INTO heist_skills(user_id,role,xp,actions) VALUES($1,$2,$3,1)
+               ON CONFLICT(user_id,role) DO UPDATE
+               SET xp=heist_skills.xp+EXCLUDED.xp, actions=heist_skills.actions+1""",
+            int(player["id"]), role, HEIST_XP_PER_SUCCESS)
     nm, nr = loot.count("money"), loot.count("ruby")
     names = "، ".join(_ulink(p["id"], p["name"] or "کاربر") for p in g["players"])
     text = (f"{HEIST_BANK_CE} <b>سرقت موفق بود!</b> 🎉\n\n{names} با ماشین فرار کردن.\n\n"
-            f"{HEIST_MONEY_CE} پول: <b>{nm * 5}</b> تا ({nm * 5 * 50_000:,} تومان)\n"
-            f"{HEIST_RUBY_CE} یاقوت: <b>{nr * 3}</b> تا ({nr * 3 * 100_000:,} تومان)\n\n"
+            f"{HEIST_MONEY_CE} پول: <b>+{nm}</b>\n"
+            f"{HEIST_RUBY_CE} یاقوت: <b>+{nr}</b>\n\n"
             f"💵 غنیمت کل: <b>{total:,}</b> تومان\n🤝 سهم هر نفر: <b>{share:,}</b> تومان")
     await _heist_edit(bot, g, B(text))
 
@@ -19147,11 +19207,17 @@ async def _heist_runner(bot, g):
                 if time.time() >= g["deadline"]:
                     await _heist_fail(bot, g, "⏱ وقت تموم شد و پلیس رسید!")
                     break
+                changed = False
                 if g["stage"] == 2:
-                    g["guard"] = random.random() < HEIST_GUARD_CHANCE
+                    new_guard = random.random() < HEIST_GUARD_CHANCE
+                    changed = new_guard != g.get("guard")
+                    g["guard"] = new_guard
                 elif g["stage"] == 3:
-                    g["camera"] = random.random() < HEIST_CAMERA_CHANCE
-                await _heist_show(bot, g)
+                    new_camera = random.random() < HEIST_CAMERA_CHANCE
+                    changed = new_camera != g.get("camera")
+                    g["camera"] = new_camera
+                if changed:
+                    await _heist_show(bot, g)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -19177,7 +19243,7 @@ def _heist_stage2(g):
 
 def _heist_stage3(g):
     g["stage"] = 3
-    g["items"] = list(g["picked"])
+    g["items"] = [kind for kind in g["picked"] for _ in range(5 if kind == "money" else 2)]
     g["moved"], g["camera"] = 0, False
 
 
@@ -19227,8 +19293,10 @@ async def _heist_pick(q, context, parts):
         await _hs_ans(q, _heist_jail_alert(_hl), True); return
     await upsert_user(user.id, user.full_name)
     _HEIST_SEQ[0] += 1
+    first_skill = await _heist_load_skill(user.id, 0)
     g = {"id": _HEIST_SEQ[0], "chat": q.message.chat_id, "msg": q.message.message_id, "owner": user.id,
-         "players": [{"id": user.id, "name": user.full_name}], "state": "wait", "stage": 0, "deadline": None, "lock": asyncio.Lock()}
+         "players": [{"id": user.id, "name": user.full_name, "skills": {0: first_skill}}],
+         "state": "wait", "stage": 0, "deadline": None, "lock": asyncio.Lock()}
     HEIST_TABLES[g["id"]] = g
     await _hs_ans(q)
     await _heist_show(context.bot, g)
@@ -19289,6 +19357,16 @@ async def _heist_dispatch(q, context, g, act, parts):
     bot, user = context.bot, q.from_user
     note, alert = None, False
     if g["state"] == "wait":
+        if act == "start":
+            if user.id != g["owner"]:
+                note, alert = "فقط سازنده میز می‌تونه سرقت رو شروع کنه.", True
+            elif len(g["players"]) != 4:
+                note, alert = "میز هنوز کامل نشده؛ باید ۴ نفر بشینن.", True
+            else:
+                await _heist_start(bot, g)
+                note = "سرقت شروع شد!"
+            await _hs_ans(q, note, alert)
+            return
         if act == "j":
             _jl = await _heist_jail_left(user.id)
             if _heist_in_game(user.id) is not None:
@@ -19299,11 +19377,10 @@ async def _heist_dispatch(q, context, g, act, parts):
                 note, alert = "میز پر شده.", True
             else:
                 await upsert_user(user.id, user.full_name)
-                g["players"].append({"id": user.id, "name": user.full_name})
-                if len(g["players"]) == 4:
-                    await _heist_start(bot, g)
-                else:
-                    await _heist_show(bot, g)
+                role = len(g["players"])
+                xp = await _heist_load_skill(user.id, role)
+                g["players"].append({"id": user.id, "name": user.full_name, "skills": {role: xp}})
+                await _heist_show(bot, g)
         elif act == "x":
             if user.id != g["owner"]:
                 note, alert = "فقط سازنده‌ی میز می‌تونه ببندتش.", True
@@ -19338,7 +19415,8 @@ async def _heist_dispatch(q, context, g, act, parts):
         if i in g["open"]:
             note, alert = "این خونه رو قبلاً برداشتی.", True
         elif g.get("guard"):
-            note, alert = "👮 نگهبان اینجاست! صبر کن بره.", True
+            _heist_stage2(g)
+            note, alert = "👮 نگهبان متوجه شد! مرحله جمع‌آوری از اول شروع شد.", True
         else:
             g["open"].add(i)
             kind = g["cells"][i]
@@ -19378,8 +19456,8 @@ async def _heist_dispatch(q, context, g, act, parts):
                 await _heist_success(bot, g); return
             note = "✅ درست پیچیدی!"
         else:
-            await _hs_ans(q, "💥 اشتباه پیچیدی!", True)
-            await _heist_fail(bot, g, "🚔 مسیر رو اشتباه رفتی و پلیس راهتون رو بست!"); return
+            g["qs"], g["qi"] = _heist_questions(), 0
+            note, alert = "❌ مسیر اشتباه بود؛ رانندگی از سؤال اول شروع شد.", True
     else:
         note, alert = "این دکمه دیگه فعال نیست.", True
     if note:
