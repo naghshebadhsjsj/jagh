@@ -6542,7 +6542,7 @@ def _guide_sections() -> list:
         _gq("🤗 بوس و بغل", f"روی پیام کاربر ریپلای کن و بنویس <code>بوس</code> یا <code>بغل</code>\nهر کاربر رو هر ۵ دقیقه یه بار می‌شه بغل/بوس کرد. به هر دو نفر انرژی و {HUG_MONEY[0]} تا {HUG_MONEY[1]} تومن (تو پروفیت) می‌رسه. بوس و بغل روی همسر بقیه ۳ انرژی منفی داره."),
         _gq("🎁 هدیه", "<code>هدیه</code> لیست هدیه‌ها و قیمتشون\nریپلای + <code>هدیه گل</code>\nهدیه به طرف مقابل انرژی میده."),
         _gq("⚡ انرژی", "انرژی زیر ۳۰٪ یعنی پول امتیاز نصف، درآمد ماشین ۲۵٪ کمتر و شانس گیر افتادن تو خلاف بیشتر. با بغل، بوس و هدیه بالا میره."),
-        _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code> (پشتیبان‌ها هم می‌تونن؛ طلاق با پشتیبان پولی جابه‌جا نمی‌کنه)\n<code>همسرم</code> اطلاعات همسر و میزان رابطه\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
+        _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code> (پشتیبان‌ها هم می‌تونن؛ طلاق با پشتیبان پولی جابه‌جا نمی‌کنه)\n<code>همسرم</code> اطلاعات همسر، میزان رابطه و دکمه‌ی طلاق\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
         _gq("👶 فرزندخواندگی", "زوج‌های متأهل: ریپلای روی کاربر + <code>جینگو فرزندخواندگی</code> (یا <code>فرزندخواندگی</code>)؛ اگه قبول کنه فرزندخونده‌تون میشه.\n<code>خانواده</code> والدین، فرزندها و دکمه‌ی شجره‌نامه (لیدربرد ← فامیل‌سالارها). بوس و بغل بین فامیل‌ها خیانت حساب نمیشه | <code>شجره نامه</code> عکس شجره‌نامه.\nوالد: ریپلای + <code>عیدی ۱۰۰۰۰۰</code> | ریپلای + <code>عاق</code>\nفرزندخونده: <code>پول توجیبی</code> (روزی ۵۰ هزار از والدین) | <code>ترک خانواده</code>"),
         _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
@@ -7572,7 +7572,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "home":
         text = await self_panel_text(uid, q.from_user.full_name)
         kb = self_panel_keyboard(uid, private=q.message.chat.type == "private")
-        if getattr(q.message, "photo", None):
+        if getattr(q.message, "photo", None) and not (q.message.caption or "").startswith("🎰 کازینو"):
             try:
                 await q.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=kb)
             except BadRequest as e:
@@ -7653,8 +7653,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"\n{HAND_DONE_CE} زمان نهایی پس از ۵ ارتقا: <b>۴ دقیقه و ۴۰ ثانیه</b>")
         await _sp_edit_text(q, B("\n".join(lines)),parse_mode="HTML",reply_markup=InlineKeyboardMarkup(rows)); return
     if action == "casino":
-        text, kb = panel_main(uid)
-        await _sp_edit_text(q, text, reply_markup=InlineKeyboardMarkup(list(kb.inline_keyboard) + back)); return
+        await casino_main_replace(q, uid, extra_rows=back); return
     if action == "settings":
         await _sp_edit_text(q, B("⚙️ تنظیمات\n\nیکی از گزینه‌ها رو انتخاب کن:"), parse_mode="HTML", reply_markup=settings_keyboard(uid)); return
     if action == "gender":
@@ -9673,6 +9672,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _word_key(text) == "خونه" or _word_key(text) == "خانه" or _word_key(text) == "املاک":
         await show_homes(update, context)
         return
+    if await heist_text(update, context, text):
+        return
     if await marriage_text(update, context, text):
         return
     if await gift_hug_text(update, context, text):
@@ -10091,7 +10092,7 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 _PM_BLOCK_WORDS = {
-    "خونه", "خانه", "املاک", "دست", "هوش", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جاسوسی",
+    "خونه", "خانه", "املاک", "دست", "هوش", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جینگوسرقت", "جاسوسی",
     "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس", "بادیگارد", "خریدبادیگارد", "پت", "پتنوازش", "پتغذا", "پتگردش",
     "فروشگاه", "سکس", "موشک", "کراش",
 }
@@ -12029,6 +12030,15 @@ async def send_html(bot, chat_id: int, text: str, **kw):
 
 
 async def edit_html(q, text: str, reply_markup=None):
+    _m = q.message
+    if _m is not None and getattr(_m, "photo", None) and (q.data or "").startswith(("cz:", "sg:")):
+        # پنل اصلی کازینو عکس‌داره؛ ادیت متن روش جواب نمیده، پس پاک میشه و پنل متنی جدید میاد
+        try:
+            await _m.delete()
+        except Exception:
+            pass
+        await send_html(q.get_bot(), _m.chat_id, text, reply_markup=reply_markup)
+        return
     try:
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=reply_markup)
     except Exception as e:
@@ -12162,6 +12172,47 @@ def panel_main(uid: int):
        + [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")],
        [btn("🏅 بازی‌های ورزشی", "success", callback_data=f"sg:m:{uid}")]])
     return text, kb
+
+
+CASINO_IMG = BASE_DIR / "casino.jpg"
+_CASINO_FID = None
+
+
+async def send_casino_main(bot, chat_id: int, uid: int, reply_to: int | None = None, extra_rows=None):
+    """پنل اصلی کازینو: عکس «Casino Jingo» + همون کپشن و دکمه‌های کازینو. اگه عکس نبود/نشد، متنی می‌فرسته."""
+    global _CASINO_FID
+    text, kb = panel_main(uid)
+    if extra_rows:
+        kb = InlineKeyboardMarkup(list(kb.inline_keyboard) + list(extra_rows))
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    for cap in (text, re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)):
+        try:
+            if _CASINO_FID:
+                return await bot.send_photo(chat_id, _CASINO_FID, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            if CASINO_IMG.exists():
+                with open(CASINO_IMG, "rb") as f:
+                    m = await bot.send_photo(chat_id, f, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+                try:
+                    _CASINO_FID = m.photo[-1].file_id
+                except Exception:
+                    pass
+                return m
+            break
+        except Exception:
+            log.warning("casino photo send failed", exc_info=True)
+            _CASINO_FID = None
+    return await send_html(bot, chat_id, text, reply_markup=kb, reply_parameters=rp)
+
+
+async def casino_main_replace(q, uid: int, extra_rows=None):
+    """پیام فعلی رو با پنل اصلی کازینو (عکس‌دار) عوض می‌کنه."""
+    m = q.message
+    new = await send_casino_main(q.get_bot(), m.chat_id, uid, extra_rows=extra_rows)
+    if new is not None:
+        try:
+            await m.delete()
+        except Exception:
+            pass
 
 
 def panel_game(uid: int, game: str):
@@ -13128,8 +13179,7 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if act == "m":
         await q.answer()
-        text, kb = panel_main(uid)
-        await edit_html(q, text, kb)
+        await casino_main_replace(q, uid)
     elif act == "g":
         await q.answer()
         text, kb = panel_game(uid, parts[3])
@@ -13700,8 +13750,7 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
         await play_single(bot, context, chat_id, user, "dice", amt, int(t), msg.message_id)
         return True
     if re.fullmatch(r"کازینو|casino", t, re.I):
-        ptext, kb = panel_main(user.id)
-        await send_html(bot, chat_id, ptext, reply_markup=kb, reply_parameters=rp)
+        await send_casino_main(bot, chat_id, user.id, reply_to=msg.message_id)
         return True
     m = re.fullmatch(r"(?:میز\s*(تاس|اسلات)|(تاس|اسلات)\s*میز)\s+(.+)", t)
     if m:
@@ -16656,7 +16705,7 @@ def _is_bot_text_command(text: str) -> bool:
         ME_WORD, "تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks",
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
         "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده", "شجرهنامه", "پولتوجیبی", "ترکخانواده", "عاق", "فرزندخواندگی", "فرزندخوندگی", "جینگوفرزندخواندگی", "جینگوفرزندخوندگی", "جینگوفرزندخونده", "جینگوفرزندخوانده", "جینگوشجرهنامه", "درختخانواده",
-        "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلدرسی", "دوئلدرس",
+        "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "جینگوسرقت", "دوئلدرسی", "دوئلدرس",
         "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
@@ -16708,7 +16757,8 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _t2 = asyncio.create_task(_touch_profile(user))
         _BG_TASKS.add(_t2)
         _t2.add_done_callback(_BG_TASKS.discard)
-    if user and not user.is_bot and user.id not in ADMIN_IDS and user.id in BANNED:
+    if (user and not user.is_bot and user.id not in ADMIN_IDS and user.id in BANNED
+            and not (update.callback_query and (update.callback_query.data or "") == "hs:bail")):
         until = BANNED[user.id]
         if until <= time.time():  # محرومیت تموم شده
             BANNED.pop(user.id, None)
@@ -18087,6 +18137,62 @@ async def adopt_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                          f"با نوشتن «خانواده» و دکمه‌ی «شجره‌نامه» درخت خانواده‌تون رو ببینید 🌳"))
 
 
+# ───── پنل همسرم ─────
+async def spouse_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg, user = update.effective_message, update.effective_user
+    row = await get_user(user.id)
+    if not row or not row["spouse_id"]:
+        await msg.reply_text("هنوز ازدواج نکردی."); return
+    spouse = await get_user(int(row["spouse_id"]))
+    if not spouse:
+        await msg.reply_text("اطلاعات همسرت پیدا نشد."); return
+    rel, _ = await couple_info(user.id, int(spouse["user_id"]))
+    text = (f"💍 <b>همسر تو</b>\nهمسر: {_ulink(spouse['user_id'], spouse['name'] or 'همسر')}\n"
+            f"{energy_line(spouse['energy'])}\n💞 میزان رابطه: <b>{rel}</b>")
+    kb_rows = []
+    if update.effective_chat.type != "private":
+        kb_rows.append([btn("سکس", "danger", icon=SEX_EIDS[0], callback_data=f"sx:ask:{user.id}"),
+                        btn("فروشگاه", "primary", icon=SHOP_EID, callback_data=f"shp:no:{user.id}:condom")])
+    kb_rows.append([btn("💔 طلاق", "danger", callback_data=f"fam:div:{user.id}:q"),
+                    btn("🌳 شجره‌نامه", "primary", callback_data=f"fam:tree:{user.id}")])
+    await send_html(context.bot, msg.chat_id, B(text), reply_markup=InlineKeyboardMarkup(kb_rows),
+                    reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+
+
+async def family_divorce_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        _, _, uid_s, act = q.data.split(":"); uid = int(uid_s)
+    except (ValueError, IndexError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این دکمه مال تو نیست.", show_alert=True); return
+    if act == "q":
+        row = await get_user(uid)
+        if not row or not row["spouse_id"]:
+            await q.answer("تو الان متأهل نیستی.", show_alert=True); return
+        await q.answer()
+        kb = InlineKeyboardMarkup([[btn("✅ آره، طلاق می‌گیرم", "danger", callback_data=f"fam:div:{uid}:y"),
+                                    btn("انصراف", "primary", callback_data=f"fam:div:{uid}:n")]])
+        await edit_html(q, B("💔 مطمئنی می‌خوای طلاق بگیری؟\nرابطه‌ی شما پاک می‌شه (هیچ پولی جابه‌جا نمی‌شه)."), kb); return
+    if act == "n":
+        await q.answer("انصراف داده شد."); await edit_html(q, B("باشه، طلاق نگرفتی ❤️")); return
+    sp_id = None
+    async with pool.acquire() as c:
+        async with c.transaction():
+            me = await c.fetchrow("SELECT spouse_id FROM users WHERE user_id=$1 FOR UPDATE", uid)
+            if me and me["spouse_id"]:
+                sp_id = int(me["spouse_id"])
+                await c.execute("UPDATE users SET spouse_id=NULL WHERE user_id IN ($1,$2)", uid, sp_id)
+                await c.execute("DELETE FROM couple_relation WHERE pair_key=$1", _pair_key(uid, sp_id))
+    if sp_id is None:
+        await q.answer("تو الان متأهل نیستی.", show_alert=True)
+        await edit_html(q, B("تو الان متأهل نیستی.")); return
+    sp = await get_user(sp_id)
+    await q.answer("طلاق ثبت شد.")
+    await edit_html(q, B(f"💔 {_ulink(uid, q.from_user.full_name)} و {_ulink(sp_id, (sp['name'] if sp else None) or 'همسرش')} از هم جدا شدن. طلاق ثبت شد."))
+
+
 # ───── پنل خانواده ─────
 async def family_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg, user = update.effective_message, update.effective_user
@@ -18095,32 +18201,24 @@ async def family_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kids = await pool.fetch("SELECT a.child_id, u.name FROM adoptions a LEFT JOIN users u ON u.user_id=a.child_id "
                             "WHERE a.parent1_id=$1 OR a.parent2_id=$1 ORDER BY a.created_at", user.id)
     spouse = await get_user(int(row["spouse_id"])) if row and row["spouse_id"] else None
-    if row and row["spouse_id"] and not spouse:
-        await msg.reply_text("اطلاعات همسرت پیدا نشد."); return
     if not spouse and not parents and not kids:
-        await msg.reply_text("هنوز ازدواج نکردی."); return
-    parts = []
-    kb_rows = []
+        await msg.reply_text("هنوز خانواده‌ای نداری؛ اول ازدواج کن یا فرزندخونده بگیر."); return
+    parts = ["👨‍👩‍👧 <b>خانواده‌ی تو</b>"]
     if spouse:
-        rel, _ = await couple_info(user.id, int(spouse["user_id"]))
-        parts.append(f"💍 <b>خانواده‌ی تو</b>\nهمسر: {_ulink(spouse['user_id'], spouse['name'] or 'همسر')}\n{energy_line(spouse['energy'])}\n💞 میزان رابطه: <b>{rel}</b>")
-        if update.effective_chat.type != "private":
-            kb_rows.append([btn("سکس", "danger", icon=SEX_EIDS[0], callback_data=f"sx:ask:{user.id}")])
-            kb_rows.append([btn("فروشگاه", "primary", icon=SHOP_EID, callback_data=f"shp:no:{user.id}:condom")])
-    else:
-        parts.append("👨‍👩‍👧 <b>خانواده‌ی تو</b>")
+        parts.append(f"💍 <b>همسر:</b> {_ulink(spouse['user_id'], spouse['name'] or 'همسر')}")
     if parents:
-        ids = [int(parents["parent1_id"]), int(parents["parent2_id"])]
         names = []
-        for pid in ids:
+        for pid in (int(parents["parent1_id"]), int(parents["parent2_id"])):
             pr = await get_user(pid)
             names.append(_ulink(pid, (pr["name"] if pr else None) or "کاربر"))
         parts.append(f"👶 <b>فرزندخونده</b>\nوالدین: {names[0]} و {names[1]}")
     if kids:
         lst = "، ".join(_ulink(int(k["child_id"]), k["name"] or "کاربر") for k in kids)
         parts.append(f"🍼 <b>فرزندخونده‌ها ({len(kids)}):</b> {lst}")
-    kb_rows.append([btn("🌳 شجره‌نامه", "primary", callback_data=f"fam:tree:{user.id}")])
-    await send_html(context.bot, msg.chat_id, B("\n\n".join(parts)), reply_markup=InlineKeyboardMarkup(kb_rows),
+    row_btns = [btn("🌳 شجره‌نامه", "primary", callback_data=f"fam:tree:{user.id}")]
+    if parents:
+        row_btns.append(btn("🚪 ترک خانواده", "danger", callback_data=f"fam:leave:{user.id}:q"))
+    await send_html(context.bot, msg.chat_id, B("\n\n".join(parts)), reply_markup=InlineKeyboardMarkup([row_btns]),
                     reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
 
 
@@ -18311,17 +18409,176 @@ def render_family_tree(tree: dict, info: dict, me_id: int):
     return out
 
 
+# ── شجره‌نامه‌ی کارتی: والدین بالا، تو و همسرت وسط (با قلب)، فرزندها پایین؛ آواتار گرد با حلقه‌ی طلایی ──
+TREE_KIDS_PER_PAGE = 6
+_TREE_AV_CACHE: dict = {}
+
+
+async def _tree_avatar(bot, uid: int):
+    now = time.time()
+    hit = _TREE_AV_CACHE.get(uid)
+    if hit and now - hit[0] < 1800:
+        return hit[1]
+    data = None
+    try:
+        ph = await bot.get_user_profile_photos(uid, limit=1)
+        if ph and ph.photos:
+            sizes = ph.photos[0]
+            f = await bot.get_file(sizes[min(1, len(sizes) - 1)].file_id)
+            data = bytes(await f.download_as_bytearray())
+    except Exception:
+        log.info("tree avatar failed (%s)", uid, exc_info=True)
+    if len(_TREE_AV_CACHE) > 600:
+        _TREE_AV_CACHE.clear()
+    _TREE_AV_CACHE[uid] = (now, data)
+    return data
+
+
+async def family_card_data(uid: int) -> dict:
+    row = await get_user(uid)
+    spouse = int(row["spouse_id"]) if row and row["spouse_id"] else None
+    par = await pool.fetchrow("SELECT parent1_id, parent2_id FROM adoptions WHERE child_id=$1", uid)
+    parents = [int(par["parent1_id"]), int(par["parent2_id"])] if par else []
+    ids = [uid] + ([spouse] if spouse else [])
+    kid_rows = await pool.fetch("SELECT child_id FROM adoptions WHERE parent1_id=ANY($1::bigint[]) OR parent2_id=ANY($1::bigint[]) ORDER BY created_at", ids)
+    kids, seen = [], set()
+    for r in kid_rows:
+        c = int(r["child_id"])
+        if c != uid and c not in seen:
+            seen.add(c); kids.append(c)
+    allids = list(dict.fromkeys(ids + parents + kids))
+    rows = await pool.fetch("SELECT user_id, name, gender FROM users WHERE user_id=ANY($1::bigint[])", allids)
+    info = {int(r["user_id"]): (r["name"], r["gender"]) for r in rows}
+    return {"me": uid, "spouse": spouse, "parents": parents, "kids": kids, "info": info}
+
+
+def render_family_card(d: dict, avatars: dict, page: int, pages: int):
+    S, W = 2, 1280
+    me, spouse, parents, info = d["me"], d["spouse"], d["parents"], d["info"]
+    kids = d["kids"][page * TREE_KIDS_PER_PAGE:(page + 1) * TREE_KIDS_PER_PAGE]
+    R = 56
+    has_par = bool(parents)
+    y_par = 160
+    y_cpl = 400 if has_par else 195
+    y_kid = y_cpl + 235
+    H = 820 if has_par else 620
+    GOLD, PINK, LAV, GRAY, LINE = (245, 197, 66), (240, 150, 185), (190, 200, 225), (150, 160, 180), (110, 130, 170)
+    s = lambda v: int(round(v * S))
+    img = Image.new("RGB", (W * S, H * S), (16, 21, 34))
+    dr = ImageDraw.Draw(img)
+    dr.rounded_rectangle([s(24), s(24), s(W - 24), s(H - 24)], radius=s(44), fill=(23, 31, 46), outline=(58, 72, 102), width=s(3))
+    f_title, f_name, f_page, f_empty, f_init = _tree_font(36 * S), _tree_font(24 * S), _tree_font(22 * S), _tree_font(28 * S), _tree_font(46 * S)
+
+    def text(x, y, t, font, fill, anchor="mm"):
+        dr.text((s(x), s(y)), _fa_text(t), font=font, fill=fill, anchor=anchor)
+
+    def fit(name, maxw=190):
+        t = _tree_clean_name(name); orig = t
+        while f_name.getlength(_fa_text(t)) > maxw * S and len(t) > 2:
+            t = t[:-1]
+        return t if t == orig else t.rstrip() + "…"
+
+    def avatar(cx, cy, uid):
+        name, g = info.get(uid, (None, None))
+        r = R * S
+        x0, y0 = s(cx) - r, s(cy) - r
+        im = None
+        raw = avatars.get(uid)
+        if raw:
+            try:
+                im = Image.open(BytesIO(raw)).convert("RGB")
+                w, h = im.size; m = min(w, h)
+                im = im.crop(((w - m) // 2, (h - m) // 2, (w - m) // 2 + m, (h - m) // 2 + m)).resize((2 * r, 2 * r), Image.LANCZOS)
+            except Exception:
+                im = None
+        if im is None:
+            base = (46, 78, 140) if g == "m" else ((130, 50, 92) if g == "f" else (62, 72, 98))
+            im = Image.new("RGB", (2 * r, 2 * r), base)
+            ImageDraw.Draw(im).text((r, r), _fa_text(_tree_clean_name(name)[:1]), font=f_init, fill=(255, 255, 255), anchor="mm")
+        mask = Image.new("L", (2 * r, 2 * r), 0)
+        ImageDraw.Draw(mask).ellipse([0, 0, 2 * r - 1, 2 * r - 1], fill=255)
+        img.paste(im, (x0, y0), mask)
+        dr.ellipse([x0, y0, x0 + 2 * r, y0 + 2 * r], outline=GOLD, width=s(4))
+
+    def label(cx, cy, uid, color):
+        text(cx, cy + R + 22, fit(info.get(uid, (None, None))[0]), f_name, color)
+
+    def heart(cx, ytop, w, h, fill):
+        pts = []
+        for i in range(0, 361, 3):
+            t = math.radians(i)
+            pts.append((16 * math.sin(t) ** 3, -(13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t))))
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        sx, sy = w / (max(xs) - min(xs)), h / (max(ys) - min(ys))
+        dr.polygon([(s(cx + p[0] * sx), s(ytop + (p[1] - min(ys)) * sy)) for p in pts], fill=fill)
+
+    text(640, 58, "شجره خانواده", f_title, GOLD)
+    text(W - 58, 58, f"{page + 1}/{pages}", f_page, GRAY, "rm")
+
+    # قلب پشت زوج
+    if spouse:
+        heart(640, y_cpl - 45, 108, 132, (107, 31, 53))
+    # خط والدین → زوج
+    if has_par:
+        for px in (490, 790):
+            dr.line([(s(px), s(y_par + R + 42)), (s(640), s(y_cpl - R - 14))], fill=LINE, width=s(4))
+    # خط زوج → فرزندها
+    if kids:
+        n = len(kids); gap = 170
+        xs = [640 + (i - (n - 1) / 2) * gap for i in range(n)]
+        start_y = y_cpl + 95 if spouse else y_cpl + R + 38
+        bar_y = y_kid - R - 28
+        dr.line([(s(640), s(start_y)), (s(640), s(bar_y))], fill=LINE, width=s(4))
+        if n > 1:
+            dr.line([(s(xs[0]), s(bar_y)), (s(xs[-1]), s(bar_y))], fill=LINE, width=s(4))
+        for x in xs:
+            dr.line([(s(x), s(bar_y)), (s(x), s(y_kid - R))], fill=LINE, width=s(4))
+    # آدم‌ها
+    if has_par:
+        for px, pid in zip((490, 790), parents):
+            avatar(px, y_par, pid); label(px, y_par, pid, LAV)
+    if spouse:
+        avatar(548, y_cpl, me); label(548, y_cpl, me, GOLD)
+        avatar(732, y_cpl, spouse); label(732, y_cpl, spouse, PINK)
+    else:
+        avatar(640, y_cpl, me); label(640, y_cpl, me, GOLD)
+    if kids:
+        for x, kid in zip(xs, kids):
+            avatar(x, y_kid, kid); label(x, y_kid, kid, LAV)
+    elif page == 0:
+        text(640, y_cpl + 240, "هنوز فرزندی در این شاخه نیست", f_empty, (170, 180, 210))
+
+    img = img.resize((W, H), Image.LANCZOS)
+    out = BytesIO(); img.save(out, "PNG", optimize=True); out.seek(0)
+    out.name = "family_tree.png"
+    return out
+
+
+async def _tree_png(bot, uid: int, page: int):
+    d = await family_card_data(uid)
+    pages = max(1, math.ceil(len(d["kids"]) / TREE_KIDS_PER_PAGE))
+    page = max(0, min(page, pages - 1))
+    show = d["kids"][page * TREE_KIDS_PER_PAGE:(page + 1) * TREE_KIDS_PER_PAGE]
+    ids = list(dict.fromkeys([uid] + d["parents"] + ([d["spouse"]] if d["spouse"] else []) + show))
+    got = await asyncio.gather(*[_tree_avatar(bot, i) for i in ids])
+    png = await asyncio.to_thread(render_family_card, d, dict(zip(ids, got)), page, pages)
+    nav = []
+    if page > 0:
+        nav.append(btn("◀️ قبلی", None, callback_data=f"fam:tp:{uid}:{page - 1}"))
+    if page < pages - 1:
+        nav.append(btn("بعدی ▶️", None, callback_data=f"fam:tp:{uid}:{page + 1}"))
+    return png, (InlineKeyboardMarkup([nav]) if nav else None)
+
+
 async def send_family_tree(bot, chat_id: int, uid: int, reply_to: int | None = None):
     has_rel = await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1 OR parent1_id=$1 OR parent2_id=$1 LIMIT 1", uid)
     row = await get_user(uid)
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
     if not has_rel and not (row and row["spouse_id"]):
-        await bot.send_message(chat_id, "هنوز خانواده‌ای نداری؛ اول ازدواج کن یا فرزندخونده بگیر.",
-                               reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None)
+        await bot.send_message(chat_id, "هنوز خانواده‌ای نداری؛ اول ازدواج کن یا فرزندخونده بگیر.", reply_parameters=rp)
         return
-    tree, info = await tree_data(uid)
-    png = await asyncio.to_thread(render_family_tree, tree, info, uid)
-    await bot.send_photo(chat_id, png, caption=B("🌳 شجره‌نامه‌ی خانواده‌ی تو"), parse_mode="HTML",
-                         reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None)
+    png, kb = await _tree_png(bot, uid, 0)
+    await bot.send_photo(chat_id, png, caption=B("🌳 شجره‌نامه‌ی خانواده‌ی تو"), parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
 
 
 async def family_tree_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -18339,6 +18596,22 @@ async def family_tree_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.exception("family tree failed")
         await q.answer("ساخت شجره‌نامه به مشکل خورد.", show_alert=True)
 
+
+async def family_tree_page_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        _, _, uid_s, page_s = q.data.split(":"); uid = int(uid_s); page = int(page_s)
+    except (ValueError, IndexError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این پنل مال تو نیست.", show_alert=True); return
+    await q.answer()
+    try:
+        png, kb = await _tree_png(context.bot, uid, page)
+        await q.edit_message_media(InputMediaPhoto(png, caption=B("🌳 شجره‌نامه‌ی خانواده‌ی تو"), parse_mode="HTML"), reply_markup=kb)
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            log.exception("family tree page failed")
 
 
 # ───── عیدی، پول توجیبی، ترک خانواده و عاق ─────
@@ -18425,6 +18698,12 @@ async def family_leave_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer(); return
     if q.from_user.id != uid:
         await q.answer("این دکمه مال تو نیست.", show_alert=True); return
+    if act == "q":
+        if not await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", uid):
+            await q.answer("تو فرزندخونده‌ی هیچ خانواده‌ای نیستی.", show_alert=True); return
+        await q.answer()
+        kb = InlineKeyboardMarkup([[btn("✅ آره، ترک می‌کنم", "danger", callback_data=f"fam:leave:{uid}:y"), btn("انصراف", "primary", callback_data=f"fam:leave:{uid}:n")]])
+        await edit_html(q, B("مطمئنی می‌خوای خانواده‌ت رو ترک کنی؟ از شجره‌نامه‌ی اونا حذف می‌شی."), kb); return
     if act == "n":
         await q.answer("انصراف داده شد."); await edit_html(q, B("باشه، خانواده‌ت رو ترک نکردی ❤️")); return
     n = await pool.fetchval("DELETE FROM adoptions WHERE child_id=$1 RETURNING 1", uid)
@@ -18435,7 +18714,9 @@ async def family_leave_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def marriage_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     key=_word_key(text); msg=update.effective_message; user=update.effective_user
-    if key in ("همسرم","خانوادهزنم","خانوادههمسرم","خانواده"):
+    if key in ("همسرم","خانوادهزنم","خانوادههمسرم"):
+        await spouse_panel(update, context); return True
+    if key == "خانواده":
         await family_panel(update, context); return True
     if key in ADOPT_WORDS:
         return await adopt_request(update, context)
@@ -18513,6 +18794,437 @@ async def affair_cb(update,context):
             await c.execute("DELETE FROM couple_relation WHERE pair_key=$1",_pair_key(cheater,spouse))
     await q.answer("طلاق ثبت شد.")
     await q.edit_message_text(f"💔 طلاق ثبت شد. {amount:,} تومان (۱۰٪ دارایی همسر سابقت) به حسابت منتقل شد." if amount else "💔 طلاق ثبت شد. (چون یکی از طرفین پشتیبانه، هیچ پولی جابه‌جا نشد.)")
+
+# ───────────────────────── 🏦 سرقت گروهی از خزانه‌ی بانک (میز ۴ نفره) ─────────────────────────
+# «جینگو سرقت» → انتخاب محل → میز ۴ نفره (سازنده نفر اول) → ۴ مرحله‌ی پشت‌سرهم تو یه پنل:
+#   ۱) در باز کن: مسئله‌ی ریاضی با دکمه‌های عددی | ۲) پول جمع کن: ۹ خونه، نگهبان | ۳) فرار: دوربین | ۴) راننده: ۳ سؤال
+# کل زمان ۲ دقیقه و ۴۵ ثانیه. موفق → جایزه مساوی بین چهار نفر | شکست → ۱۵ دقیقه محرومیت (زندان) یا وثیقه‌ی ۱ میلیون.
+HEIST_TOTAL = 165
+HEIST_TICK = 3
+HEIST_WAIT_TTL = 300
+HEIST_BAIL = 1_000_000
+HEIST_JAIL_SECS = 15 * 60
+HEIST_PAY = {"money": 5 * 50_000, "ruby": 3 * 100_000}   # هر خونه‌ی پول = ۵ تا ×۵۰ هزار | هر خونه‌ی یاقوت = ۳ تا ×۱۰۰ هزار
+HEIST_BANK_EID = "5776167758223905926"
+HEIST_MONEY_EID = "5776085234722281318"
+HEIST_RUBY_EID = "5778327448168961624"
+HEIST_MONEY_CE = f'<tg-emoji emoji-id="{HEIST_MONEY_EID}">💰</tg-emoji>'
+HEIST_RUBY_CE = f'<tg-emoji emoji-id="{HEIST_RUBY_EID}">💎</tg-emoji>'
+HEIST_BANK_CE = f'<tg-emoji emoji-id="{HEIST_BANK_EID}">🏦</tg-emoji>'
+HEIST_ROLES = ["در باز کن", "پول جمع کن", "فرار", "راننده"]
+HEIST_TABLES: dict = {}
+HEIST_JAILED: dict = {}   # user_id -> زمان پایان محرومیتِ سرقت (فقط همین محرومیت با وثیقه آزاد میشه)
+_HEIST_SEQ = [0]
+_HS_OBST = {
+    "L": ["سمت چپ پلیسه", "سمت چپ جاده بسته‌ست", "سمت چپ ترافیک قفله"],
+    "M": ["وسط کوه ریزش کرده", "وسط سد پلیسیه", "وسط جاده گودال عمیقه"],
+    "R": ["سمت راست پل خرابه", "سمت راست آتیش گرفته", "سمت راست راهبندانه"],
+}
+
+
+def _heist_in_game(uid: int):
+    for g in HEIST_TABLES.values():
+        if g["state"] in ("wait", "play") and any(p["id"] == uid for p in g["players"]):
+            return g
+    return None
+
+
+def _heist_questions() -> list:
+    qs = []
+    for _ in range(3):
+        free = random.choice("LMR")
+        blocked = [random.choice(_HS_OBST[d]) for d in "LMR" if d != free]
+        qs.append({"t": f"{blocked[0]} و {blocked[1]}؛ چکار می‌کنی؟", "ok": "RML".index(free)})   # ترتیب دکمه‌ها: راست، وسط، چپ
+    return qs
+
+
+def _heist_layout() -> list:
+    cells = ["money"] * 3 + ["ruby"] + [None] * 5
+    random.shuffle(cells)
+    return cells
+
+
+def _heist_loot_value(items) -> int:
+    return sum(HEIST_PAY[k] for k in items)
+
+
+def _heist_icons(items) -> str:
+    return " ".join(HEIST_MONEY_CE if k == "money" else HEIST_RUBY_CE for k in items) or "—"
+
+
+def _heist_time(g) -> str:
+    left = max(0, int(g["deadline"] - time.time())) if g.get("deadline") else HEIST_TOTAL
+    return f"{left // 60}:{left % 60:02d}"
+
+
+def _heist_role_label(i: int) -> str:
+    return ["🔓", "💰", f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji>', "🚗"][i] + " " + HEIST_ROLES[i]
+
+
+def _heist_render(g):
+    """(متن، کیبورد) پنل بر اساس وضعیت میز/مرحله."""
+    cid = g["id"]
+    ps = g["players"]
+    if g["state"] == "wait":
+        lines = [f"{HEIST_BANK_CE} <b>سرقت از خزانه‌ی بانک</b>", f"میز ۴ نفره — <b>{len(ps)}/۴</b>", ""]
+        for i in range(4):
+            who = _ulink(ps[i]["id"], ps[i]["name"] or "کاربر") if i < len(ps) else "—"
+            lines.append(f"{i + 1}. {_heist_role_label(i)}: {who}")
+        lines += ["", f"⏱ کل زمان سرقت: <b>۲ دقیقه و ۴۵ ثانیه</b> | جایزه بین هر ۴ نفر مساوی تقسیم میشه.",
+                  f"🚔 شکست = ۱۵ دقیقه زندان (محرومیت از ربات) یا وثیقه‌ی <b>{HEIST_BAIL:,}</b> تومان."]
+        kb = InlineKeyboardMarkup([[btn("🪑 می‌شینم", "success", callback_data=f"hs:j:{cid}"),
+                                    btn("❌ بستن میز", "danger", callback_data=f"hs:x:{cid}")]])
+        return B("\n".join(lines)), kb
+    st = g["stage"]
+    head = [f"{HEIST_BANK_CE} <b>سرقت از خزانه‌ی بانک</b> — ⏱ <b>{_heist_time(g)}</b>", ""]
+    for i in range(4):
+        head.append(f"{'▶️' if i == st - 1 else '▫️'} {_heist_role_label(i)}: {_ulink(ps[i]['id'], ps[i]['name'] or 'کاربر')}")
+    head.append("")
+    rows = []
+    if st == 1:
+        head += ["🔓 <b>مرحله ۱ — باز کردن در خزانه</b>", "مسئله رو حل کن و جواب رو با دکمه‌های عددی بزن:",
+                 f"<code>{g['a']} + {g['b']} = ؟</code>", f"جواب تو: <code>{g['typed'] or '—'}</code>"]
+        nums = [str(i) for i in range(1, 10)]
+        for r in range(3):
+            rows.append([btn(n, "primary", callback_data=f"hs:k:{cid}:{n}") for n in nums[r * 3:r * 3 + 3]])
+        rows.append([btn("⌫", "danger", callback_data=f"hs:k:{cid}:b"), btn("0", "primary", callback_data=f"hs:k:{cid}:0"),
+                     btn("✅ تایید", "success", callback_data=f"hs:k:{cid}:ok")])
+    elif st == 2:
+        head += ["💰 <b>مرحله ۲ — جمع‌کردن پول</b>",
+                 "۳ تا خونه رو انتخاب کن؛ فقط وقتی نگهبانِ اون خونه نیست (❓) می‌تونی برداری. 👮 یعنی نگهبان هست!",
+                 "اگه خونه‌ی خالی برداری، همه‌چی از اول شروع میشه.",
+                 f"برداشته‌شده ({len(g['picked'])}/۳): {_heist_icons(g['picked'])}"]
+        for r in range(3):
+            row = []
+            for i in range(r * 3, r * 3 + 3):
+                if i in g["open"]:
+                    k = g["cells"][i]
+                    row.append(btn("پول" if k == "money" else "یاقوت", "success" if k == "money" else "primary",
+                                   icon=HEIST_MONEY_EID if k == "money" else HEIST_RUBY_EID, callback_data=f"hs:c:{cid}:{i}"))
+                elif g["guards"][i]:
+                    row.append(btn("👮", "danger", callback_data=f"hs:c:{cid}:{i}"))
+                else:
+                    row.append(btn("❓", "primary", callback_data=f"hs:c:{cid}:{i}"))
+            rows.append(row)
+        rows.append([btn("✋ کافیه", "success", callback_data=f"hs:e:{cid}")])
+    elif st == 3:
+        cam = "🔴 روشنه — نزن!" if g["camera"] else "🟢 خاموشه — بزن!"
+        head += [f'<tg-emoji emoji-id="{THEFT_EID}">🥷</tg-emoji> <b>مرحله ۳ — فرار</b>',
+                 "محصولات رو یکی‌یکی به ماشین برسون. اگه دوربین روشن باشه آژیر می‌زنه، همه‌ی محصولات از دستت می‌افته و باید از اول شروع کنی!",
+                 f"📷 دوربین: <b>{cam}</b>", f"🚗 منتقل‌شده به ماشین: <b>{g['moved']}/{len(g['items'])}</b>"]
+        rows.append([btn("انتقال به ماشین", "danger", icon=THEFT_EID, callback_data=f"hs:m:{cid}"),
+                     btn("✋ کافیه", "success", callback_data=f"hs:e:{cid}")])
+    else:
+        q = g["qs"][g["qi"]]
+        head += [f"🚗 <b>مرحله ۴ — رانندگی</b> (سؤال {g['qi'] + 1}/۳)",
+                 f"غنیمت توی ماشین: {_heist_icons(g['loot'])} — <b>{_heist_loot_value(g['loot']):,}</b> تومان", "",
+                 f"🛣 {q['t']}"]
+        rows.append([btn("↪️ بپیچ راست", "primary", callback_data=f"hs:d:{cid}:0"),
+                     btn("⬆️ بپیچ وسط", "primary", callback_data=f"hs:d:{cid}:1"),
+                     btn("↩️ بپیچ چپ", "primary", callback_data=f"hs:d:{cid}:2")])
+    return B("\n".join(head)), InlineKeyboardMarkup(rows)
+
+
+async def _heist_edit(bot, g, text: str, kb=None) -> bool:
+    for t in (text, re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)):
+        try:
+            await bot.edit_message_text(t, chat_id=g["chat"], message_id=g["msg"], parse_mode="HTML", reply_markup=kb)
+            return True
+        except RetryAfter:
+            return False
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return True
+        except Exception:
+            log.warning("heist edit failed", exc_info=True)
+    return False
+
+
+async def _heist_show(bot, g):
+    text, kb = _heist_render(g)
+    await _heist_edit(bot, g, text, kb)
+
+
+def _heist_drop(g):
+    g["state"] = "done"
+    HEIST_TABLES.pop(g["id"], None)
+
+
+async def _heist_close(bot, g, why: str):
+    _heist_drop(g)
+    await _heist_edit(bot, g, B(why))
+
+
+async def _heist_expire(bot, g):
+    await asyncio.sleep(HEIST_WAIT_TTL)
+    async with g["lock"]:
+        if g["state"] == "wait":
+            await _heist_close(bot, g, "⌛ میز سرقت منقضی شد.")
+
+
+async def _heist_jail(uids):
+    until = time.time() + HEIST_JAIL_SECS
+    for uid in uids:
+        if uid in ADMIN_IDS:
+            continue
+        try:
+            await pool.execute("UPDATE users SET banned_until=GREATEST(banned_until,$2::double precision) WHERE user_id=$1::bigint", uid, until)
+        except Exception:
+            log.warning("heist jail save failed", exc_info=True)
+        BANNED[uid] = max(BANNED.get(uid, 0), until)
+        if BANNED[uid] == until:
+            HEIST_JAILED[uid] = until
+
+
+async def _heist_fail(bot, g, reason: str):
+    _heist_drop(g)
+    ids = [p["id"] for p in g["players"]]
+    await _heist_jail(ids)
+    names = "، ".join(_ulink(p["id"], p["name"] or "کاربر") for p in g["players"])
+    text = (f"🚨 <b>سرقت شکست خورد!</b>\n\n{reason}\n\n⛓ {names} گیر افتادن و <b>۱۵ دقیقه</b> از همه‌ی دستورات ربات محروم شدن.\n"
+            f"💰 هر نفر می‌تونه با دکمه‌ی زیر وثیقه‌ی <b>{HEIST_BAIL:,}</b> تومانی بده و زودتر آزاد بشه.")
+    kb = InlineKeyboardMarkup([[btn(f"💰 پرداخت وثیقه ({HEIST_BAIL:,})", "success", callback_data="hs:bail")]])
+    await _heist_edit(bot, g, B(text), kb)
+
+
+async def _heist_success(bot, g):
+    _heist_drop(g)
+    loot = g["loot"]
+    total = _heist_loot_value(loot)
+    share = total // 4
+    ids = [p["id"] for p in g["players"]]
+    await pool.execute("UPDATE users SET balance=balance+$1::bigint WHERE user_id=ANY($2::bigint[])", share, ids)
+    nm, nr = loot.count("money"), loot.count("ruby")
+    names = "، ".join(_ulink(p["id"], p["name"] or "کاربر") for p in g["players"])
+    text = (f"{HEIST_BANK_CE} <b>سرقت موفق بود!</b> 🎉\n\n{names} با ماشین فرار کردن.\n\n"
+            f"{HEIST_MONEY_CE} پول: <b>{nm * 5}</b> تا ({nm * 5 * 50_000:,} تومان)\n"
+            f"{HEIST_RUBY_CE} یاقوت: <b>{nr * 3}</b> تا ({nr * 3 * 100_000:,} تومان)\n\n"
+            f"💵 غنیمت کل: <b>{total:,}</b> تومان\n🤝 سهم هر نفر: <b>{share:,}</b> تومان")
+    await _heist_edit(bot, g, B(text))
+
+
+async def _heist_runner(bot, g):
+    try:
+        while g["state"] == "play":
+            await asyncio.sleep(HEIST_TICK)
+            async with g["lock"]:
+                if g["state"] != "play":
+                    break
+                if time.time() >= g["deadline"]:
+                    await _heist_fail(bot, g, "⏱ وقت تموم شد و پلیس رسید!")
+                    break
+                if g["stage"] == 2:
+                    g["guards"] = [(i not in g["open"]) and random.random() < 0.5 for i in range(9)]
+                elif g["stage"] == 3:
+                    g["camera"] = random.random() < 0.4
+                await _heist_show(bot, g)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("heist runner failed")
+
+
+async def _heist_start(bot, g):
+    g["state"] = "play"
+    g["deadline"] = time.time() + HEIST_TOTAL
+    g["stage"] = 1
+    g["a"], g["b"], g["typed"] = random.randint(1000, 9999), random.randint(1000, 9999), ""
+    await _heist_show(bot, g)
+    t = asyncio.create_task(_heist_runner(bot, g))
+    _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
+
+
+def _heist_stage2(g):
+    g["stage"] = 2
+    g["cells"] = _heist_layout()
+    g["open"], g["picked"] = set(), []
+    g["guards"] = [random.random() < 0.5 for _ in range(9)]
+
+
+def _heist_stage3(g):
+    g["stage"] = 3
+    g["items"] = list(g["picked"])
+    g["moved"], g["camera"] = 0, False
+
+
+def _heist_stage4(g):
+    g["stage"] = 4
+    g["loot"] = g["items"][:g["moved"]]
+    g["qs"], g["qi"] = _heist_questions(), 0
+
+
+async def _hs_ans(q, note=None, alert=False):
+    try:
+        await q.answer(note, show_alert=alert)
+    except Exception:
+        pass
+
+
+async def heist_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    if _word_key(text) != "جینگوسرقت":
+        return False
+    msg, user = update.effective_message, update.effective_user
+    if update.effective_chat.type == "private":
+        await msg.reply_text("سرقت گروهی فقط تو گروه کار می‌کنه."); return True
+    kb = InlineKeyboardMarkup([[btn("سرقت از خزانه بانک", "danger", icon=HEIST_BANK_EID, callback_data=f"hs:pk:{user.id}:bank")]])
+    await send_html(context.bot, msg.chat_id,
+                    B("🏦 <b>سرقت گروهی</b>\n\nمحل سرقت رو انتخاب کن 👇\nمیز ۴ نفره می‌سازی و سه نفر دیگه باید بیان بشینن."),
+                    reply_markup=kb, reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+    return True
+
+
+async def _heist_pick(q, context, parts):
+    user = q.from_user
+    try:
+        owner = int(parts[2])
+    except (ValueError, IndexError):
+        await _hs_ans(q); return
+    if user.id != owner:
+        await _hs_ans(q, "این پنل مال تو نیست؛ خودت بنویس «جینگو سرقت» 😅", True); return
+    if _heist_in_game(user.id) is not None:
+        await _hs_ans(q, "تو الان تو یه سرقت دیگه‌ای هستی.", True); return
+    await upsert_user(user.id, user.full_name)
+    _HEIST_SEQ[0] += 1
+    g = {"id": _HEIST_SEQ[0], "chat": q.message.chat_id, "msg": q.message.message_id, "owner": user.id,
+         "players": [{"id": user.id, "name": user.full_name}], "state": "wait", "stage": 0, "deadline": None, "lock": asyncio.Lock()}
+    HEIST_TABLES[g["id"]] = g
+    await _hs_ans(q)
+    await _heist_show(context.bot, g)
+    t = asyncio.create_task(_heist_expire(context.bot, g))
+    _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
+
+
+async def _heist_bail(q, user):
+    until = HEIST_JAILED.get(user.id)
+    if not until or BANNED.get(user.id) != until or until <= time.time():
+        HEIST_JAILED.pop(user.id, None)
+        await _hs_ans(q, "تو الان زندانیِ سرقت نیستی.", True); return
+    bal = await pool.fetchval("UPDATE users SET balance=balance-$1::bigint WHERE user_id=$2::bigint AND balance>=$1::bigint RETURNING balance", HEIST_BAIL, user.id)
+    if bal is None:
+        await _hs_ans(q, f"وثیقه {HEIST_BAIL:,} تومنه؛ پول جیبت کافی نیست.", True); return
+    await pool.execute("UPDATE users SET banned_until=0 WHERE user_id=$1::bigint", user.id)
+    BANNED.pop(user.id, None)
+    HEIST_JAILED.pop(user.id, None)
+    await _hs_ans(q, "🔓 وثیقه پرداخت شد و آزاد شدی!", True)
+
+
+async def heist_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    parts = (q.data or "").split(":")
+    act = parts[1] if len(parts) > 1 else ""
+    if act == "bail":
+        await _heist_bail(q, q.from_user); return
+    if act == "pk":
+        await _heist_pick(q, context, parts); return
+    try:
+        g = HEIST_TABLES.get(int(parts[2]))
+    except (ValueError, IndexError):
+        await _hs_ans(q); return
+    if g is None or g["state"] == "done":
+        await _hs_ans(q, "این سرقت تموم شده.", True); return
+    async with g["lock"]:
+        if g["state"] == "done":
+            await _hs_ans(q, "این سرقت تموم شده.", True); return
+        await _heist_dispatch(q, context, g, act, parts)
+
+
+async def _heist_dispatch(q, context, g, act, parts):
+    bot, user = context.bot, q.from_user
+    note, alert = None, False
+    if g["state"] == "wait":
+        if act == "j":
+            if _heist_in_game(user.id) is not None:
+                note, alert = "تو الان تو یه سرقت (همین میز یا یه میز دیگه) هستی.", True
+            elif len(g["players"]) >= 4:
+                note, alert = "میز پر شده.", True
+            else:
+                await upsert_user(user.id, user.full_name)
+                g["players"].append({"id": user.id, "name": user.full_name})
+                if len(g["players"]) == 4:
+                    await _heist_start(bot, g)
+                else:
+                    await _heist_show(bot, g)
+        elif act == "x":
+            if user.id != g["owner"]:
+                note, alert = "فقط سازنده‌ی میز می‌تونه ببندتش.", True
+            else:
+                await _heist_close(bot, g, "❌ میز سرقت بسته شد.")
+        else:
+            note, alert = "سرقت هنوز شروع نشده.", True
+        await _hs_ans(q, note, alert); return
+    if act in ("j", "x"):
+        await _hs_ans(q, "سرقت شروع شده.", True); return
+    st = g["stage"]
+    if user.id != g["players"][st - 1]["id"]:
+        await _hs_ans(q, f"الان نوبت «{HEIST_ROLES[st - 1]}»ـه.", True); return
+    if time.time() >= g["deadline"]:
+        await _heist_fail(bot, g, "⏱ وقت تموم شد و پلیس رسید!")
+        await _hs_ans(q, "وقت تموم شد!", True); return
+    if st == 1 and act == "k":
+        v = parts[3]
+        if v == "b":
+            g["typed"] = g["typed"][:-1]
+        elif v == "ok":
+            if not g["typed"]:
+                note, alert = "اول جواب رو با دکمه‌ها بزن.", True
+            elif int(g["typed"]) == g["a"] + g["b"]:
+                _heist_stage2(g); note = "🔓 در باز شد!"
+            else:
+                g["typed"] = ""; note, alert = "❌ جواب اشتباهه! دوباره امتحان کن.", True
+        elif v.isdigit() and len(g["typed"]) < 5:
+            g["typed"] += v
+    elif st == 2 and act == "c":
+        i = int(parts[3])
+        if i in g["open"]:
+            note, alert = "این خونه رو قبلاً برداشتی.", True
+        elif g["guards"][i]:
+            note, alert = "👮 نگهبان اونجاست! صبر کن بره.", True
+        else:
+            g["open"].add(i)
+            kind = g["cells"][i]
+            if kind is None:
+                g["cells"] = _heist_layout(); g["open"] = set(); g["picked"] = []
+                g["guards"] = [random.random() < 0.5 for _ in range(9)]
+                note, alert = "❌ خونه خالی بود! همه‌چی از اول شروع شد.", True
+            else:
+                g["picked"].append(kind)
+                note = "💰 پول برداشتی!" if kind == "money" else "💎 یاقوت برداشتی!"
+                if len(g["picked"]) >= 3:
+                    _heist_stage3(g)
+    elif st == 2 and act == "e":
+        if not g["picked"]:
+            note, alert = "هنوز چیزی برنداشتی!", True
+        else:
+            _heist_stage3(g)
+    elif st == 3 and act == "m":
+        if g["camera"]:
+            g["moved"] = 0
+            note, alert = "🚨 آژیر زد! دوربین دیدت و محصولات از دستت افتاد؛ از اول شروع کن.", True
+        else:
+            g["moved"] += 1
+            note = "🥷 یه محصول رسید به ماشین!"
+            if g["moved"] >= len(g["items"]):
+                _heist_stage4(g)
+    elif st == 3 and act == "e":
+        if g["moved"] < 1:
+            note, alert = "هنوز چیزی به ماشین نرسوندی!", True
+        else:
+            _heist_stage4(g)
+    elif st == 4 and act == "d":
+        if int(parts[3]) == g["qs"][g["qi"]]["ok"]:
+            g["qi"] += 1
+            if g["qi"] >= 3:
+                await _hs_ans(q, "🏁 رسیدین!")
+                await _heist_success(bot, g); return
+            note = "✅ درست پیچیدی!"
+        else:
+            await _hs_ans(q, "💥 اشتباه پیچیدی!", True)
+            await _heist_fail(bot, g, "🚔 مسیر رو اشتباه رفتی و پلیس راهتون رو بست!"); return
+    else:
+        note, alert = "این دکمه دیگه فعال نیست.", True
+    await _hs_ans(q, note, alert)
+    await _heist_show(bot, g)
+
 
 # ───── فامیل: اجتماع خانواده، برچسب نسبت و لیدربرد «فامیل‌سالارها» ─────
 async def _family_component(uid: int, limit: int = 400) -> set:
@@ -20434,9 +21146,12 @@ def main():
     app.add_handler(CallbackQueryHandler(bank_cb, pattern=r"^bk:(dep|wd):\d+$"))
     app.add_handler(CallbackQueryHandler(marriage_cb, pattern=r"^mar:(yes|no):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(adopt_cb, pattern=r"^adp:(yes|no):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(family_leave_cb, pattern=r"^fam:leave:\d+:[yn]$"))
+    app.add_handler(CallbackQueryHandler(family_leave_cb, pattern=r"^fam:leave:\d+:[ynq]$"))
+    app.add_handler(CallbackQueryHandler(family_divorce_cb, pattern=r"^fam:div:\d+:[qyn]$"))
     app.add_handler(CallbackQueryHandler(family_tree_cb, pattern=r"^fam:tree:\d+$"))
+    app.add_handler(CallbackQueryHandler(family_tree_page_cb, pattern=r"^fam:tp:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(affair_cb, pattern=r"^af:(divorce|forgive):\d+:\d+:\-?\d+$"))
+    app.add_handler(CallbackQueryHandler(heist_cb, pattern=r"^hs:"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
     app.add_handler(CallbackQueryHandler(sports_cb, pattern=r"^sg:"))
     app.add_handler(CallbackQueryHandler(equip_cb, pattern=r"^eq:"))
