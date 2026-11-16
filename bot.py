@@ -543,6 +543,8 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS affection_cooldowns (actor_id BIGINT NOT NULL, target_id BIGINT NOT NULL, last_ts DOUBLE PRECISION NOT NULL, PRIMARY KEY(actor_id,target_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS actor_cooldowns (actor_id BIGINT NOT NULL, kind TEXT NOT NULL, last_ts DOUBLE PRECISION NOT NULL, PRIMARY KEY(actor_id,kind))")
         await c.execute("CREATE TABLE IF NOT EXISTS marriage_proposals (bride_id BIGINT PRIMARY KEY, groom_id BIGINT NOT NULL, chat_id BIGINT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE TABLE IF NOT EXISTS adoptions (child_id BIGINT PRIMARY KEY, parent1_id BIGINT NOT NULL, parent2_id BIGINT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE TABLE IF NOT EXISTS adoption_requests (child_id BIGINT PRIMARY KEY, parent_id BIGINT NOT NULL, spouse_id BIGINT NOT NULL, chat_id BIGINT NOT NULL, created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS casino_records (chat_id BIGINT NOT NULL, game TEXT NOT NULL, user_id BIGINT NOT NULL, name TEXT, record BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(chat_id, game))")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_state (user_id BIGINT NOT NULL, robbery_type TEXT NOT NULL, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, blocked_until DOUBLE PRECISION NOT NULL DEFAULT 0, PRIMARY KEY (user_id, robbery_type))")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_profile (user_id BIGINT PRIMARY KEY, trace INTEGER NOT NULL DEFAULT 0, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, arrest_until DOUBLE PRECISION NOT NULL DEFAULT 0, trace_until DOUBLE PRECISION NOT NULL DEFAULT 0)")
@@ -6509,6 +6511,7 @@ def _guide_sections() -> list:
         _gq("🎁 هدیه", "<code>هدیه</code> لیست هدیه‌ها و قیمتشون\nریپلای + <code>هدیه گل</code>\nهدیه به طرف مقابل انرژی میده."),
         _gq("⚡ انرژی", "انرژی زیر ۳۰٪ یعنی پول امتیاز نصف، درآمد ماشین ۲۵٪ کمتر و شانس گیر افتادن تو خلاف بیشتر. با بغل، بوس و هدیه بالا میره."),
         _gq("💍 ازدواج", "ریپلای مرد روی پیام زن + <code>ازدواج</code>\n<code>همسرم</code> اطلاعات همسر و میزان رابطه\n<code>سکس</code> بین زوج‌ها (هر ۱۲۰ دقیقه)\n<code>فروشگاه</code> خرید کاندوم و قرص."),
+        _gq("👶 فرزندخواندگی", "زوج‌های متأهل: ریپلای روی کاربر + <code>جینگو فرزندخواندگی</code> (یا <code>فرزندخواندگی</code>)؛ اگه قبول کنه فرزندخونده‌تون میشه.\n<code>خانواده</code> والدین، فرزندها و دکمه‌ی شجره‌نامه | <code>شجره نامه</code> عکس شجره‌نامه."),
         _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
         _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
@@ -7822,27 +7825,52 @@ def _top_lines(rows, col: str, unit: str, show_ids: bool = False) -> str:
     return "\n\n".join(out)  # بین هر نفر یه خط فاصله
 
 
+TOP_RICH_EID = "5190526908462292507"
+TOP_LVL_EID = "5192964134899047657"
+
+
+async def _top_view(kind: str, ids: bool):
+    """متن و دکمه‌ی لیدربرد: kind = rich (پولدارها) یا lvl (بیشترین سطح‌ها)."""
+    if kind == "lvl":
+        rows = await pool.fetch("SELECT user_id, name, username, msg_total FROM users WHERE msg_total > 0 AND user_id <> ALL($1::bigint[]) ORDER BY msg_total DESC LIMIT 10", list(ADMIN_IDS))
+        rows = [dict(r, lvl=msg_level(r["msg_total"])) for r in rows]
+        body = _top_lines(rows, "lvl", "سطح", ids) if rows else "هنوز کسی تو لیست نیست!"
+        text = f'<tg-emoji emoji-id="{TOP_LVL_EID}">⭐</tg-emoji> <b>۱۰ نفر با بیشترین سطح</b>\n\n{body}'
+        kb = InlineKeyboardMarkup([[btn("پولدارها", "primary", icon=TOP_RICH_EID, callback_data="tp:rich")]])
+    else:
+        rows = await pool.fetch("SELECT user_id, name, username, balance FROM users WHERE balance > 0 AND user_id <> ALL($1::bigint[]) ORDER BY balance DESC LIMIT 10", list(ADMIN_IDS))
+        body = _top_lines(rows, "balance", "تومن", ids) if rows else "هنوز کسی تو لیست نیست!"
+        text = f'<tg-emoji emoji-id="{TOP_RICH_EID}">💰</tg-emoji> <b>۱۰ نفر از پولدارها</b>\n\n{body}'
+        kb = InlineKeyboardMarkup([[btn("بیشترین سطح‌ها", "primary", icon=TOP_LVL_EID, callback_data="tp:lvl")]])
+    return text, kb
+
+
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/top یا «لیدربرد» / «برترین» / «برترین ها» — ۱۰ نفر اول امتیاز و دارایی."""
-    by_j = await pool.fetch("SELECT user_id, name, username, jaghs FROM users WHERE jaghs > 0 AND user_id <> ALL($1::bigint[]) ORDER BY jaghs DESC LIMIT 10", list(ADMIN_IDS))
-    by_b = await pool.fetch("SELECT user_id, name, username, balance FROM users WHERE balance > 0 AND user_id <> ALL($1::bigint[]) ORDER BY balance DESC LIMIT 10", list(ADMIN_IDS))
-    if not by_j and not by_b:
-        await update.effective_message.reply_text(BP("هنوز کسی تو لیست نیست!"), parse_mode="HTML")
-        return
-    # آیدی عددی و یوزرنیم فقط برای پشتیبان‌ها و فقط تو پی‌وی ربات نشون داده میشه (تو گروه همه می‌بینن)
+    """/top یا «لیدربرد»: ۱۰ پولدار اول + دکمه‌ی بیشترین سطح‌ها."""
     ids = update.effective_user.id in ADMIN_IDS and update.effective_chat.type == "private"
-    text = (
-        f"{ce('top', 1, '👑')} <b>برترین‌ها</b>\n\n"
-        f"{ce('jagh', 1, '🤛')} <b>بیشترین امتیاز</b>\n\n{_top_lines(by_j, 'jaghs', 'امتیاز', ids)}\n\n"
-        f"〰️〰️〰️\n\n"
-        f"{ce('wallet', 1, '💰')} <b>بیشترین دارایی</b>\n\n{_top_lines(by_b, 'balance', 'تومن', ids)}"
-    )
+    text, kb = await _top_view("rich", ids)
     rp = ReplyParameters(message_id=update.effective_message.message_id, allow_sending_without_reply=True)
     try:
-        await update.effective_message.reply_text(text, parse_mode="HTML", reply_parameters=rp)
+        await update.effective_message.reply_text(text, parse_mode="HTML", reply_parameters=rp, reply_markup=kb)
     except Exception:
         log.exception("top failed, retrying without premium emojis")
-        await update.effective_message.reply_text(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), parse_mode="HTML", reply_parameters=rp)
+        await update.effective_message.reply_text(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), parse_mode="HTML", reply_parameters=rp, reply_markup=kb)
+
+
+async def top_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    kind = "lvl" if q.data == "tp:lvl" else "rich"
+    ids = q.from_user.id in ADMIN_IDS and q.message.chat.type == "private"
+    text, kb = await _top_view(kind, ids)
+    try:
+        await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            try:
+                await q.edit_message_text(re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text), parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                log.exception("top_cb failed")
+    await q.answer()
 
 
 # ───────────── انتقال پول (ریپلای + «انتقال پول 100 هزار») ─────────────
@@ -16531,7 +16559,7 @@ def _is_bot_text_command(text: str) -> bool:
     exact = {
         ME_WORD, "تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks",
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
-        "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده",
+        "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده", "شجرهنامه", "فرزندخواندگی", "فرزندخوندگی", "جینگوفرزندخواندگی", "جینگوفرزندخوندگی", "جینگوفرزندخونده", "جینگوفرزندخوانده", "جینگوشجرهنامه", "درختخانواده",
         "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "دوئلدرسی", "دوئلدرس",
         "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
@@ -17866,22 +17894,376 @@ async def gift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await task_event(context.bot, q.message.chat_id, frm, "gift", name=q.from_user.full_name)
 
 
+# ───────────────────────── فرزندخواندگی و شجره‌نامه ─────────────────────────
+# زوج‌های متأهل: ریپلای روی کاربر + «جینگو فرزندخواندگی» (یا «فرزندخواندگی»). اگه اون کاربر قبول کنه، فرزندخونده‌ی هر دو نفر میشه.
+# تو «خانواده» والدین/فرزندها نشون داده میشه و دکمه‌ی «شجره‌نامه» (یا نوشتن «شجره نامه») عکس درخت خانواده رو می‌فرسته.
+ADOPT_WORDS = {"جینگوفرزندخواندگی", "جینگوفرزندخوندگی", "فرزندخواندگی", "فرزندخوندگی",
+               "جینگوفرزندخونده", "جینگوفرزندخوانده", "جینگوفرزندخوندهگرفتن", "جینگوفرزندخواندهگرفتن"}
+TREE_WORDS = {"شجرهنامه", "شجرهنامهخانواده", "درختخانواده", "جینگوشجرهنامه"}
+ADOPT_REQ_TTL = 3600
+TREE_MAX_DEPTH = 6
+
+
+async def _adopt_is_ancestor(anc: int, uid: int) -> bool:
+    """آیا anc جزو اجداد (والدین، والدینِ والدین، ...) uid هست؟ (جلوی حلقه‌ی خانوادگی رو می‌گیره)"""
+    seen = {uid}
+    frontier = [uid]
+    for _ in range(12):
+        if not frontier:
+            return False
+        rows = await pool.fetch("SELECT parent1_id, parent2_id FROM adoptions WHERE child_id = ANY($1::bigint[])", frontier)
+        nxt = []
+        for r in rows:
+            for p in (int(r["parent1_id"]), int(r["parent2_id"])):
+                if p == anc:
+                    return True
+                if p not in seen:
+                    seen.add(p); nxt.append(p)
+        frontier = nxt
+    return False
+
+
+async def adopt_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    target = msg.reply_to_message.from_user if msg.reply_to_message else None
+    if not target or target.is_bot or target.id == user.id:
+        await msg.reply_text("برای فرزندخواندگی، روی پیام کاربر موردنظرت ریپلای کن و «جینگو فرزندخواندگی» بنویس."); return True
+    if user.id in ADMIN_IDS or target.id in ADMIN_IDS:
+        await msg.reply_text("🛡 حساب‌های پشتیبانی امکان فرزندخواندگی ندارن."); return True
+    await upsert_user(user.id, user.full_name)
+    await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
+    me = await get_user(user.id); other = await get_user(target.id)
+    if not me or not me["spouse_id"]:
+        await msg.reply_text("👶 فقط زوج‌های متأهل می‌تونن فرزندخونده بگیرن؛ اول باید ازدواج کنی."); return True
+    spouse_id = int(me["spouse_id"])
+    if target.id == spouse_id:
+        await msg.reply_text("همسرت رو که نمی‌تونی فرزندخونده کنی 😅"); return True
+    if other and other["spouse_id"]:
+        await msg.reply_text("کسی که ازدواج کرده نمی‌تونه فرزندخونده بشه."); return True
+    if await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", target.id):
+        await msg.reply_text("این کاربر قبلاً فرزندخونده‌ی یه خانواده شده."); return True
+    if await _adopt_is_ancestor(target.id, user.id) or await _adopt_is_ancestor(target.id, spouse_id):
+        await msg.reply_text("این کاربر جزو اجداد خانواده‌ی شماست؛ نمی‌تونه فرزندخونده‌تون بشه."); return True
+    sp = await get_user(spouse_id)
+    sp_name = (sp["name"] if sp else None) or "همسر"
+    await pool.execute("INSERT INTO adoption_requests(child_id,parent_id,spouse_id,chat_id,created_at) VALUES($1,$2,$3,$4,$5) "
+                       "ON CONFLICT(child_id) DO UPDATE SET parent_id=EXCLUDED.parent_id,spouse_id=EXCLUDED.spouse_id,chat_id=EXCLUDED.chat_id,created_at=EXCLUDED.created_at",
+                       target.id, user.id, spouse_id, msg.chat_id, time.time())
+    kb = InlineKeyboardMarkup([[btn("👶 قبول می‌کنم", "success", callback_data=f"adp:yes:{target.id}:{user.id}"),
+                                btn("رد می‌کنم", "danger", callback_data=f"adp:no:{target.id}:{user.id}")]])
+    await send_html(context.bot, msg.chat_id,
+                    B(f"👶 {_ulink(target.id, target.full_name)}، {_ulink(user.id, user.full_name)} و همسرش {_ulink(spouse_id, sp_name)} می‌خوان تو رو به فرزندخونده‌گی بگیرن!\nقبول می‌کنی؟"),
+                    reply_markup=kb, reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+    return True
+
+
+async def adopt_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        _, act, child_s, parent_s = q.data.split(":"); child = int(child_s); parent = int(parent_s)
+    except (ValueError, IndexError):
+        await q.answer("درخواست نامعتبره.", show_alert=True); return
+    if q.from_user.id != child:
+        await q.answer("فقط خودِ فرد موردنظر می‌تونه جواب بده.", show_alert=True); return
+    req = await pool.fetchrow("SELECT parent_id, spouse_id, created_at FROM adoption_requests WHERE child_id=$1", child)
+    if not req or int(req["parent_id"]) != parent or time.time() - float(req["created_at"]) > ADOPT_REQ_TTL:
+        await pool.execute("DELETE FROM adoption_requests WHERE child_id=$1", child)
+        await q.answer("درخواست منقضی شده.", show_alert=True); return
+    if act == "no":
+        await pool.execute("DELETE FROM adoption_requests WHERE child_id=$1", child)
+        await q.answer("رد شد."); await edit_html(q, B("💔 درخواست فرزندخواندگی رد شد.")); return
+    err = None
+    async with pool.acquire() as c:
+        async with c.transaction():
+            rows = await c.fetch("SELECT user_id, spouse_id, name FROM users WHERE user_id=ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", [child, parent])
+            by = {int(r["user_id"]): r for r in rows}
+            ch, pa = by.get(child), by.get(parent)
+            if not ch or not pa or not pa["spouse_id"]:
+                err = "والد دیگه متأهل نیست."
+            elif ch["spouse_id"]:
+                err = "کسی که ازدواج کرده نمی‌تونه فرزندخونده بشه."
+            elif await c.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", child):
+                err = "این کاربر قبلاً فرزندخونده شده."
+            else:
+                sp_id = int(pa["spouse_id"])
+                await c.execute("INSERT INTO adoptions(child_id,parent1_id,parent2_id,created_at) VALUES($1,$2,$3,$4)", child, parent, sp_id, time.time())
+                await c.execute("DELETE FROM adoption_requests WHERE child_id=$1", child)
+    if err:
+        await pool.execute("DELETE FROM adoption_requests WHERE child_id=$1", child)
+        await q.answer(err, show_alert=True); await edit_html(q, B(f"❌ {html.escape(err)}")); return
+    sp = await get_user(sp_id)
+    await q.answer("مبارکه! 👶")
+    await edit_html(q, B(f"👶 {_ulink(child, q.from_user.full_name)} فرزندخونده‌ی {_ulink(parent, pa['name'] or 'کاربر')} و {_ulink(sp_id, (sp['name'] if sp else None) or 'همسر')} شد!\n"
+                         f"با نوشتن «خانواده» و دکمه‌ی «شجره‌نامه» درخت خانواده‌تون رو ببینید 🌳"))
+
+
+# ───── پنل خانواده ─────
+async def family_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg, user = update.effective_message, update.effective_user
+    row = await get_user(user.id)
+    parents = await pool.fetchrow("SELECT parent1_id, parent2_id FROM adoptions WHERE child_id=$1", user.id)
+    kids = await pool.fetch("SELECT a.child_id, u.name FROM adoptions a LEFT JOIN users u ON u.user_id=a.child_id "
+                            "WHERE a.parent1_id=$1 OR a.parent2_id=$1 ORDER BY a.created_at", user.id)
+    spouse = await get_user(int(row["spouse_id"])) if row and row["spouse_id"] else None
+    if row and row["spouse_id"] and not spouse:
+        await msg.reply_text("اطلاعات همسرت پیدا نشد."); return
+    if not spouse and not parents and not kids:
+        await msg.reply_text("هنوز ازدواج نکردی."); return
+    parts = []
+    kb_rows = []
+    if spouse:
+        rel, _ = await couple_info(user.id, int(spouse["user_id"]))
+        parts.append(f"💍 <b>خانواده‌ی تو</b>\nهمسر: {_ulink(spouse['user_id'], spouse['name'] or 'همسر')}\n{energy_line(spouse['energy'])}\n💞 میزان رابطه: <b>{rel}</b>")
+        if update.effective_chat.type != "private":
+            kb_rows.append([btn("سکس", "danger", icon=SEX_EIDS[0], callback_data=f"sx:ask:{user.id}")])
+            kb_rows.append([btn("فروشگاه", "primary", icon=SHOP_EID, callback_data=f"shp:no:{user.id}:condom")])
+    else:
+        parts.append("👨‍👩‍👧 <b>خانواده‌ی تو</b>")
+    if parents:
+        ids = [int(parents["parent1_id"]), int(parents["parent2_id"])]
+        names = []
+        for pid in ids:
+            pr = await get_user(pid)
+            names.append(_ulink(pid, (pr["name"] if pr else None) or "کاربر"))
+        parts.append(f"👶 <b>فرزندخونده</b>\nوالدین: {names[0]} و {names[1]}")
+    if kids:
+        lst = "، ".join(_ulink(int(k["child_id"]), k["name"] or "کاربر") for k in kids)
+        parts.append(f"🍼 <b>فرزندخونده‌ها ({len(kids)}):</b> {lst}")
+    kb_rows.append([btn("🌳 شجره‌نامه", "primary", callback_data=f"fam:tree:{user.id}")])
+    await send_html(context.bot, msg.chat_id, B("\n\n".join(parts)), reply_markup=InlineKeyboardMarkup(kb_rows),
+                    reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+
+
+# ───── شجره‌نامه (عکس) ─────
+async def _tree_build(pid: int, visited: set, depth: int) -> dict:
+    visited.add(pid)
+    row = await get_user(pid)
+    partner = int(row["spouse_id"]) if row and row["spouse_id"] else None
+    kids = await pool.fetch("SELECT child_id, parent1_id, parent2_id, created_at FROM adoptions WHERE parent1_id=$1 OR parent2_id=$1 ORDER BY created_at", pid)
+    if partner is None and kids:   # طلاق گرفته‌ن ولی فرزندها هنوز به هر دو وصلن
+        k0 = kids[0]
+        partner = int(k0["parent2_id"]) if int(k0["parent1_id"]) == pid else int(k0["parent1_id"])
+    people = [pid]
+    child_rows = list(kids)
+    if partner and partner not in visited:
+        people.append(partner); visited.add(partner)
+        child_rows += list(await pool.fetch("SELECT child_id, parent1_id, parent2_id, created_at FROM adoptions WHERE parent1_id=$1 OR parent2_id=$1 ORDER BY created_at", partner))
+    child_ids, seen_c = [], set()
+    for r in sorted(child_rows, key=lambda r: float(r["created_at"])):
+        c = int(r["child_id"])
+        if c not in seen_c:
+            seen_c.add(c); child_ids.append(c)
+    children = []
+    if depth < TREE_MAX_DEPTH:
+        for c in child_ids:
+            if c not in visited:
+                children.append(await _tree_build(c, visited, depth + 1))
+    return {"people": people, "children": children}
+
+
+async def tree_data(uid: int):
+    """(درخت، اطلاعات کاربرها) — از بالاترین جد شروع میشه و تا همه‌ی نوه‌ها پایین میاد."""
+    cur = uid
+    for _ in range(TREE_MAX_DEPTH):
+        par = await pool.fetchrow("SELECT parent1_id, parent2_id FROM adoptions WHERE child_id=$1", cur)
+        if not par:
+            break
+        p1, p2 = int(par["parent1_id"]), int(par["parent2_id"])
+        if not await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", p1) and await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1", p2):
+            cur = p2
+        else:
+            cur = p1
+    tree = await _tree_build(cur, set(), 0)
+    ids = []
+    def walk(n):
+        ids.extend(n["people"])
+        for c in n["children"]:
+            walk(c)
+    walk(tree)
+    rows = await pool.fetch("SELECT user_id, name, gender FROM users WHERE user_id=ANY($1::bigint[])", ids)
+    info = {int(r["user_id"]): (r["name"], r["gender"]) for r in rows}
+    return tree, info
+
+
+_RAQM_OK = None
+
+
+def _fa_text(text: str) -> str:
+    """متن فارسی برای PIL: اگه raqm نصب باشه خودش وصل‌نویسی می‌کنه؛ وگرنه با arabic_reshaper+bidi (اگه نصب باشن)."""
+    global _RAQM_OK
+    if _RAQM_OK is None:
+        try:
+            from PIL import features as _pf
+            _RAQM_OK = bool(_pf.check("raqm"))
+        except Exception:
+            _RAQM_OK = False
+    if _RAQM_OK:
+        return text
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        return get_display(arabic_reshaper.reshape(text))
+    except Exception:
+        return text
+
+
+def _tree_font(size: int):
+    """فونتی که حروف فارسی داشته باشه: کنار bot.py (DejaVuSans-Bold.ttf / Vazirmatn / ...) یا فونت‌های سیستم."""
+    names = ("Vazirmatn-Bold.ttf", "Vazir-Bold.ttf", "Vazirmatn-Regular.ttf", "Vazir.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "NotoNaskhArabic-Bold.ttf", "NotoSansArabic-Bold.ttf")
+    dirs = (BASE_DIR, BASE_DIR / "fonts", BASE_DIR / "assets", Path("/usr/share/fonts/truetype/dejavu"), Path("/usr/share/fonts/truetype/noto"),
+            Path("/usr/share/fonts/dejavu"), Path("/usr/share/fonts/TTF"), Path("/usr/share/fonts"))
+    for n in names:
+        for d in dirs:
+            fp = d / n
+            try:
+                if fp.exists():
+                    return ImageFont.truetype(str(fp), size)
+            except Exception:
+                continue
+    log.warning("tree font with Persian glyphs NOT FOUND: DejaVuSans-Bold.ttf رو کنار bot.py بذار")
+    return load_font(size)
+
+
+def _tree_clean_name(name) -> str:
+    n = re.sub(r"[^\w\s\-\.‌]", "", name or "")   # ایموجی و نمادها تو فونت نیست
+    n = re.sub(r"\s+", " ", n).strip()
+    return n or "کاربر"
+
+
+def render_family_tree(tree: dict, info: dict, me_id: int):
+    BW, BH, HG, SG, VG, M, TOP = 220, 74, 54, 44, 120, 60, 130
+    f_name = _tree_font(27); f_title = _tree_font(38); f_heart = _tree_font(34); f_tag = _tree_font(20)
+
+    def unit_w(n):
+        k = len(n["people"]); return BW * k + HG * (k - 1)
+
+    def sub_w(n):
+        if "_sw" in n:
+            return n["_sw"]
+        cw = sum(sub_w(c) for c in n["children"]) + SG * max(0, len(n["children"]) - 1)
+        n["_cw"] = cw; n["_sw"] = max(unit_w(n), cw)
+        return n["_sw"]
+
+    depth_max = [0]
+
+    def place(n, left, d):
+        sw = sub_w(n); n["cx"] = left + sw / 2; n["d"] = d; depth_max[0] = max(depth_max[0], d)
+        x = left + (sw - n["_cw"]) / 2
+        for c in n["children"]:
+            place(c, x, d + 1); x += sub_w(c) + SG
+
+    total_w = int(sub_w(tree)) + 2 * M
+    place(tree, M, 0)
+    W = max(total_w, 760)
+    shift = (W - total_w) / 2
+    H = TOP + (depth_max[0] + 1) * BH + depth_max[0] * VG + M
+    img = Image.new("RGB", (W, H), (20, 24, 43))
+    dr = ImageDraw.Draw(img)
+    for y in range(H):      # گرادیانت پس‌زمینه
+        t = y / max(1, H - 1)
+        dr.line([(0, y), (W, y)], fill=(int(20 + 22 * t), int(24 + 6 * t), int(43 + 30 * t)))
+    dr.text((W / 2, 62), _fa_text("شجره‌نامه‌ی خانواده"), font=f_title, fill=(255, 224, 140), anchor="mm")
+    dr.line([(W / 2 - 120, 100), (W / 2 + 120, 100)], fill=(255, 224, 140), width=3)
+    LINE = (150, 160, 205)
+
+    def box_left(n, i):
+        return n["cx"] + shift - unit_w(n) / 2 + i * (BW + HG)
+
+    def ytop(n):
+        return TOP + n["d"] * (BH + VG)
+
+    def draw_edges(n):
+        if not n["children"]:
+            return
+        yb = ytop(n) + BH
+        sx = n["cx"] + shift
+        ymid = yb + VG / 2
+        y0 = yb if len(n["people"]) == 1 else ytop(n) + BH / 2 + 20   # زوج: از زیر قلب
+        dr.line([(sx, y0), (sx, ymid)], fill=LINE, width=4)
+        xs = [c["cx"] + shift - unit_w(c) / 2 + BW / 2 for c in n["children"]]
+        dr.line([(min(xs + [sx]), ymid), (max(xs + [sx]), ymid)], fill=LINE, width=4)
+        for c, x in zip(n["children"], xs):
+            dr.line([(x, ymid), (x, ytop(c))], fill=LINE, width=4)
+            draw_edges(c)
+
+    draw_edges(tree)
+
+    def draw_nodes(n):
+        y = ytop(n)
+        for i, pid in enumerate(n["people"]):
+            nm, g = info.get(pid, (None, None))
+            x = box_left(n, i)
+            base = (66, 135, 245) if g == "m" else ((236, 100, 160) if g == "f" else (140, 150, 175))
+            fill = tuple(int(c * 0.28 + 14) for c in base)
+            me = pid == me_id
+            dr.rounded_rectangle([x, y, x + BW, y + BH], radius=20, fill=fill, outline=(255, 214, 90) if me else base, width=6 if me else 4)
+            txt = _tree_clean_name(nm)
+            while f_name.getlength(_fa_text(txt)) > BW - 44 and len(txt) > 2:
+                txt = txt[:-1]
+            if txt != _tree_clean_name(nm):
+                txt = txt.rstrip() + "…"
+            dr.text((x + BW / 2, y + BH / 2 - (10 if me else 0)), _fa_text(txt), font=f_name, fill=(255, 255, 255), anchor="mm")
+            if me:
+                dr.text((x + BW / 2, y + BH - 13), _fa_text("تو"), font=f_tag, fill=(255, 214, 90), anchor="mm")
+            if i == 1:   # قلب بین زوج
+                hx = x - HG / 2
+                dr.line([(hx - HG / 2 + 4, y + BH / 2), (hx + HG / 2 - 4, y + BH / 2)], fill=LINE, width=4)
+                dr.text((hx, y + BH / 2 - 2), "♥", font=f_heart, fill=(255, 90, 120), anchor="mm")
+        for c in n["children"]:
+            draw_nodes(c)
+
+    draw_nodes(tree)
+    if W > 2600:
+        r = 2600 / W
+        img = img.resize((2600, max(1, int(H * r))), Image.LANCZOS)
+    out = BytesIO(); img.save(out, "PNG", optimize=True); out.seek(0)
+    out.name = "family_tree.png"
+    return out
+
+
+async def send_family_tree(bot, chat_id: int, uid: int, reply_to: int | None = None):
+    has_rel = await pool.fetchval("SELECT 1 FROM adoptions WHERE child_id=$1 OR parent1_id=$1 OR parent2_id=$1 LIMIT 1", uid)
+    row = await get_user(uid)
+    if not has_rel and not (row and row["spouse_id"]):
+        await bot.send_message(chat_id, "هنوز خانواده‌ای نداری؛ اول ازدواج کن یا فرزندخونده بگیر.",
+                               reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None)
+        return
+    tree, info = await tree_data(uid)
+    png = await asyncio.to_thread(render_family_tree, tree, info, uid)
+    await bot.send_photo(chat_id, png, caption=B("🌳 شجره‌نامه‌ی خانواده‌ی تو"), parse_mode="HTML",
+                         reply_parameters=ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None)
+
+
+async def family_tree_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        uid = int(q.data.split(":")[2])
+    except (ValueError, IndexError):
+        await q.answer(); return
+    if q.from_user.id != uid:
+        await q.answer("این پنل مال تو نیست.", show_alert=True); return
+    await q.answer("🌳 در حال ساخت شجره‌نامه...")
+    try:
+        await send_family_tree(context.bot, q.message.chat_id, uid, q.message.message_id)
+    except Exception:
+        log.exception("family tree failed")
+        await q.answer("ساخت شجره‌نامه به مشکل خورد.", show_alert=True)
+
+
+
 async def marriage_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     key=_word_key(text); msg=update.effective_message; user=update.effective_user
     if key in ("همسرم","خانوادهزنم","خانوادههمسرم","خانواده"):
-        row=await get_user(user.id)
-        if not row or not row["spouse_id"]:
-            await msg.reply_text("هنوز ازدواج نکردی."); return True
-        spouse=await get_user(int(row["spouse_id"]))
-        if not spouse:
-            await msg.reply_text("اطلاعات همسرت پیدا نشد."); return True
-        rel, _ = await couple_info(user.id, int(spouse['user_id']))
-        kb = None
-        if update.effective_chat.type != "private":
-            kb = InlineKeyboardMarkup([[btn("سکس", "danger", icon=SEX_EIDS[0], callback_data=f"sx:ask:{user.id}")],
-                                       [btn("فروشگاه", "primary", icon=SHOP_EID, callback_data=f"shp:no:{user.id}:condom")]])
-        await send_html(context.bot, msg.chat_id, B(f"💍 <b>خانواده‌ی تو</b>\nهمسر: {_ulink(spouse['user_id'],spouse['name'] or 'همسر')}\n{energy_line(spouse['energy'])}\n💞 میزان رابطه: <b>{rel}</b>"),
-                        reply_markup=kb, reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)); return True
+        await family_panel(update, context); return True
+    if key in ADOPT_WORDS:
+        return await adopt_request(update, context)
+    if key in TREE_WORDS:
+        await upsert_user(user.id, user.full_name)
+        try:
+            await send_family_tree(context.bot, msg.chat_id, user.id, msg.message_id)
+        except Exception:
+            log.exception("family tree failed"); await msg.reply_text("ساخت شجره‌نامه به مشکل خورد.")
+        return True
     if key == "سکس":
         await upsert_user(user.id, user.full_name)
         await sex_request(context.bot, context, msg.chat_id, user.id, reply_to=msg.message_id); return True
@@ -19146,7 +19528,7 @@ async def gift_prices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 BOSS_EVERY = 3 * 3600          # فاصله‌ی ظاهر شدن غول تو هر گروه
 BOSS_DURATION = 40 * 60        # مهلت نابود کردن؛ بعدش فرار می‌کنه
 BOSS_HIT_CD = 10               # هر نفر هر چند ثانیه یه شلیک
-BOSS_ENERGY_COST = 1.0         # انرژی هر شلیک
+BOSS_ENERGY_COST = 0.25        # انرژی هر شلیک
 BOSS_ACTIVE_WINDOW = 6 * 3600  # فقط گروه‌هایی که تو این مدت پیام داشتن غول می‌گیرن
 BOSS_TICK = 4                  # هر چند ثانیه یه بار پیام غول آپدیت میشه (جلوگیری از لیمیت تلگرام)
 BOSS_WORDS = {"شلیک", "شلیککن", "شلیکنابودش", "شلیکنابودکن"}
@@ -19616,14 +19998,44 @@ async def boss_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: st
     return False
 
 
+PET_SAVE_EVERY = 1800     # هر ۳۰ دقیقه
+PET_SAVE_BASE = 4000      # تومن به‌ازای هر پت × شماره‌ی پت (۱ تا ۵) در هر دور، وقتی شکم و محبوبیت پُر باشه
+
+
+async def pet_savings_tick():
+    """هر پت یکم پول تو پروفیت صاحبش پس‌انداز می‌کنه؛ شکم یا محبوبیت کم باشه کمتر، خالی باشه هیچی."""
+    now = time.time()
+    rows = await pool.fetch("SELECT user_id, pets_owned, pet_stats FROM users WHERE pets_owned > 0")
+    for r in rows:
+        total = 0
+        for idx in range(1, int(r["pets_owned"]) + 1):
+            st_ = _pet_st(r, idx, now)
+            belly = st_["belly"] / 100.0
+            pop = min(1.0, st_["pop"] / PET_POP_CAP)
+            f = belly * (0.3 + 0.7 * pop) if belly > 0.02 else 0.0
+            total += int(PET_SAVE_BASE * idx * f)
+        if total <= 0:
+            continue
+        try:
+            async with pool.acquire() as c:
+                async with c.transaction():
+                    await jm_add(c, int(r["user_id"]), total)
+        except Exception:
+            log.exception("pet savings failed")
+
+
 async def boss_loop(app: Application):
     """هر چند ثانیه: آپدیت پیام غول‌ها، فرار غول‌های بی‌جواب، و ظاهر شدن غول جدید تو گروه‌های فعال."""
     tick = 0
+    last_pet = time.time()
     while True:
         await asyncio.sleep(BOSS_TICK)
         tick += 1
         try:
             bot = app.bot
+            if time.time() - last_pet >= PET_SAVE_EVERY:
+                last_pet = time.time()
+                await pet_savings_tick()
             for cid in list(_BOSS_DIRTY):
                 _BOSS_DIRTY.discard(cid)
                 await _boss_edit(bot, cid)
@@ -19711,11 +20123,14 @@ def main():
     app.add_handler(CallbackQueryHandler(home_cb, pattern=r"^hm:"))
     app.add_handler(CallbackQueryHandler(bank_cb, pattern=r"^bk:(dep|wd):\d+$"))
     app.add_handler(CallbackQueryHandler(marriage_cb, pattern=r"^mar:(yes|no):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(adopt_cb, pattern=r"^adp:(yes|no):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(family_tree_cb, pattern=r"^fam:tree:\d+$"))
     app.add_handler(CallbackQueryHandler(affair_cb, pattern=r"^af:(divorce|forgive):\d+:\d+:\-?\d+$"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
     app.add_handler(CallbackQueryHandler(sports_cb, pattern=r"^sg:"))
     app.add_handler(CallbackQueryHandler(equip_cb, pattern=r"^eq:"))
     app.add_handler(CallbackQueryHandler(pet_cb, pattern=r"^pt:"))
+    app.add_handler(CallbackQueryHandler(top_cb, pattern=r"^tp:"))
     app.add_handler(CallbackQueryHandler(sex_cb, pattern=r"^sx:"))
     app.add_handler(CallbackQueryHandler(shop_cb, pattern=r"^shp:"))
     app.add_handler(MessageHandler(filters.Dice.SLOT_MACHINE & filters.ChatType.GROUPS, slot_dice_msg))
