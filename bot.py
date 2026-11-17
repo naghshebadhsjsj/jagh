@@ -1210,7 +1210,6 @@ textarea.inp{min-height:130px;resize:vertical}
 .tw-modes button.on:disabled{opacity:1}
 .tw-info{display:flex;align-items:center;justify-content:center;gap:6px;text-align:center;font-size:13px;color:#b7bec6;margin:-4px 0 12px}
 .tw-cancel{width:100%;margin-top:10px;height:44px;border-radius:22px;border:0;background:#8f2f35;color:#fff;font-weight:800;font-size:15px;font-family:inherit;cursor:pointer}
-.tw-commit{margin-top:12px;font-size:11px;color:#8a929b;text-align:center;direction:ltr;word-break:break-all;cursor:pointer;line-height:1.7}
 .tw-t .cei{width:26px;height:26px;object-fit:contain}
 .tw-main{width:100%;height:58px;border:0;border-radius:29px;background:#3095f3;color:#fff;font-weight:900;font-size:21px;cursor:pointer;font-family:inherit}
 .tw-main.green{background:#16a34a}.tw-main:disabled{background:#3a424b;color:#8a929b}
@@ -2964,7 +2963,7 @@ function GamesScreen(){
    [z=>svgIc('mine',z),'مین','۲۵ خانه و ۳ مین؛ خانه‌های امن را باز کن و در زمان مناسب برداشت بزن.','mines','red'],
    [z=>svgIc('skull',z),'سم یا خوراکی','میز دونفره با انتظار برای حریف؛ اگر تا ۱۲۰ ثانیه کسی نیاید، شرط برمی‌گردد.','poison','red'],
    [z=>svgIc('target',z),'خط و نشان','کاروم دونفره با مهره‌های فیزیکی و نوبت ۶۰ ثانیه‌ای.','carrom','green'],
-    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج گنج','برج گنج: ۸ طبقه؛ حالت آسان ۴ در و حالت سخت ۳ در؛ پشت یکی از درها نگهبانه. تا ×۲۴ برنده شو.','tower','gold']];
+    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج گنج','برج گنج: ۸ طبقه؛ حالت آسان ۴ در و حالت سخت ۳ در؛ پشت یکی از درها نگهبانه. تا ×۵ در حالت آسان و تا ×۷ در حالت سخت برنده شو.','tower','gold']];
   const grid=h('div',{class:'games-grid'},...G.map(([ic,t,d,key,cls])=>{
    const v=h('div',{class:'gvisual'},ic(64));
    if(key==='crash'){v.style.background='radial-gradient(circle,#073c42,#050b1e 72%)';v.replaceChildren(h('div',{class:'rocket-mark'},svgIc('rocket',76)))}
@@ -3391,7 +3390,6 @@ function GamesScreen(){
   const board=h('div',{class:'tw-board'}),resBox=h('div',{class:'rk2-res tw-res',style:'display:none'});
   const main=h('button',{class:'tw-main'},'ثبت شرط');
   const cancelB=h('button',{class:'tw-cancel',style:'display:none'},'انصراف و برگشت شرط');
-  const commitB=h('div',{class:'tw-commit'});
   const wifiP=h('button',{class:'rk2-pill',onclick:()=>toast(performance.now()-lastOk<4000?'اتصال برقراره ✅':'اتصال ضعیفه…',performance.now()-lastOk>=4000)},dot);wifiP.append(svgEl(WIFI));
   const shieldB=h('button',{class:'rk2-pill',onclick:openRules});shieldB.append(svgEl(SHIELD));
   const gearB=h('button',{class:'rk2-pill',onclick:openTable});gearB.append(svgEl(GEAR));
@@ -3402,15 +3400,15 @@ function GamesScreen(){
   box.replaceChildren(h('div',{class:'rk2 tw'},
    h('div',{class:'rk2-top'},back,h('div',{class:'rk2-title'},tI,'برج گنج'),h('span',{class:'rk2-sp'})),
    h('div',{class:'rk2-bar'},wifiP,shieldB,gearB,h('span',{class:'rk2-grow'}),balP,meBox),
-   modeBox,info,win,board,resBox,main,cancelB,commitB));
+   modeBox,info,win,board,resBox,main,cancelB));
   api('/api/social/me').then(m=>{me={id:m.id,name:m.name};meBox.replaceChildren(avatar('user',m.id,m.name,44))}).catch(()=>{});
   rkCleanup=()=>{stopped=true;clearInterval(pingT)};
   pingT=setInterval(()=>{dot.className='rk2-dot'+(performance.now()-lastOk<4000?'':' bad')},1000);
-  const FALLBACK={easy:{cols:4,fa:'آسان',mults:[1.26,1.68,2.25,3,4,5.33,7.11,9.48]},hard:{cols:3,fa:'سخت',mults:[1.42,2.13,3.2,4.8,7.21,10.82,16.23,24.34]}};
+  const FALLBACK={easy:{cols:4,fa:'آسان',mults:[1.22,1.5,1.83,2.24,2.73,3.34,4.09,5]},hard:{cols:3,fa:'سخت',mults:[1.28,1.63,2.07,2.65,3.37,4.3,5.49,7]}};
   const MD=()=>(st&&st.modes)||FALLBACK;
   const cur=()=>{const src=game||end;if(src&&src.mults&&src.cols)return{mode:src.mode||mode,cols:src.cols,mults:src.mults};const m=MD()[mode]||FALLBACK[mode];return{mode,cols:m.cols,mults:m.mults}};
   const fm=v=>Number(v).toFixed(2)+'x';
-  function openRules(){sheet('قوانین برج گنج',()=>h('div',{class:'rk2-sh'},'• ۸ طبقه داره و پشت یکی از درهای هر طبقه نگهبان قایمه.\n• حالت آسان: ۴ در و ضریب‌های کمتر. حالت سخت: ۳ در و ضریب‌های بیشتر.\n• هر طبقه‌ای که رد کنی ضریبت بالاتر می‌ره؛ هر لحظه بعد از طبقه اول می‌تونی «برداشت» بزنی.\n• اگه به نگهبان بخوری شرط می‌سوزه. قبل از باز کردن اولین در می‌تونی انصراف بدی و شرط برگرده.\n• «کد صداقت» پیش از اولین در ثبت می‌شه و آخر بازی رمزش نشون داده می‌شه تا مطمئن بشی چیدمان وسط بازی عوض نشده.'))}
+  function openRules(){sheet('قوانین برج گنج',()=>h('div',{class:'rk2-sh'},'• ۸ طبقه داره و پشت یکی از درهای هر طبقه نگهبان قایمه.\n• حالت آسان: ۴ در و ضریب‌های کمتر. حالت سخت: ۳ در و ضریب‌های بیشتر.\n• هر طبقه‌ای که رد کنی ضریبت بالاتر می‌ره؛ هر لحظه بعد از طبقه اول می‌تونی «برداشت» بزنی.\n• اگه به نگهبان بخوری شرط می‌سوزه. قبل از باز کردن اولین در می‌تونی انصراف بدی و شرط برگرده.'))}
   function openTable(){sheet('جدول ضرایب',()=>h('div',{class:'rk2-sh'},...['easy','hard'].map(k=>{const m=MD()[k]||FALLBACK[k];return h('div',{style:'margin-bottom:12px'},h('div',{style:'font-weight:900;margin-bottom:6px'},(k==='hard'?'🔴 ':'🟢 ')+m.fa+' · '+num(m.cols)+' در'),...m.mults.map((x,i)=>h('div',{style:'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #ffffff14'},h('span',{},'طبقه '+num(i+1)),h('b',{style:'direction:ltr'},fm(x)))))})))}
   function drawModes(){
     const lock=!!game;
@@ -3456,12 +3454,6 @@ function GamesScreen(){
       else{main.disabled=true;main.className='tw-main';main.textContent='یه در از طبقه اول انتخاب کن'}
     }else{main.disabled=false;main.className='tw-main';main.textContent='ثبت شرط'}
     cancelB.style.display=(game&&!game.picks.length)?'block':'none';
-    const src=game||end;
-    if(src&&src.commit){
-      const full=src.commit+(end&&end.salt?'\nرمز: '+end.bombs.join(',')+':'+end.salt:'');
-      commitB.textContent='🔐 کد صداقت: '+src.commit.slice(0,24)+'…'+(end&&end.salt?'  |  رمز: '+end.bombs.join(',')+':'+end.salt:'');
-      commitB.onclick=()=>copy(full);
-    }else{commitB.textContent='';commitB.onclick=null}
   }
   function banner(win,t){resBox.style.display='block';resBox.className='rk2-res tw-res '+(win?'win':'lose');resBox.textContent=t;clearTimeout(banner.t);banner.t=setTimeout(()=>{resBox.style.display='none'},7000)}
   async function pick(c){
@@ -3759,8 +3751,9 @@ function LeaderboardScreen(){
  }
  async function load(){body.replaceChildren(h('div',{class:'empty'},'در حال دریافت رتبه‌بندی…'));try{
   const d=await api('/api/social/leaderboard'),track=h('div',{class:'lb-track'});
-  if(!(d.assets||[]).length){body.replaceChildren(h('div',{class:'empty'},'هنوز کسی دارایی ثبت‌شده‌ای برای لیدربرد نداره.'));return}
-  track.append(section('ثروتمندترین روباه‌ها','5413715090157359985',d.assets||[],'تومان'));
+   const secs=[['۱۰ نفر از پولدارها','5190526908462292507',d.rich||d.assets||[],'تومان'],['۱۰ نفر با بیشترین سطح','5192964134899047657',d.lvl||[],'سطح'],['۱۰ فامیل‌سالار برتر','5413715090157359985',d.fam||[],'نفر فامیل']];
+   if(!secs.some(s=>s[2].length)){body.replaceChildren(h('div',{class:'empty'},'هنوز کسی توی لیدربرد نیست.'));return}
+   secs.forEach(s=>track.append(section(s[0],s[1],s[2],s[3])));
   body.replaceChildren(track);
  }catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}}
  load();return root;
@@ -4569,25 +4562,15 @@ async def _social_take_quota(c, uid, user, col, maxn, label):
 
 
 async def _g_leaderboard(qs, user):
-    # لیدربرد عمومی فقط بر اساس دارایی کل (کیف پول + بانک) است.
-    # نام از پروفایل به‌روز تلگرام گرفته می‌شود تا اسم اشتباه/قدیمی نمایش داده نشود.
-    excluded = sorted(set(ADMIN_IDS) | set(STAFF))
-    rows = await pool.fetch(
-        """SELECT u.user_id,
-                  COALESCE(NULLIF(BTRIM(CONCAT_WS(' ', NULLIF(tp.first_name,''), NULLIF(tp.last_name,''))), ''),
-                           NULLIF(BTRIM(u.name), ''), 'کاربر') AS display_name,
-                  COALESCE(tp.username, u.username) AS username,
-                  (COALESCE(u.balance,0)+COALESCE(u.bank_balance,0)) AS assets
-           FROM users u LEFT JOIN tg_profiles tp ON tp.user_id=u.user_id
-           WHERE u.started=TRUE
-             AND (COALESCE(u.balance,0)+COALESCE(u.bank_balance,0))>0
-             AND NOT (u.user_id=ANY($1::bigint[]))
-           ORDER BY assets DESC, u.user_id ASC LIMIT 10""", excluded)
-    return _j({"assets": [
-        {"user_id": int(r["user_id"]), "name": r["display_name"] or "کاربر",
-         "username": r["username"], "value": int(r["assets"] or 0)}
-        for r in rows
-    ]})
+    # لیدربرد مینی‌اپ دقیقاً همون لیدربرد ربات است (از _top_rows می‌خونه):
+    # پولدارها (موجودی جیب)، بیشترین سطح‌ها و فامیل‌سالارها؛ نه جمع کل دارایی.
+    def pack(rows, col):
+        return [{"user_id": int(r["user_id"]), "name": r.get("name") or "کاربر",
+                 "username": r.get("username"), "value": int(r.get(col) or 0)} for r in rows]
+    rich = pack(await _top_rows("rich"), "balance")
+    return _j({"assets": rich, "rich": rich,
+               "lvl": pack(await _top_rows("lvl"), "lvl"),
+               "fam": pack(await _top_rows("fam"), "fam")})
 
 
 async def _social_me(qs, user):
@@ -5184,8 +5167,62 @@ def _rp_busy_sql() -> str:
     return "SELECT 1 FROM room_poison_games WHERE phase<>'done' AND (creator=$1 OR opponent=$1)"
 
 
+# ───────── کولداون بازی‌های کازینو (مشترک بین ربات و مینی‌اپ) ─────────
+# slow (۳ دقیقه): اسلات، تاس، برج گنج، بازی‌های ورزشی (دارت/بولینگ/بسکتبال)، سم یا خوراکی
+# fast (۱۵ ثانیه): مین، موشک (و جینگو بت که کولداون جدا و هم‌اندازه‌ی همین رو داره)
+CASINO_COOLDOWN_SLOW = 180
+CASINO_COOLDOWN_FAST = 15
+CD_SLOW_GAMES = frozenset({"slot", "dice", "tower", "darts", "bowl", "hoop", "poison"})
+_CD_STAMPS = {"slow": {}, "fast": {}}
+
+
+def _cd_kind(game) -> str:
+    return "slow" if game in CD_SLOW_GAMES else "fast"
+
+
+def _cd_left_uid(uid: int, game="mines") -> int:
+    kind = _cd_kind(game)
+    secs = CASINO_COOLDOWN_SLOW if kind == "slow" else CASINO_COOLDOWN_FAST
+    left = secs - (time.time() - _CD_STAMPS[kind].get(uid, 0))
+    return int(left) + 1 if left > 0 else 0
+
+
+def _cd_set_uid(uid: int, game="mines"):
+    st = _CD_STAMPS[_cd_kind(game)]
+    if len(st) > 20000:
+        cut = time.time() - CASINO_COOLDOWN_SLOW
+        for k in [k for k, v in st.items() if v < cut]:
+            st.pop(k, None)
+    st[uid] = time.time()
+
+
+def _cd_plain(left: int) -> str:
+    t = f"{left // 60} دقیقه و {left % 60} ثانیه" if left >= 60 else f"{left} ثانیه"
+    return f"انقدر دیگه امتیاز زدی که خسته‌ای! یه نفس بگیر؛ {t} دیگه می‌تونی این بازی رو شروع کنی."
+
+
+def _cd_guard(game):
+    """دکوراتور شروع بازی‌های مینی‌اپ: اگه کولداون نگذشته خطا میده، بعد از شروع موفق کولداون ثبت میشه."""
+    import functools
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(b, user):
+            uid = int(user["id"])
+            left = _cd_left_uid(uid, game)
+            if left > 0:
+                raise _ApiError(_cd_plain(left))
+            res = await fn(b, user)
+            _cd_set_uid(uid, game)
+            return res
+        return wrapper
+    return deco
+
+
 async def _social_poison_create(b, user):
     uid, _bal = await _mini_ctx(user)
+    if (left := _cd_left_uid(uid, "poison")) > 0:
+        raise _ApiError(_cd_plain(left))
     try:
         bet = int(float(str(b.get("bet")).replace(",", "").strip()))
     except (TypeError, ValueError):
@@ -5220,6 +5257,8 @@ async def _social_poison_create(b, user):
 async def _social_poison_join(b, user):
     uid, _bal = await _mini_ctx(user)
     gid = _int(b.get("game_id"))
+    if (left := _cd_left_uid(uid, "poison")) > 0:
+        raise _ApiError(_cd_plain(left))
     async with _RP_LOCK:
         await _rp_sweep()
         g = await _rp_fetch(gid)
@@ -5237,6 +5276,7 @@ async def _social_poison_join(b, user):
         except Exception:
             await _give(uid, int(g["bet"]))
             raise
+    _cd_set_uid(uid, "poison"); _cd_set_uid(int(g["creator"]), "poison")
     nm = await _rp_names([uid, g["creator"]])
     if not g.get("silent"):
       await _rp_say(f"⚔️ {nm.get(uid, 'یه بازیکن')} به بازی {nm.get(g['creator'], 'سازنده')} پیوست!\n💰 جایزه: {int(g['bet']) * 2:,} تومن — بازی شروع شد، تماشا کنید 👀")
@@ -6373,6 +6413,7 @@ async def _mini_crash_finish(uid: int, bet: int, st: dict, res: str, m: float) -
             "rate": MINI_CRASH_RATE}
 
 
+@_cd_guard("crash")
 async def _p_game_crash_start(b, user):
     uid, _bal = await _mini_ctx(user)
     bet = _mini_bet(b)
@@ -6520,6 +6561,7 @@ def _mini_mines_view(st: dict, bet: int) -> dict:
             "cells": MINI_MINES_CELLS, "mines": MINI_MINES_COUNT}
 
 
+@_cd_guard("mines")
 async def _p_game_mines_start(b, user):
     uid, _bal = await _mini_ctx(user)
     bet = _mini_bet(b)
@@ -6594,7 +6636,7 @@ async def _p_game_mines_cashout(b, user):
 # ───── برج گنج (۸ طبقه؛ آسان = ۴ در، سخت = ۳ در؛ پشت یکی از درهای هر طبقه نگهبان است) ─────
 TOWER_FLOORS = 8
 TOWER_RTP = 0.95
-TOWER_MODES = {"easy": {"cols": 4, "fa": "آسان"}, "hard": {"cols": 3, "fa": "سخت"}}
+TOWER_MODES = {"easy": {"cols": 4, "fa": "آسان", "top": 5.0}, "hard": {"cols": 3, "fa": "سخت", "top": 7.0}}   # top = ضریب طبقه‌ی آخر (سقف)
 TOWER_COLS = 4                                                    # سازگاری با نسخه‌ی قبلی
 TOWER_MULTS = (1.26, 1.68, 2.25, 3.00, 4.00, 5.33, 7.11)          # فقط برای بازی‌های نیمه‌تمامِ نسخه‌ی قبلی
 
@@ -6604,8 +6646,11 @@ def _tower_mode(m) -> str:
 
 
 def _tower_mults_for(mode: str) -> list:
-    c = TOWER_MODES[mode]["cols"]
-    return [math.floor(TOWER_RTP * (c / (c - 1)) ** k * 100 + 1e-9) / 100 for k in range(1, TOWER_FLOORS + 1)]
+    """ضریب طبقه‌ها: رشد هندسی تا سقف هر حالت (آسان ×۵، سخت ×۷)؛ ضریب طبقه‌ی آخر دقیقاً برابر سقفه."""
+    top = float(TOWER_MODES[mode]["top"])
+    out = [round(top ** (k / TOWER_FLOORS), 2) for k in range(1, TOWER_FLOORS + 1)]
+    out[-1] = top
+    return out
 
 
 TOWER_MULTS_BY_MODE = {m: _tower_mults_for(m) for m in TOWER_MODES}
@@ -6616,11 +6661,6 @@ def _tower_cfg(st: dict):
     if mode in TOWER_MODES:
         return mode, TOWER_MODES[mode]["cols"], TOWER_MULTS_BY_MODE[mode]
     return "easy", TOWER_COLS, list(TOWER_MULTS)       # بازی قدیمی بدون حالت
-
-
-def _tower_commit(bombs, salt: str) -> str:
-    import hashlib
-    return hashlib.sha256(f"{','.join(str(b) for b in bombs)}:{salt}".encode()).hexdigest()
 
 
 # ایموجی‌های پرمیوم برج: نقش هر کدوم از روی ایموجی پایه‌ی خودِ استیکر تشخیص داده میشه.
@@ -6676,13 +6716,14 @@ def _tower_view(st: dict, bet: int) -> dict:
     k = len(st["picks"])
     m = mults[k - 1] if k else 1.0
     return {"mode": mode, "mode_fa": TOWER_MODES[mode]["fa"], "rows": len(mults), "cols": cols, "mults": list(mults),
-            "picks": st["picks"], "bet": bet, "mult": m, "payout": int(bet * m + 1e-6), "commit": st.get("commit")}
+            "picks": st["picks"], "bet": bet, "mult": m, "payout": int(bet * m + 1e-6)}
 
 
 def _tower_reveal(st: dict) -> dict:
-    return {"bombs": st["bombs"], "salt": st.get("salt"), "commit": st.get("commit")}
+    return {"bombs": st["bombs"]}
 
 
+@_cd_guard("tower")
 async def _p_game_tower_start(b, user):
     import secrets
     uid, _bal = await _mini_ctx(user)
@@ -6695,8 +6736,7 @@ async def _p_game_tower_start(b, user):
         if await _take(uid, bet) is None:
             raise _ApiError("موجودی کافی نیست.")
         bombs = [secrets.randbelow(cols) for _ in range(TOWER_FLOORS)]
-        salt = secrets.token_hex(8)
-        st = {"mode": mode, "bombs": bombs, "picks": [], "salt": salt, "commit": _tower_commit(bombs, salt)}
+        st = {"mode": mode, "bombs": bombs, "picks": []}
         try:
             await pool.execute("INSERT INTO mini_games (uid, kind, bet, state, created_at) VALUES ($1,'tower',$2,$3,$4)",
                                uid, bet, json.dumps(st), time.time())
@@ -6774,6 +6814,7 @@ async def _p_game_tower_cancel(b, user):
             raise _ApiError("بعد از باز کردن اولین در انصراف ممکن نیست؛ برداشت بزن.")
         await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
         await _give(uid, bet)
+        _CD_STAMPS["slow"].pop(uid, None)   # شرط برگشت؛ کولداون برج هم برمی‌گرده
         return _j({"cancelled": True, "bet": bet, "balance": await _mini_balance(uid)})
 
 
@@ -6821,13 +6862,11 @@ def _tower_bot_text(data: dict) -> str:
             lines.append(" ".join([_tw("door")] * cols) + f"  {_tw('arrow')} {prize:,}")
         else:
             lines.append(" ".join([_tw("lock")] * cols) + f"  {prize:,}")
-    if data.get("commit"):
-        lines += ["", "🔐 کد صداقت (پیش از اولین در ثبت شد):", f"<code>{data['commit']}</code>"]
     return "\n".join(lines)
 
 
 def _tower_end_text(data: dict, head: str) -> str:
-    """نمای پایان بازی: همه‌ی نگهبان‌ها لو میرن + رمز برای راستی‌آزمایی کد صداقت."""
+    """نمای پایان بازی: همه‌ی نگهبان‌ها لو میرن."""
     bombs = data.get("bombs") or []
     cols, picks = int(data.get("cols") or 4), data.get("picks") or []
     lines = [head, ""]
@@ -6841,8 +6880,6 @@ def _tower_end_text(data: dict, head: str) -> str:
             else:
                 cells.append(_tw("door"))
         lines.append(" ".join(cells))
-    if data.get("salt"):
-        lines += ["", "🔓 رمز بازی (برای تطبیق با کد صداقت):", f"<code>{','.join(str(b) for b in bombs)}:{data['salt']}</code>"]
     return "\n".join(lines)
 
 
@@ -7460,7 +7497,7 @@ def _guide_sections() -> list:
         _gq("💔 قهر و آشتی", "ریپلای + <code>قهر</code>\nتا ۳ ساعت بغل، بوس، هدیه، دوئل و کازینو با هم ندارن.\nریپلای + <code>آشتی</code> قهر رو تموم می‌کنه."),
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
         _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
-        _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه و بعد از هر بازی ۱۵ ثانیه استراحت داری.\n<code>جینگو بت 10m</code> (بدون سقف، هر ۱۰ ثانیه یک بار)"),
+        _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه. اسلات، تاس، برج گنج، بازی‌های ورزشی و سم یا خوراکی هر ۳ دقیقه یک بار؛ بت، مین و موشک هر ۱۵ ثانیه یک بار.\n<code>جینگو بت 10m</code> (بدون سقف، هر ۱۵ ثانیه یک بار)"),
         _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
         _gq("📋 تسک", "<code>تسک</code>\nتسک‌های روزانه و هفتگی با جایزه؛ ربات خودش پیشرفتت رو حساب می‌کنه."),
@@ -8862,22 +8899,32 @@ TOP_RICH_EID = "5190526908462292507"
 TOP_LVL_EID = "5192964134899047657"
 
 
+async def _top_rows(kind: str):
+    """منبع واحد لیدربرد: هم پیام «لیدربرد» ربات و هم لیدربرد مینی‌اپ از همین‌جا می‌خونن (rich | lvl | fam)."""
+    if kind == "lvl":
+        rows = await pool.fetch("SELECT user_id, name, username, edu_units, edu_degree FROM users WHERE edu_units > 0 AND user_id <> ALL($1::bigint[]) ORDER BY edu_degree DESC, edu_units DESC LIMIT 10", list(ADMIN_IDS))
+        return [dict(r, lvl=edu_level(r["edu_units"], r["edu_degree"])) for r in rows]
+    if kind == "fam":
+        return [dict(r) for r in await family_leaders(10)]
+    rows = await pool.fetch("SELECT user_id, name, username, balance FROM users WHERE balance > 0 AND user_id <> ALL($1::bigint[]) ORDER BY balance DESC LIMIT 10", list(ADMIN_IDS))
+    return [dict(r) for r in rows]
+
+
 async def _top_view(kind: str, ids: bool):
     """متن و دکمه‌های لیدربرد: kind = rich (پولدارها) | lvl (بیشترین سطح‌ها) | fam (فامیل‌سالارها)."""
     def kb_for(cur: str):
         opts = {"rich": ("پولدارها", TOP_RICH_EID), "lvl": ("بیشترین سطح‌ها", TOP_LVL_EID), "fam": ("فامیل‌سالارها", None)}
         return InlineKeyboardMarkup([[btn(("👨‍👩‍👧 " if k == "fam" else "") + opts[k][0], "primary", icon=opts[k][1], callback_data=f"tp:{k}") if opts[k][1] else btn("👨‍👩‍👧 " + opts[k][0], "primary", callback_data=f"tp:{k}") for k in opts if k != cur]])
     if kind == "lvl":
-        rows = await pool.fetch("SELECT user_id, name, username, edu_units, edu_degree FROM users WHERE edu_units > 0 AND user_id <> ALL($1::bigint[]) ORDER BY edu_degree DESC, edu_units DESC LIMIT 10", list(ADMIN_IDS))
-        rows = [dict(r, lvl=edu_level(r["edu_units"], r["edu_degree"])) for r in rows]
+        rows = await _top_rows("lvl")
         body = _top_lines(rows, "lvl", "سطح", ids) if rows else "هنوز کسی تو لیست نیست!"
         text = f'<tg-emoji emoji-id="{TOP_LVL_EID}">⭐</tg-emoji> <b>۱۰ نفر با بیشترین سطح</b>\n\n{body}'
     elif kind == "fam":
-        rows = await family_leaders(10)
+        rows = await _top_rows("fam")
         body = _top_lines(rows, "fam", "نفر فامیل", ids) if rows else "هنوز هیچ خانواده‌ای تو لیست نیست!"
         text = f'👨‍👩‍👧 <b>۱۰ فامیل‌سالار برتر</b>\n<i>بالاترین جدِ بزرگ‌ترین خانواده‌ها</i>\n\n{body}'
     else:
-        rows = await pool.fetch("SELECT user_id, name, username, balance FROM users WHERE balance > 0 AND user_id <> ALL($1::bigint[]) ORDER BY balance DESC LIMIT 10", list(ADMIN_IDS))
+        rows = await _top_rows("rich")
         body = _top_lines(rows, "balance", "تومن", ids) if rows else "هنوز کسی تو لیست نیست!"
         text = f'<tg-emoji emoji-id="{TOP_RICH_EID}">💰</tg-emoji> <b>۱۰ نفر از پولدارها</b>\n\n{body}'
     return text, kb_for(kind)
@@ -12955,10 +13002,9 @@ SLOT_POINTS = [0, 10, 15, 21]  # 🔔، 🍇، 🍋، 7️⃣
 # ۱۰ و کمتر = ۰ | ۱۱ تا ۱۵ = ۰٫۵ | ۱۶ تا ۲۱ = ۱ | ۲۲ تا ۲۷ = ۱٫۲ | ۲۸ تا ۳۵ = ۱٫۳ | ۳۶ تا ۴۵ = ۱٫۵ | ۴۶ تا ۵۲ = ۱٫۷ | ۵۳ تا ۵۹ = ۱٫۸ | ۶۰ به بالا = ۲
 SLOT_TIERS = [(60, 2.0), (53, 1.8), (46, 1.7), (36, 1.5), (28, 1.3), (22, 1.2), (16, 1.0), (11, 0.5)]
 
-# استراحت بعد از هر بازی کازینو (تاس، اسلات، مین)
-CASINO_COOLDOWN = 15
+# کولداون بازی‌ها: بالا (CASINO_COOLDOWN_SLOW / CASINO_COOLDOWN_FAST)
 
-# ───── جینگو بت: شرط شانسی بدون سقف؛ برد همیشه ×۱٫۸ (ضریب به کاربر نشون داده نمیشه) و هر ۱۰ ثانیه یک بار ─────
+# ───── جینگو بت: شرط شانسی بدون سقف؛ برد همیشه ×۱٫۸ (ضریب به کاربر نشون داده نمیشه) و هر ۱۵ ثانیه یک بار ─────
 JINGO_BET_EID = "5442961846053118972"      # آیکن دکمه‌ی پنل
 JINGO_NAME_EID = "5368698786308708223"     # ایموجی کنار مبلغ
 JINGO_WIN_EID = "5402609202378062848"      # ایموجی بعد از جمله‌ی برد
@@ -12967,7 +13013,7 @@ JINGO_LOSE_LINES = (("به قول قلعه نویی بازیه دیگه", "53687
                     ("اشکال نداره دست بعدی تو میتونی", "5244727536016970540"))
 JINGO_MULT = 1.8            # ضریب برد (مخفی)
 JINGO_WIN_CHANCE = 0.45     # شانس برد
-JINGO_COOLDOWN = 10         # ثانیه
+JINGO_COOLDOWN = 15         # ثانیه
 JINGO_RE = re.compile(r"جینگو\s*(?:بت|قمار|شرط\s*بندی)\s*(.*)", re.S)
 
 DICE_EID = "5123323069850452850"
@@ -13049,18 +13095,12 @@ def slot_final_mult(v: int) -> float:
     return slot_mult(slot_points(v))
 
 
-def _cd_left(context, uid: int) -> int:
-    ts = context.application.bot_data.setdefault("casino_cd", {}).get(uid, 0)
-    left = CASINO_COOLDOWN - (time.time() - ts)
-    return int(left) + 1 if left > 0 else 0
+def _cd_left(context, uid: int, game="mines") -> int:
+    return _cd_left_uid(uid, game)
 
 
-def _cd_set(context, uid: int):
-    context.application.bot_data.setdefault("casino_cd", {})[uid] = time.time()
-
-
-def _cd_plain(left: int) -> str:
-    return f"انقدر دیگه امتیاز زدی که خسته‌ای! یه نفس بگیر؛ {left} ثانیه دیگه می‌تونی بازی کنی."
+def _cd_set(context, uid: int, game="mines"):
+    _cd_set_uid(uid, game)
 
 
 def _cd_html(left: int) -> str:
@@ -13185,7 +13225,7 @@ def panel_game(uid: int, game: str):
         rules = (f"{DICE_CE} تاس\n\n۱ نفره: یه عدد ۱ تا ۶ حدس می‌زنی؛ درست بیاد {DICE_NET + 1} برابر پولت رو می‌گیری.\n"
                  f"۲ نفره: یه میز تو گروه باز می‌شه، نفر دوم میاد؛ هر کی تاس بالاتر بندازه کل پول رو می‌بره.")
     elif game == "jingo":
-        rules = ("🎲 جینگو بت\n\nاول مبلغ شرط رو تعیین می‌کنی، بعد شانستو امتحان می‌کنی! سقف نداره و هر ۱۰ ثانیه یه بار می‌تونی بت کنی.\n"
+        rules = ("🎲 جینگو بت\n\nاول مبلغ شرط رو تعیین می‌کنی، بعد شانستو امتحان می‌کنی! سقف نداره و هر ۱۵ ثانیه یه بار می‌تونی بت کنی.\n"
                  "میانبر: <code>جینگو بت 10m</code> یا <code>جینگو قمار 10m</code> یا <code>جینگو شرط بندی 10m</code>")
     elif game == "poison":
         rules = "☠️ سم یا خوراکی — فقط دو نفره\n\n۲۴ خانه وجود داره. هر نفر در ۶۰ ثانیه سم خودش رو پشت یک خانه مخفی می‌کنه. بعد به نوبت خانه‌های حریف رو انتخاب می‌کنید؛ پیدا کردن سم حریف یعنی بردن کل شرط! انتخاب هر مرحله ۶۰ ثانیه مهلت داره."
@@ -13200,8 +13240,7 @@ def panel_game(uid: int, game: str):
         rules = (f"{_tw('tower')} برج گنج — بازی تک‌نفره\n\n"
                  f"۸ طبقه داره و پشت یکی از درهای هر طبقه نگهبان قایم شده. هر طبقه رو رد کنی ضریبت بالاتر می‌ره و هر وقت خواستی (بعد از طبقه اول) برداشت می‌کنی.\n\n"
                  f"🟢 آسان: ۴ در در هر طبقه، ضریب‌های کمتر (تا ×{e4[-1]:g})\n"
-                 f"🔴 سخت: ۳ در در هر طبقه، ضریب‌های بیشتر (تا ×{h4[-1]:g})\n\n"
-                 f"{_tw('lock')} قبل از باز شدن اولین در، «کد صداقت» ثبت می‌شه و آخر بازی رمزش نشون داده می‌شه.")
+                 f"🔴 سخت: ۳ در در هر طبقه، ضریب‌های بیشتر (تا ×{h4[-1]:g})")
     else:
         rules = ("🎰 اسلات\n\n۱ نفره: روی یکی از نمادها (7️⃣ 🔔 🍋 🍇) شرط می‌بندی و بعد خودت روی پیام ربات ریپلای می‌کنی و 🎰 می‌فرستی.\n"
                  "هر سه تا نماد تو یکی باشه ×۳ | دوتاش ×۱٫۷ | فقط یکیش ×۰٫۳ | هیچی نیاد می‌بازی.\n\n"
@@ -13279,7 +13318,7 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
     if user.id in busy:
         await say(BP("صبر کن بازی قبلیت تموم شه 😅"))
         return
-    if (left := _cd_left(context, user.id)) > 0:
+    if (left := _cd_left(context, user.id, game)) > 0:
         await say(_cd_html(left))
         return
     await upsert_user(user.id, user.full_name)
@@ -13300,7 +13339,7 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
             await say(BP("خطا تو انداختن تاس؛ پولت برگشت."))
             return
         await asyncio.sleep(CASINO_WAIT)
-        _cd_set(context, user.id)
+        _cd_set(context, user.id, game)
         name = _uname(user)
         if game == "dice":
             if v == pick:
@@ -13334,7 +13373,7 @@ async def play_single(bot, context, chat_id: int, user, game: str, bet: int, pic
 
 
 async def play_jingo(bot, context, chat_id: int, user, bet: int, reply_to: int | None = None, q=None):
-    """جینگو بت: بدون سقف، شانسی؛ برد ×۱٫۸ (مخفی) و فقط مبلغ برد/باخت نشون داده میشه. هر ۱۰ ثانیه یک بار."""
+    """جینگو بت: بدون سقف، شانسی؛ برد ×۱٫۸ (مخفی) و فقط مبلغ برد/باخت نشون داده میشه. هر ۱۵ ثانیه یک بار."""
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
     again_kb = None
     if q is not None:
@@ -13468,7 +13507,7 @@ async def slot_dice_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     busy = _busy(context)
     if user.id in busy:
         return
-    if (left := _cd_left(context, user.id)) > 0:
+    if (left := _cd_left(context, user.id, "slot")) > 0:
         await edit_panel(_cd_html(left), again_kb); return
     await upsert_user(user.id, user.full_name)
     if await _take(user.id, bet) is None:
@@ -13478,7 +13517,7 @@ async def slot_dice_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         v = msg.dice.value
         await asyncio.sleep(SLOT_USER_WAIT)   # فقط به‌اندازه‌ی تموم شدن انیمیشن؛ پیام «می‌چرخه» هم دیگه ادیت نمی‌شه
-        _cd_set(context, user.id)
+        _cd_set(context, user.id, "slot")
         reels = slot_reels(v)
         hits = sum(1 for r in reels if r == sym)
         mult = SLOT_BET_MULTS[hits]
@@ -13917,7 +13956,7 @@ async def create_table(bot, chat_id: int, user, game: str, bet: int, reply_to: i
     if user.id in _busy(context):
         await say(BP("اول کاری که دستته (بازی یا دوئل) رو تموم کن 😅"))
         return
-    if (left := _cd_left(context, user.id)) > 0:
+    if (left := _cd_left(context, user.id, game)) > 0:
         await say(_cd_html(left))
         return
     await upsert_user(user.id, user.full_name)
@@ -14078,6 +14117,8 @@ def poison_board(game_id, st, reveal=False):
 async def create_poison_table(bot, context, chat_id, user, bet, reply_to=None):
     if bet < CASINO_MIN_BET or bet > CASINO_MAX_BET:
         await send_html(bot,chat_id,BP(f"حداقل شرط {CASINO_MIN_BET:,} و حداکثرش {CASINO_MAX_BET:,} تومنه.")); return
+    if (left := _cd_left(context, user.id, "poison")) > 0:
+        await send_html(bot, chat_id, _cd_html(left)); return
     await upsert_user(user.id,user.full_name)
     if await _take(user.id,bet) is None:
         row=await get_user(user.id); await send_html(bot,chat_id,B(f"موجودی کافی نیست: {row['balance']:,} تومن")); return
@@ -14124,8 +14165,10 @@ async def poison_cb(update,context,parts):
         gid=parts[2]; st=games.get(gid)
         if not st or st["phase"]!="lobby": await q.answer("این میز فعال نیست.",show_alert=True); return
         if user.id==st["creator"]: await q.answer("خودت نمی‌تونی وارد میز خودت بشی.",show_alert=True); return
+        if (left := _cd_left(context, user.id, "poison")) > 0: await q.answer(_cd_plain(left),show_alert=True); return
         if await _take(user.id,st["bet"]) is None: await q.answer("موجودی کافی نداری.",show_alert=True); return
         st["names"][user.id]=user.full_name; st["players"]=[st["creator"],user.id]; st["phase"]="hide"; st["hide_turn"]=st["creator"]; st["deadline"]=time.time()+60
+        _cd_set(context, user.id, "poison"); _cd_set(context, st["creator"], "poison")
         context.application.create_task(poison_timeout(context.application,gid,st["deadline"]))
         await q.answer("وارد بازی شدی!")
         await q.edit_message_text(f"{POISON_CE} <b>سم یا خوراکی</b>\n\nهر نفر سم خودش رو پشت یکی از ۲۴ خانه مخفی می‌کنه.\nنوبت اول: {_ulink(st['creator'],st['names'][st['creator']])}\n۶۰ ثانیه فرصت داری.",parse_mode="HTML",reply_markup=poison_board(gid,st))
@@ -14334,7 +14377,7 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
     if user.id in _busy(context):
         await q.answer("اول کاری که دستته (بازی یا دوئل) رو تموم کن 😅", show_alert=True)
         return
-    if (left := _cd_left(context, user.id)) > 0:
+    if (left := _cd_left(context, user.id, game)) > 0:
         await q.answer(_cd_plain(left), show_alert=True)
         return
     try:
@@ -14393,8 +14436,8 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
         await bot.send_message(chat_id, BP("خطا تو انداختن تاس؛ پول هر دو نفر برگشت."), parse_mode="HTML")
         return
     await asyncio.sleep(CASINO_WAIT)
-    _cd_set(context, creator)
-    _cd_set(context, user.id)
+    _cd_set(context, creator, game)
+    _cd_set(context, user.id, game)
     if game == "dice":
         s1, s2 = v1, v2
         r1, r2 = f"{DICE_CE} {v1}", f"{DICE_CE} {v2}"
@@ -17826,8 +17869,54 @@ def _is_bot_text_command(text: str) -> bool:
 _USERNAME_SEEN: dict = {}
 
 
+# ───────── ریپلای خودکار روی هر کاری که کاربر تو ربات می‌کنه ─────────
+# gate (اولین هندلر هر آپدیت) پیامِ کاربر (یا پیامِ دکمه‌ی فشرده‌شده) رو تو این متغیر میذاره؛ هر پیامِ جدیدی که ربات
+# تو همون چت می‌فرسته و خودش ریپلای تعیین نکرده، خودکار روی اون پیام ریپلای میشه. ادیت پیام‌ها و پیام‌هایی که
+# ربات تو چت دیگه می‌فرسته (مثلا پی‌وی همسر) دست‌نخورده می‌مونن.
+import contextvars as _ctxv
+_REPLY_CTX = _ctxv.ContextVar("reply_ctx", default=None)
+_REPLY_SEND_METHODS = frozenset({
+    "sendMessage", "sendPhoto", "sendVideo", "sendAnimation", "sendDocument", "sendSticker", "sendDice",
+    "sendVoice", "sendAudio", "sendVideoNote", "sendPoll", "sendRichMessage", "sendLocation", "sendContact"})
+
+
+def _install_auto_reply():
+    import telegram
+    try:
+        from telegram.ext import ExtBot as _Ext
+    except Exception:
+        _Ext = None
+
+    def _wrap(orig):
+        async def _post(self, endpoint, data=None, *a, **kw):
+            try:
+                ctx = _REPLY_CTX.get()
+                if ctx and endpoint in _REPLY_SEND_METHODS and isinstance(data, dict):
+                    if (data.get("reply_parameters") is None and data.get("reply_to_message_id") is None
+                            and str(data.get("chat_id")) == str(ctx[0])):
+                        data["reply_parameters"] = {"message_id": int(ctx[1]), "allow_sending_without_reply": True}
+            except Exception:
+                log.warning("auto reply failed", exc_info=True)
+            return await orig(self, endpoint, data, *a, **kw)
+        _post._auto_reply = True
+        return _post
+
+    done = 0
+    for cls in (telegram.Bot, _Ext):
+        if cls is not None and "_post" in cls.__dict__ and not getattr(cls.__dict__["_post"], "_auto_reply", False):
+            cls._post = _wrap(cls.__dict__["_post"])
+            done += 1
+    if not done:
+        log.warning("auto reply not installed: Bot._post not found")
+
+
 async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ثبت گروه‌ها و کنترل دسترسی‌ها."""
+    try:   # هر چی ربات تو این آپدیت می‌فرسته، روی پیامِ همین کاربر (یا پیامِ دکمه‌ای که زده) ریپلای میشه
+        _rm = update.effective_message if (update.message or update.callback_query) else None
+        _REPLY_CTX.set((_rm.chat_id, _rm.message_id) if _rm is not None and getattr(_rm, "message_id", None) else None)
+    except Exception:
+        _REPLY_CTX.set(None)
     cm = getattr(update, "my_chat_member", None)
     if cm and cm.chat and cm.chat.type in ("group", "supergroup"):
         new_status = str(getattr(cm.new_chat_member, "status", ""))
@@ -23185,6 +23274,7 @@ def _make_update_processor():
 
 
 def main():
+    _install_auto_reply()
     _builder = (
         Application.builder()
         .token(BOT_TOKEN)
