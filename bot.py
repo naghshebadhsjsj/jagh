@@ -1202,6 +1202,16 @@ textarea.inp{min-height:130px;resize:vertical}
 .tw-m{flex:2.25;min-width:0;height:42px;border-radius:21px;border:2px solid #3c434b;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:25px;color:#fff;background:#282d33}
 .tw-row.act .tw-m{background:rgba(255,255,255,.07);border-color:#8d7d2c}
 .tw-m.done{background:#14532d;border-color:#22c55e;color:#bbf7d0}
+.tw-modes{display:flex;gap:8px;margin:0 0 12px}
+.tw-modes button{flex:1;height:42px;border-radius:21px;border:2px solid #3c434b;background:#2d3339;color:#cfd5db;font-weight:900;font-size:15px;font-family:inherit;cursor:pointer}
+.tw-modes button.on{background:linear-gradient(#37d67c,#12924a);border-color:#74eba5;color:#fff}
+.tw-modes button.on.hard{background:linear-gradient(#ff5a6e,#b91c1c);border-color:#ffa0ab}
+.tw-modes button:disabled{opacity:.5}
+.tw-modes button.on:disabled{opacity:1}
+.tw-info{display:flex;align-items:center;justify-content:center;gap:6px;text-align:center;font-size:13px;color:#b7bec6;margin:-4px 0 12px}
+.tw-cancel{width:100%;margin-top:10px;height:44px;border-radius:22px;border:0;background:#8f2f35;color:#fff;font-weight:800;font-size:15px;font-family:inherit;cursor:pointer}
+.tw-commit{margin-top:12px;font-size:11px;color:#8a929b;text-align:center;direction:ltr;word-break:break-all;cursor:pointer;line-height:1.7}
+.tw-t .cei{width:26px;height:26px;object-fit:contain}
 .tw-main{width:100%;height:58px;border:0;border-radius:29px;background:#3095f3;color:#fff;font-weight:900;font-size:21px;cursor:pointer;font-family:inherit}
 .tw-main.green{background:#16a34a}.tw-main:disabled{background:#3a424b;color:#8a929b}
 .tw-res{margin-bottom:12px}
@@ -2954,7 +2964,7 @@ function GamesScreen(){
    [z=>svgIc('mine',z),'مین','۲۵ خانه و ۳ مین؛ خانه‌های امن را باز کن و در زمان مناسب برداشت بزن.','mines','red'],
    [z=>svgIc('skull',z),'سم یا خوراکی','میز دونفره با انتظار برای حریف؛ اگر تا ۱۲۰ ثانیه کسی نیاید، شرط برمی‌گردد.','poison','red'],
    [z=>svgIc('target',z),'خط و نشان','کاروم دونفره با مهره‌های فیزیکی و نوبت ۶۰ ثانیه‌ای.','carrom','green'],
-    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج','۷ طبقه، ۴ خانه و یک بمب در هر طبقه؛ بالا برو و تا ×۷٫۱۱ برنده شو.','tower','gold']];
+    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج گنج','برج گنج: ۸ طبقه؛ حالت آسان ۴ در و حالت سخت ۳ در؛ پشت یکی از درها نگهبانه. تا ×۲۴ برنده شو.','tower','gold']];
   const grid=h('div',{class:'games-grid'},...G.map(([ic,t,d,key,cls])=>{
    const v=h('div',{class:'gvisual'},ic(64));
    if(key==='crash'){v.style.background='radial-gradient(circle,#073c42,#050b1e 72%)';v.replaceChildren(h('div',{class:'rocket-mark'},svgIc('rocket',76)))}
@@ -3372,12 +3382,16 @@ function GamesScreen(){
   const SHIELD='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.6-3.2 7.8-8 9.5C7.2 19.8 4 16.6 4 12V6z"/></svg>';
   const GEAR='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg>';
   const LOCK='<svg viewBox="0 0 24 24" fill="#7d858e"><rect x="5" y="10.5" width="14" height="10" rx="2.6"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="#7d858e" stroke-width="2.4"/></svg>';
-  let st=null,game=null,end=null,busy=false,stopped=false,pingT=null,lastOk=performance.now(),me={id:0,name:''};
+  let st=null,game=null,end=null,busy=false,stopped=false,pingT=null,lastOk=performance.now(),me={id:0,name:''},mode='easy',EM={};
   const svgEl=s=>{const d=h('span',{});d.innerHTML=s;return d.firstChild};
+  const emo=(role,z,fb)=>EM[role]?ceI(EM[role],z):fb;
   const dot=h('i',{class:'rk2-dot'}),balance=h('b',{},'…'),meBox=h('div',{class:'rk2-me'});
   const winB=h('b',{},'0'),win=h('div',{class:'tw-win'},winB,svgEl(COIN));
+  const modeBox=h('div',{class:'tw-modes'}),info=h('div',{class:'tw-info'});
   const board=h('div',{class:'tw-board'}),resBox=h('div',{class:'rk2-res tw-res',style:'display:none'});
   const main=h('button',{class:'tw-main'},'ثبت شرط');
+  const cancelB=h('button',{class:'tw-cancel',style:'display:none'},'انصراف و برگشت شرط');
+  const commitB=h('div',{class:'tw-commit'});
   const wifiP=h('button',{class:'rk2-pill',onclick:()=>toast(performance.now()-lastOk<4000?'اتصال برقراره ✅':'اتصال ضعیفه…',performance.now()-lastOk>=4000)},dot);wifiP.append(svgEl(WIFI));
   const shieldB=h('button',{class:'rk2-pill',onclick:openRules});shieldB.append(svgEl(SHIELD));
   const gearB=h('button',{class:'rk2-pill',onclick:openTable});gearB.append(svgEl(GEAR));
@@ -3386,40 +3400,52 @@ function GamesScreen(){
   const back=h('button',{class:'rk2-back',onclick:leave},'→ بازگشت');
   const tI=h('i',{});tI.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="3.5" width="16" height="4" rx="1.6"/><rect x="4" y="10" width="16" height="4" rx="1.6"/><rect x="4" y="16.5" width="16" height="4" rx="1.6"/></svg>';
   box.replaceChildren(h('div',{class:'rk2 tw'},
-   h('div',{class:'rk2-top'},back,h('div',{class:'rk2-title'},tI,'برج'),h('span',{class:'rk2-sp'})),
+   h('div',{class:'rk2-top'},back,h('div',{class:'rk2-title'},tI,'برج گنج'),h('span',{class:'rk2-sp'})),
    h('div',{class:'rk2-bar'},wifiP,shieldB,gearB,h('span',{class:'rk2-grow'}),balP,meBox),
-   win,board,resBox,main));
+   modeBox,info,win,board,resBox,main,cancelB,commitB));
   api('/api/social/me').then(m=>{me={id:m.id,name:m.name};meBox.replaceChildren(avatar('user',m.id,m.name,44))}).catch(()=>{});
   rkCleanup=()=>{stopped=true;clearInterval(pingT)};
   pingT=setInterval(()=>{dot.className='rk2-dot'+(performance.now()-lastOk<4000?'':' bad')},1000);
-  const mults=()=>(st&&st.mults)||[1.26,1.68,2.25,3,4,5.33,7.11];
+  const FALLBACK={easy:{cols:4,fa:'آسان',mults:[1.26,1.68,2.25,3,4,5.33,7.11,9.48]},hard:{cols:3,fa:'سخت',mults:[1.42,2.13,3.2,4.8,7.21,10.82,16.23,24.34]}};
+  const MD=()=>(st&&st.modes)||FALLBACK;
+  const cur=()=>{const src=game||end;if(src&&src.mults&&src.cols)return{mode:src.mode||mode,cols:src.cols,mults:src.mults};const m=MD()[mode]||FALLBACK[mode];return{mode,cols:m.cols,mults:m.mults}};
   const fm=v=>Number(v).toFixed(2)+'x';
-  function openRules(){sheet('قوانین برج',()=>h('div',{class:'rk2-sh'},'• هر طبقه ۴ خانه داره و توی یکی‌شون بمب هست.\n• از پایین شروع می‌کنی؛ هر طبقه‌ای که رد کنی ضریبت بالاتر می‌ره.\n• هر لحظه می‌تونی «برداشت» بزنی و شرط × ضریب همون طبقه رو برداری.\n• اگه به بمب بخوری شرط می‌سوزه. با رد کردن هر ۷ طبقه خودکار برداشت می‌شه.'))}
-  function openTable(){sheet('جدول ضرایب',()=>h('div',{class:'rk2-sh'},...mults().map((m,i)=>h('div',{style:'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #ffffff14'},h('span',{},'طبقه '+num(i+1)),h('b',{style:'direction:ltr'},fm(m))))))}
+  function openRules(){sheet('قوانین برج گنج',()=>h('div',{class:'rk2-sh'},'• ۸ طبقه داره و پشت یکی از درهای هر طبقه نگهبان قایمه.\n• حالت آسان: ۴ در و ضریب‌های کمتر. حالت سخت: ۳ در و ضریب‌های بیشتر.\n• هر طبقه‌ای که رد کنی ضریبت بالاتر می‌ره؛ هر لحظه بعد از طبقه اول می‌تونی «برداشت» بزنی.\n• اگه به نگهبان بخوری شرط می‌سوزه. قبل از باز کردن اولین در می‌تونی انصراف بدی و شرط برگرده.\n• «کد صداقت» پیش از اولین در ثبت می‌شه و آخر بازی رمزش نشون داده می‌شه تا مطمئن بشی چیدمان وسط بازی عوض نشده.'))}
+  function openTable(){sheet('جدول ضرایب',()=>h('div',{class:'rk2-sh'},...['easy','hard'].map(k=>{const m=MD()[k]||FALLBACK[k];return h('div',{style:'margin-bottom:12px'},h('div',{style:'font-weight:900;margin-bottom:6px'},(k==='hard'?'🔴 ':'🟢 ')+m.fa+' · '+num(m.cols)+' در'),...m.mults.map((x,i)=>h('div',{style:'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #ffffff14'},h('span',{},'طبقه '+num(i+1)),h('b',{style:'direction:ltr'},fm(x)))))})))}
+  function drawModes(){
+    const lock=!!game;
+    modeBox.replaceChildren(...['easy','hard'].map(k=>{const m=MD()[k]||FALLBACK[k];
+      const b=h('button',{class:(cur().mode===k?'on ':'')+k,disabled:lock,onclick:()=>{if(busy||game||mode===k)return;mode=k;end=null;resBox.style.display='none';draw()}},(k==='hard'?'🔴 ':'🟢 ')+m.fa+' · '+num(m.cols)+' در');
+      return b}));
+  }
   function draw(){
-    const M=mults(),n=M.length,picks=game?game.picks:(end?end.picks:[]);
+    const C=cur(),M=C.mults,n=M.length,picks=game?game.picks:(end?end.picks||[]:[]);
+    drawModes();
+    const chance=Math.round((C.cols-1)/C.cols*100);
+    info.replaceChildren(emo('guard',18,'🛡'),h('span',{},'پشت یکی از '+num(C.cols)+' در نگهبانه • شانس هر طبقه '+num(chance)+'٪'));
+    const lockIc=()=>EM.lock?ceI(EM.lock,24):svgEl(LOCK);
+    const doorIc=()=>EM.door?ceI(EM.door,26):'?';
+    const guardIc=()=>EM.guard?ceI(EM.guard,24):'💣';
     const rows=[];
     for(let r=n-1;r>=0;r--){
       const played=r<picks.length,active=game&&r===picks.length||(!game&&!end&&r===0);
       const lostRow=end&&end.lost&&end.row===r;
       const tiles=[];
-      for(let c=0;c<4;c++){
+      for(let c=0;c<C.cols;c++){
         let cls='tw-t',inner=null,click=null;
         if(game){
           if(played){if(picks[r]===c){cls+=' safe';inner='✓'}else cls+=' dim'}
-          else if(r===picks.length){inner='?';click=()=>pick(c)}
-          else inner=svgEl(LOCK);
-        }else if(end){
-          const bomb=end.bombs&&end.bombs[r]===c;
-          if(played||(end.won&&r<n)){if(picks[r]===c){cls+=' safe';inner='✓'}else if(bomb){cls+=' bomb';inner='💣'}else cls+=' dim'}
-          else if(lostRow){if(c===end.col){cls+=' boom';inner='💣'}else if(bomb){cls+=' bomb';inner='💣'}else cls+=' dim'}
-          else{if(bomb){cls+=' bomb';inner='💣'}else{cls+=' dim';inner=svgEl(LOCK)}}
+          else if(r===picks.length){inner=doorIc();click=()=>pick(c)}
+          else inner=lockIc();
+        }else if(end&&end.bombs){
+          const bomb=end.bombs[r]===c;
+          if(played||(end.won&&r<n)){if(picks[r]===c){cls+=' safe';inner='✓'}else if(bomb){cls+=' bomb';inner=guardIc()}else cls+=' dim'}
+          else if(lostRow){if(c===end.col){cls+=' boom';inner=guardIc()}else if(bomb){cls+=' bomb';inner=guardIc()}else cls+=' dim'}
+          else{if(bomb){cls+=' bomb';inner=guardIc()}else{cls+=' dim';inner=lockIc()}}
         }else{
-          if(r===0){inner='?';click=()=>toast('اول شرط ببند 👇',1)}else inner=svgEl(LOCK);
+          if(r===0){inner=doorIc();click=()=>toast('اول شرط ببند 👇',1)}else inner=lockIc();
         }
-        const b=h('button',{class:cls,onclick:click},inner);
-        if(!click)b.disabled=false;
-        tiles.push(b);
+        tiles.push(h('button',{class:cls,onclick:click},inner));
       }
       rows.push(h('div',{class:'tw-row'+(active?' act':'')},...tiles,h('div',{class:'tw-m'+(played?' done':'')},fm(M[r]))));
     }
@@ -3427,8 +3453,15 @@ function GamesScreen(){
     winB.textContent=num(game?game.payout:(end&&end.won?end.payout:0));
     if(game){
       if(game.picks.length){main.disabled=false;main.className='tw-main green';main.textContent='برداشت • '+num(game.payout)}
-      else{main.disabled=true;main.className='tw-main';main.textContent='یه خانه از طبقه اول انتخاب کن'}
+      else{main.disabled=true;main.className='tw-main';main.textContent='یه در از طبقه اول انتخاب کن'}
     }else{main.disabled=false;main.className='tw-main';main.textContent='ثبت شرط'}
+    cancelB.style.display=(game&&!game.picks.length)?'block':'none';
+    const src=game||end;
+    if(src&&src.commit){
+      const full=src.commit+(end&&end.salt?'\nرمز: '+end.bombs.join(',')+':'+end.salt:'');
+      commitB.textContent='🔐 کد صداقت: '+src.commit.slice(0,24)+'…'+(end&&end.salt?'  |  رمز: '+end.bombs.join(',')+':'+end.salt:'');
+      commitB.onclick=()=>copy(full);
+    }else{commitB.textContent='';commitB.onclick=null}
   }
   function banner(win,t){resBox.style.display='block';resBox.className='rk2-res tw-res '+(win?'win':'lose');resBox.textContent=t;clearTimeout(banner.t);banner.t=setTimeout(()=>{resBox.style.display='none'},7000)}
   async function pick(c){
@@ -3436,8 +3469,8 @@ function GamesScreen(){
     try{
       const r=await api('/api/game/tower/open',{col:c});lastOk=performance.now();
       balance.textContent=num(r.balance!=null?r.balance:st.balance);
-      if(r.lost){game=null;end=r;draw();banner(false,'💥 به بمب خوردی؛ شرط '+num(r.bet)+' سوخت.')}
-      else if(r.won){game=null;end=r;draw();banner(true,'🏆 همه‌ی طبقه‌ها رو رد کردی! '+fm(r.mult)+' • سود '+num(r.profit))}
+      if(r.lost){mode=r.mode||mode;game=null;end=r;draw();banner(false,'🛡 نگهبان پشت این در بود؛ شرط '+num(r.bet)+' سوخت.')}
+      else if(r.won){mode=r.mode||mode;game=null;end=r;draw();banner(true,'💎 به گنج رسیدی! '+fm(r.mult)+' • سود '+num(r.profit))}
       else{game=r;draw()}
     }catch(e){toast(e.message,1)}
     finally{busy=false}
@@ -3446,27 +3479,35 @@ function GamesScreen(){
     if(busy||!game)return;busy=true;main.disabled=true;
     try{
       const r=await api('/api/game/tower/cashout',{});lastOk=performance.now();
-      balance.textContent=num(r.balance);game=null;end=r;draw();banner(true,'✅ برداشت موفق '+fm(r.mult)+' • دریافتی '+num(r.payout)+' • سود '+num(r.profit));
+      balance.textContent=num(r.balance);mode=r.mode||mode;game=null;end=r;draw();banner(true,'✅ برداشت موفق '+fm(r.mult)+' • دریافتی '+num(r.payout)+' • سود '+num(r.profit));
     }catch(e){toast(e.message,1);main.disabled=false}
     finally{busy=false}
   }
+  cancelB.onclick=async()=>{
+    if(busy||!game||game.picks.length)return;busy=true;cancelB.disabled=true;
+    try{
+      const r=await api('/api/game/tower/cancel',{});lastOk=performance.now();
+      balance.textContent=num(r.balance);st.balance=r.balance;game=null;end=null;draw();toast('شرط برگشت ✅');
+    }catch(e){toast(e.message,1)}
+    finally{busy=false;cancelB.disabled=false}
+  };
   function openBet(){
     if(!st)return;
-    sheet('ثبت شرط',close=>h('div',{class:'rk2-sh'},betPicker(st,async bet=>{
+    sheet('ثبت شرط • '+((MD()[mode]||FALLBACK[mode]).fa),close=>h('div',{class:'rk2-sh'},betPicker(st,async bet=>{
       if(busy)return;busy=true;
       try{
-        const r=await api('/api/game/tower/start',{bet});lastOk=performance.now();
+        const r=await api('/api/game/tower/start',{bet,mode});lastOk=performance.now();
         balance.textContent=num(r.balance);st.balance=r.balance;game=r;end=null;resBox.style.display='none';close();draw();
       }catch(e){toast(e.message,1)}
       finally{busy=false}
-    },'🏗 شروع بازی')));
+    },'🏰 شروع بازی')));
   }
   main.onclick=()=>{if(game)cashout();else openBet()};
   try{
-    st=await api('/api/game/tower/state');lastOk=performance.now();balance.textContent=num(st.balance);
+    st=await api('/api/game/tower/state');lastOk=performance.now();balance.textContent=num(st.balance);EM=st.emoji||{};
     if(st.other==='crash'){toast('اول بازی موشک را تمام کن.',1);rkCleanup();crash();return}
     if(st.other==='mines'){toast('اول بازی مین را تمام کن.',1);rkCleanup();mines();return}
-    if(st.active)game=st;
+    if(st.active){game=st;mode=st.mode||'easy'}
     draw();
   }catch(e){toast(e.message,1);rkCleanup();home()}
  }
@@ -3725,6 +3766,26 @@ function LeaderboardScreen(){
  load();return root;
 }
 const lbCss=document.createElement('style');lbCss.textContent='.lb-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;direction:rtl;overscroll-behavior-x:contain;scrollbar-width:none;height:100%}.lb-track::-webkit-scrollbar{display:none}.lb-page{flex:0 0 100%;width:100%;padding:12px;overflow-y:auto;scroll-snap-align:start}.lb-hint{text-align:center;color:var(--hint);font-size:12px;padding:8px}.lb-podium-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:6px;padding:18px 0}.lb-winner{display:flex;flex-direction:column;align-items:center;justify-content:end;text-align:center;gap:6px;padding:9px 2px;border-radius:16px;background:var(--sec);min-width:0}.lb-winner.rank1{transform:translateY(-13px);min-height:158px;border:2px solid #f6cf55;background:linear-gradient(180deg,rgba(246,207,85,.20),var(--sec) 72%);box-shadow:0 8px 28px rgba(246,190,55,.18)}.lb-winner.rank2{min-height:132px;border:2px solid #c6d2e0;background:linear-gradient(180deg,rgba(198,210,224,.14),var(--sec) 75%)}.lb-winner.rank3{min-height:126px;border:2px solid #cd8d5b;background:linear-gradient(180deg,rgba(205,141,91,.14),var(--sec) 75%)}.lb-winner .av{border-radius:50%!important;border:3px solid #d6b34a}.lb-winner.rank1 .av{border-color:#f6cf55;box-shadow:0 0 18px rgba(246,207,85,.32)}.lb-winner.rank2 .av{border-color:#c6d2e0}.lb-winner.rank3 .av{border-color:#cd8d5b}.lb-winner b{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lb-winner small{font-size:11px;color:var(--hint)}.lb-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.lb-value{font-size:12px;white-space:nowrap}.lb-rank{width:24px;text-align:center}';document.head.append(lbCss);
+
+/* ───── خانه ───── */
+const MASCOT='data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" fill="#241a5a"/><path d="M20 26 L48 50 Q64 45 80 50 L108 26 L111 72 Q111 110 64 118 Q17 110 17 72 Z" fill="#f97316"/><path d="M26 36 L42 50 L28 62 Z M102 36 L86 50 L100 62 Z" fill="#fdba74"/><path d="M29 76 Q64 68 99 76 Q94 106 64 114 Q34 106 29 76 Z" fill="#fff7ed"/><circle cx="46" cy="70" r="5.5" fill="#1f2937"/><circle cx="82" cy="70" r="5.5" fill="#1f2937"/><circle cx="48" cy="68" r="1.8" fill="#fff"/><circle cx="84" cy="68" r="1.8" fill="#fff"/><ellipse cx="64" cy="92" rx="7" ry="5" fill="#1f2937"/></svg>');
+const openUserProfile=uid=>{if(window.IS_STAFF&&uid)openProfile(uid)};
+function HomeScreen(){
+ const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
+ const sub=h('small',{},'بازی کن، ارتقا بده و بالاتر برو 🚀');
+ const nameB=h('b',{},'خوش اومدی 👋');
+ const ico=p=>{const d=h('span',{});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';return d.firstChild};
+ const tile=(cls,k,label,p)=>h('button',{class:'hm-tile '+cls,onclick:()=>openTab(k)},ico(p),label);
+ box.replaceChildren(
+  h('div',{class:'hm-hero'},h('img',{alt:'',src:MASCOT}),h('div',{},nameB,sub)),
+  h('div',{class:'hm-grid'},
+   tile('a','games','بازی‌ها','<rect x="2.5" y="7" width="19" height="11" rx="5.5"/><path d="M8 10.5v4M6 12.5h4"/><circle cx="16" cy="11.5" r=".6"/><circle cx="18" cy="13.5" r=".6"/>'),
+   tile('b','store','فروشگاه','<path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>'),
+   tile('c','board','لیدربرد','<path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M12 14v4M8.5 20h7"/>'),
+   tile('d','myself','خودم','<circle cx="12" cy="8" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>')));
+ api('/api/myself').then(d=>{if(d&&d.name){nameB.textContent='سلام '+d.name+' 👋';if(d.pocket!=null)sub.textContent='موجودی جیب: '+num(d.pocket)+' تومان'}}).catch(()=>{});
+ root.append(box);return root;
+}
 
 /* ───── شروع ───── */
 const TABS={home:HomeScreen,games:GamesScreen,store:StoreScreen,board:LeaderboardScreen,myself:MyselfScreen,chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
@@ -6530,27 +6591,112 @@ async def _p_game_mines_cashout(b, user):
 
 
 
-# ───── برج (۷ طبقه × ۴ خانه، در هر طبقه یک بمب) ─────
-TOWER_MULTS = (1.26, 1.68, 2.25, 3.00, 4.00, 5.33, 7.11)
-TOWER_COLS = 4
+# ───── برج گنج (۸ طبقه؛ آسان = ۴ در، سخت = ۳ در؛ پشت یکی از درهای هر طبقه نگهبان است) ─────
+TOWER_FLOORS = 8
+TOWER_RTP = 0.95
+TOWER_MODES = {"easy": {"cols": 4, "fa": "آسان"}, "hard": {"cols": 3, "fa": "سخت"}}
+TOWER_COLS = 4                                                    # سازگاری با نسخه‌ی قبلی
+TOWER_MULTS = (1.26, 1.68, 2.25, 3.00, 4.00, 5.33, 7.11)          # فقط برای بازی‌های نیمه‌تمامِ نسخه‌ی قبلی
+
+
+def _tower_mode(m) -> str:
+    return "hard" if str(m or "").strip().lower() in ("hard", "h", "سخت") else "easy"
+
+
+def _tower_mults_for(mode: str) -> list:
+    c = TOWER_MODES[mode]["cols"]
+    return [math.floor(TOWER_RTP * (c / (c - 1)) ** k * 100 + 1e-9) / 100 for k in range(1, TOWER_FLOORS + 1)]
+
+
+TOWER_MULTS_BY_MODE = {m: _tower_mults_for(m) for m in TOWER_MODES}
+
+
+def _tower_cfg(st: dict):
+    mode = st.get("mode")
+    if mode in TOWER_MODES:
+        return mode, TOWER_MODES[mode]["cols"], TOWER_MULTS_BY_MODE[mode]
+    return "easy", TOWER_COLS, list(TOWER_MULTS)       # بازی قدیمی بدون حالت
+
+
+def _tower_commit(bombs, salt: str) -> str:
+    import hashlib
+    return hashlib.sha256(f"{','.join(str(b) for b in bombs)}:{salt}".encode()).hexdigest()
+
+
+# ایموجی‌های پرمیوم برج: نقش هر کدوم از روی ایموجی پایه‌ی خودِ استیکر تشخیص داده میشه.
+# اگه جایی اشتباه نشست، همین‌جا دستی بنویس: TOWER_EMOJI_OVERRIDE = {"door": "آیدی", "lock": "آیدی", ...}
+TOWER_EIDS = ["5994417719666024807", "6001098094618353299", "6001375025519663654", "5994634555384934359",
+              "5994347320857078339", "5994388054326910670", "5994478622302281933", "5994525506165284642"]
+TOWER_EMOJI_OVERRIDE: dict = {}
+_TOWER_FB = {"tower": "🏰", "coin": "🪙", "target": "🎯", "guard": "🛡", "gem": "💎", "lock": "🔒", "door": "🚪", "arrow": "⬅️"}
+_TOWER_BASE = {"🏰": "tower", "🏯": "tower", "🏛": "tower", "🗼": "tower", "🪙": "coin", "💰": "coin", "💵": "coin",
+               "🎯": "target", "🛡": "guard", "💂": "guard", "⚔": "guard", "💎": "gem", "💠": "gem", "✨": "gem",
+               "🔒": "lock", "🔐": "lock", "🔓": "lock", "🔑": "lock", "🗝": "lock", "🚪": "door",
+               "⬅": "arrow", "◀": "arrow", "👈": "arrow", "↩": "arrow", "🔙": "arrow", "👉": "arrow", "➡": "arrow"}
+_TOWER_EMOJI: dict = {}
+_TOWER_EMOJI_DONE = False
+_TOWER_EMOJI_TRY = 0.0
+
+
+async def _tower_emoji_ensure():
+    global _TOWER_EMOJI_DONE, _TOWER_EMOJI_TRY
+    if _TOWER_EMOJI_DONE or BOT_REF is None or time.time() - _TOWER_EMOJI_TRY < 300:
+        return
+    _TOWER_EMOJI_TRY = time.time()
+    try:
+        stickers = await _tg_call(BOT_REF.get_custom_emoji_stickers, TOWER_EIDS)
+        by_role: dict = {}
+        for stk in stickers or []:
+            base = (getattr(stk, "emoji", "") or "").replace("\ufe0f", "").replace("\u200d", "")[:1]
+            role = _TOWER_BASE.get(base)
+            cid = str(getattr(stk, "custom_emoji_id", "") or "")
+            log.info("tower emoji %s -> base %r role %s", cid, base, role)
+            if role and cid:
+                by_role.setdefault(role, []).append(cid)
+        found = {r: v[0] for r, v in by_role.items()}
+        if "lock" not in found and len(by_role.get("door", [])) >= 2:
+            found["lock"], found["door"] = by_role["door"][0], by_role["door"][1]
+            log.warning("tower emoji: two door emojis found, assigned by order (lock first)")
+        found.update({k: str(v) for k, v in TOWER_EMOJI_OVERRIDE.items() if k in _TOWER_FB})
+        _TOWER_EMOJI.clear()
+        _TOWER_EMOJI.update(found)
+        _TOWER_EMOJI_DONE = True
+    except Exception:
+        log.warning("tower emoji detection failed", exc_info=True)
+
+
+def _tw(role: str) -> str:
+    eid = _TOWER_EMOJI.get(role)
+    fb = _TOWER_FB[role]
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>' if eid else fb
 
 
 def _tower_view(st: dict, bet: int) -> dict:
+    mode, cols, mults = _tower_cfg(st)
     k = len(st["picks"])
-    m = TOWER_MULTS[k - 1] if k else 1.0
-    return {"rows": len(TOWER_MULTS), "cols": TOWER_COLS, "mults": list(TOWER_MULTS), "picks": st["picks"],
-            "bet": bet, "mult": m, "payout": int(bet * m + 1e-6)}
+    m = mults[k - 1] if k else 1.0
+    return {"mode": mode, "mode_fa": TOWER_MODES[mode]["fa"], "rows": len(mults), "cols": cols, "mults": list(mults),
+            "picks": st["picks"], "bet": bet, "mult": m, "payout": int(bet * m + 1e-6), "commit": st.get("commit")}
+
+
+def _tower_reveal(st: dict) -> dict:
+    return {"bombs": st["bombs"], "salt": st.get("salt"), "commit": st.get("commit")}
 
 
 async def _p_game_tower_start(b, user):
+    import secrets
     uid, _bal = await _mini_ctx(user)
     bet = _mini_bet(b)
+    mode = _tower_mode(b.get("mode"))
+    cols = TOWER_MODES[mode]["cols"]
     async with _mini_lock(uid):
         if await pool.fetchval("SELECT 1 FROM mini_games WHERE uid=$1", uid):
             raise _ApiError("اول بازی قبلیت رو تموم کن.")
         if await _take(uid, bet) is None:
             raise _ApiError("موجودی کافی نیست.")
-        st = {"bombs": [random.randrange(TOWER_COLS) for _ in TOWER_MULTS], "picks": []}
+        bombs = [secrets.randbelow(cols) for _ in range(TOWER_FLOORS)]
+        salt = secrets.token_hex(8)
+        st = {"mode": mode, "bombs": bombs, "picks": [], "salt": salt, "commit": _tower_commit(bombs, salt)}
         try:
             await pool.execute("INSERT INTO mini_games (uid, kind, bet, state, created_at) VALUES ($1,'tower',$2,$3,$4)",
                                uid, bet, json.dumps(st), time.time())
@@ -6562,8 +6708,11 @@ async def _p_game_tower_start(b, user):
 
 async def _g_game_tower_state(qs, user):
     uid, bal = await _mini_ctx(user)
+    await _tower_emoji_ensure()
     row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
-    base = {**_mini_base(bal), "rows": len(TOWER_MULTS), "cols": TOWER_COLS, "mults": list(TOWER_MULTS)}
+    base = {**_mini_base(bal), "rows": TOWER_FLOORS, "cols": TOWER_MODES["easy"]["cols"],
+            "mults": TOWER_MULTS_BY_MODE["easy"], "emoji": dict(_TOWER_EMOJI),
+            "modes": {m: {"cols": v["cols"], "fa": v["fa"], "mults": TOWER_MULTS_BY_MODE[m]} for m, v in TOWER_MODES.items()}}
     if not row or row["kind"] != "tower":
         return _j({**base, "active": False, "other": row["kind"] if row else None})
     return _j({**base, "active": True, **_tower_view(json.loads(row["state"]), int(row["bet"]))})
@@ -6572,24 +6721,26 @@ async def _g_game_tower_state(qs, user):
 async def _p_game_tower_open(b, user):
     uid, _bal = await _mini_ctx(user)
     col = _int(b.get("col"))
-    if col is None or not 0 <= col < TOWER_COLS:
-        raise _ApiError("خونه نامعتبره")
     async with _mini_lock(uid):
         row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
         if not row or row["kind"] != "tower":
             raise _ApiError("بازی فعالی نداری.")
         st, bet = json.loads(row["state"]), int(row["bet"])
+        mode, cols, mults = _tower_cfg(st)
+        if col is None or not 0 <= col < cols:
+            raise _ApiError("در نامعتبره")
         r = len(st["picks"])
         if st["bombs"][r] == col:
             await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
-            return _j({"lost": True, "row": r, "col": col, "picks": st["picks"], "bombs": st["bombs"], "bet": bet,
+            return _j({"lost": True, "row": r, "col": col, "picks": st["picks"], "bet": bet,
+                       "mode": mode, "cols": cols, "mults": list(mults), **_tower_reveal(st),
                        "balance": await _mini_balance(uid)})
         st["picks"].append(col)
         v = _tower_view(st, bet)
-        if len(st["picks"]) >= len(TOWER_MULTS):
+        if len(st["picks"]) >= len(mults):
             await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
             await _give(uid, v["payout"])
-            return _j({**v, "won": True, "auto": True, "bombs": st["bombs"], "profit": v["payout"] - bet,
+            return _j({**v, "won": True, "auto": True, **_tower_reveal(st), "profit": v["payout"] - bet,
                        "balance": await _mini_balance(uid)})
         await pool.execute("UPDATE mini_games SET state=$2 WHERE uid=$1", uid, json.dumps(st))
         return _j(v)
@@ -6607,69 +6758,135 @@ async def _p_game_tower_cashout(b, user):
         v = _tower_view(st, bet)
         await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
         await _give(uid, v["payout"])
-        return _j({**v, "won": True, "auto": False, "bombs": st["bombs"], "profit": v["payout"] - bet,
+        return _j({**v, "won": True, "auto": False, **_tower_reveal(st), "profit": v["payout"] - bet,
                    "balance": await _mini_balance(uid)})
+
+
+async def _p_game_tower_cancel(b, user):
+    """انصراف و برگشت شرط؛ فقط تا وقتی هنوز هیچ دری باز نشده."""
+    uid, _bal = await _mini_ctx(user)
+    async with _mini_lock(uid):
+        row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+        if not row or row["kind"] != "tower":
+            raise _ApiError("بازی فعالی نداری.")
+        st, bet = json.loads(row["state"]), int(row["bet"])
+        if st["picks"]:
+            raise _ApiError("بعد از باز کردن اولین در انصراف ممکن نیست؛ برداشت بزن.")
+        await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+        await _give(uid, bet)
+        return _j({"cancelled": True, "bet": bet, "balance": await _mini_balance(uid)})
 
 
 def _tower_result_data(result):
     return json.loads(result[2].decode("utf-8"))
 
 
-def _tower_bot_keyboard(uid: int, picks: list[int], can_cashout: bool = True):
-    floor = len(picks)
+def _tower_mode_code(mode: str) -> str:
+    return "h" if mode == "hard" else "e"
+
+
+def _tower_bot_keyboard(uid: int, data: dict):
+    picks = data.get("picks") or []
+    cols, floor = int(data.get("cols") or 4), len(picks)
     rows = []
-    if floor < len(TOWER_MULTS):
-        rows.append([btn(f"خانه {i+1}", "success", callback_data=f"cz:to:{uid}:{i}") for i in range(TOWER_COLS)])
+    if floor < int(data.get("rows") or TOWER_FLOORS):
+        door = _TOWER_EMOJI.get("door")
+        rows.append([btn(str(i + 1), "success", icon=door, callback_data=f"cz:to:{uid}:{i}") for i in range(cols - 1, -1, -1)])
     if floor:
-        rows.append([btn("💰 برداشت", "primary", callback_data=f"cz:tc:{uid}")])
-    rows.append([btn("🔙 بازگشت به کازینو", None, icon=EID_BACK, callback_data=f"cz:m:{uid}")])
+        rows.append([btn(f"💰 برداشت {int(data.get('payout', 0)):,}", "primary", callback_data=f"cz:tc:{uid}")])
+    else:
+        rows.append([btn("انصراف و برگشت شرط", "danger", callback_data=f"cz:tx:{uid}")])
     return InlineKeyboardMarkup(rows)
 
 
-def _tower_bot_text(data: dict, title: str = "🏗 برج‌ساز"):
+def _tower_bot_text(data: dict) -> str:
     picks = data.get("picks") or []
-    lines = [f"<b>{title}</b>", f"💰 شرط: <b>{int(data.get('bet', 0)):,}</b> تومان",
-             f"🏢 طبقه عبورکرده: <b>{len(picks)}/7</b>",
-             f"📈 ضریب فعلی: <b>×{float(data.get('mult', 1)):.2f}</b>",
-             f"💵 دریافتی فعلی: <b>{int(data.get('payout', 0)):,}</b> تومان"]
-    if picks:
-        lines.append("🧱 مسیر امن: " + "، ".join(f"طبقه {i+1}: خانه {c+1}" for i, c in enumerate(picks)))
-    if len(picks) < len(TOWER_MULTS):
-        lines.append(f"👇 یکی از ۴ خانه‌ی طبقه {len(picks)+1} رو انتخاب کن.")
+    mults = data.get("mults") or TOWER_MULTS_BY_MODE["easy"]
+    cols, bet, k, n = int(data.get("cols") or 4), int(data.get("bet", 0)), len(picks), len(mults)
+    chance = round((cols - 1) / cols * 100)
+    lines = [f"{_tw('tower')} <b>برج گنج · {data.get('mode_fa') or 'آسان'}</b>",
+             f"{_tw('coin')} شرط: <b>{bet:,}</b> تومان", ""]
+    lines += [f"{_tw('target')} یکی از <b>{cols}</b> در را انتخاب کن.",
+              f"{_tw('guard')} پشت یکی از آنها نگهبان است!"]
+    if k < n:
+        lines.append(f"{_tw('target')} شانس طبقه بعد: <b>{chance}٪</b>")
+    if k:
+        lines.append(f"{_tw('coin')} برداشت فعلی: <b>×{float(data.get('mult', 1)):.2f}</b> = <b>{int(data.get('payout', 0)):,}</b> تومان")
+    lines += ["", f"{_tw('gem')} گنج: <b>{int(bet * mults[-1] + 1e-6):,}</b> تومان", ""]
+    for r in range(n - 1, -1, -1):
+        prize = int(bet * mults[r] + 1e-6)
+        if r < k:
+            lines.append(" ".join(["✅"] * cols) + f"  {prize:,}")
+        elif r == k:
+            lines.append(" ".join([_tw("door")] * cols) + f"  {_tw('arrow')} {prize:,}")
+        else:
+            lines.append(" ".join([_tw("lock")] * cols) + f"  {prize:,}")
+    if data.get("commit"):
+        lines += ["", "🔐 کد صداقت (پیش از اولین در ثبت شد):", f"<code>{data['commit']}</code>"]
     return "\n".join(lines)
 
 
-async def _casino_tower_start(q, user, bet: int):
+def _tower_end_text(data: dict, head: str) -> str:
+    """نمای پایان بازی: همه‌ی نگهبان‌ها لو میرن + رمز برای راستی‌آزمایی کد صداقت."""
+    bombs = data.get("bombs") or []
+    cols, picks = int(data.get("cols") or 4), data.get("picks") or []
+    lines = [head, ""]
+    for r in range(len(bombs) - 1, -1, -1):
+        cells = []
+        for c in range(cols):
+            if bombs[r] == c:
+                cells.append(_tw("guard"))
+            elif r < len(picks) and picks[r] == c:
+                cells.append("✅")
+            else:
+                cells.append(_tw("door"))
+        lines.append(" ".join(cells))
+    if data.get("salt"):
+        lines += ["", "🔓 رمز بازی (برای تطبیق با کد صداقت):", f"<code>{','.join(str(b) for b in bombs)}:{data['salt']}</code>"]
+    return "\n".join(lines)
+
+
+def _tower_end_kb(uid: int, mode: str):
+    return InlineKeyboardMarkup([[btn("🔁 بازی دوباره", "success", callback_data=f"cz:a:{uid}:tower:{_tower_mode_code(mode)}")],
+                                 [btn("🔙 کازینو", None, icon=EID_BACK, callback_data=f"cz:m:{uid}")]])
+
+
+async def _casino_tower_start(q, user, bet: int, mode: str = "e"):
+    await _tower_emoji_ensure()
     ud = {"id": user.id, "first_name": user.first_name, "username": user.username}
-    data = _tower_result_data(await _p_game_tower_start({"bet": bet}, ud))
-    await edit_html(q, _tower_bot_text(data), _tower_bot_keyboard(user.id, data["picks"]))
+    data = _tower_result_data(await _p_game_tower_start({"bet": bet, "mode": mode}, ud))
+    await edit_html(q, _tower_bot_text(data), _tower_bot_keyboard(user.id, data))
 
 
 async def _casino_tower_open(q, user, col: int):
     ud = {"id": user.id, "first_name": user.first_name, "username": user.username}
     data = _tower_result_data(await _p_game_tower_open({"col": col}, ud))
     if data.get("lost"):
-        text = (f"<b>💥 برج فروریخت!</b>\nشرط <b>{int(data.get('bet',0)):,}</b> تومنی سوخت.\n"
-                f"در طبقه {int(data.get('row',0))+1} خانه‌ی بمب رو انتخاب کردی.")
-        kb = InlineKeyboardMarkup([[btn("🔁 بازی دوباره", "success", callback_data=f"cz:g:{user.id}:tower")],
-                                   [btn("🔙 کازینو", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")]])
+        head = (f"{_tw('guard')} <b>نگهبان پشت این در بود!</b>\n"
+                f"در طبقه {int(data.get('row', 0)) + 1} به نگهبان خوردی و شرط <b>{int(data.get('bet', 0)):,}</b> تومانی سوخت.")
+        text, kb = _tower_end_text(data, head), _tower_end_kb(user.id, data.get("mode"))
     elif data.get("won"):
-        text = (f"<b>🏆 هر ۷ طبقه رو رد کردی!</b>\nضریب: <b>×{float(data['mult']):.2f}</b>\n"
-                f"دریافتی: <b>{int(data['payout']):,}</b> تومان\nسود خالص: <b>{int(data['profit']):,}</b> تومان")
-        kb = InlineKeyboardMarkup([[btn("🔁 بازی دوباره", "success", callback_data=f"cz:g:{user.id}:tower")],
-                                   [btn("🔙 کازینو", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")]])
+        head = (f"{_tw('gem')} <b>به گنج رسیدی! همه‌ی طبقه‌ها رو رد کردی.</b>\nضریب: <b>×{float(data['mult']):.2f}</b>\n"
+                f"دریافتی: <b>{int(data['payout']):,}</b> تومان • سود خالص: <b>{int(data['profit']):,}</b> تومان")
+        text, kb = _tower_end_text(data, head), _tower_end_kb(user.id, data.get("mode"))
     else:
-        text, kb = _tower_bot_text(data), _tower_bot_keyboard(user.id, data["picks"])
+        text, kb = _tower_bot_text(data), _tower_bot_keyboard(user.id, data)
     await edit_html(q, text, kb)
 
 
 async def _casino_tower_cashout(q, user):
     ud = {"id": user.id, "first_name": user.first_name, "username": user.username}
     data = _tower_result_data(await _p_game_tower_cashout({}, ud))
-    text = (f"<b>💰 برداشت موفق از برج‌ساز!</b>\nضریب: <b>×{float(data['mult']):.2f}</b>\n"
-            f"دریافتی: <b>{int(data['payout']):,}</b> تومان\nسود خالص: <b>{int(data['profit']):,}</b> تومان")
-    kb = InlineKeyboardMarkup([[btn("🔁 بازی دوباره", "success", callback_data=f"cz:g:{user.id}:tower")],
-                               [btn("🔙 کازینو", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")]])
+    head = (f"{_tw('coin')} <b>برداشت موفق از برج گنج!</b>\nضریب: <b>×{float(data['mult']):.2f}</b>\n"
+            f"دریافتی: <b>{int(data['payout']):,}</b> تومان • سود خالص: <b>{int(data['profit']):,}</b> تومان")
+    await edit_html(q, _tower_end_text(data, head), _tower_end_kb(user.id, data.get("mode")))
+
+
+async def _casino_tower_cancel(q, user):
+    ud = {"id": user.id, "first_name": user.first_name, "username": user.username}
+    data = _tower_result_data(await _p_game_tower_cancel({}, ud))
+    text = f"{_tw('coin')} <b>انصراف دادی؛ شرط {int(data.get('bet', 0)):,} تومانی برگشت.</b>"
+    kb = InlineKeyboardMarkup([[btn("🔙 کازینو", None, icon=EID_BACK, callback_data=f"cz:m:{user.id}")]])
     await edit_html(q, text, kb)
 
 
@@ -6678,7 +6895,8 @@ _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cas
               "/api/game/mines/start": _p_game_mines_start, "/api/game/mines/open": _p_game_mines_open,
               "/api/game/mines/cashout": _p_game_mines_cashout,
               "/api/game/tower/start": _p_game_tower_start, "/api/game/tower/open": _p_game_tower_open,
-              "/api/game/tower/cashout": _p_game_tower_cashout}
+              "/api/game/tower/cashout": _p_game_tower_cashout,
+              "/api/game/tower/cancel": _p_game_tower_cancel}
 
 
 
@@ -12761,7 +12979,7 @@ SLOT_SYMS = [
     '<tg-emoji emoji-id="5357158630091139922">7️⃣</tg-emoji>',
 ]
 GAME_EMOJI = {"dice": "🎲", "slot": "🎰", "darts": "🎯", "bowl": "🎳", "hoop": "🏀"}  # ایموجی خودِ تلگرام برای sendDice
-GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "موشک کاغذی 🛩", "mines": f"مین {MINES_BOMB_CE}", "tower": "برج‌ساز 🏗", "poison": "سم یا خوراکی ☠️", "jingo": "جینگو بت",
+GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "موشک کاغذی 🛩", "mines": f"مین {MINES_BOMB_CE}", "tower": "برج گنج 🏰", "poison": "سم یا خوراکی ☠️", "jingo": "جینگو بت",
            "darts": "دارت 🎯", "bowl": "بولینگ 🎳", "hoop": "بسکتبال 🏀"}
 
 
@@ -12916,7 +13134,7 @@ def panel_main(uid: int):
     ], ([btn("🛩 موشک کاغذی", "success", callback_data=f"cz:g:{uid}:crash")] if crash_allowed(uid) else [])
        + [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")],
        [btn("جینگو بت", "success", icon=JINGO_BET_EID, callback_data=f"cz:g:{uid}:jingo")],
-       [btn("🏗 برج‌ساز", "success", callback_data=f"cz:g:{uid}:tower")],
+       [btn("🏰 برج گنج", "success", callback_data=f"cz:g:{uid}:tower")],
        [btn("🏅 بازی‌های ورزشی", "success", callback_data=f"sg:m:{uid}")]])
     return text, kb
 
@@ -12978,14 +13196,21 @@ def panel_game(uid: int, game: str):
     elif game == "mines":
         rules = (f"{MINES_BOMB_CE} مین — بازی تک‌نفره\n\n۲۵ خانه وجود داره و ۳ خانه بمبه. هر خانه امن ضریب رو بیشتر می‌کنه. با پیدا کردن بمب شرطت از دست میره؛ هر زمان خواستی برداشت کن تا شرط × ضریب به حسابت برگرده. ضریب نهایی در آخرین خانه امن (بیست‌ودوم) ۳٫۰۵× است.")
     elif game == "tower":
-        rules = ("🏗 برج‌ساز — بازی تک‌نفره\\n\\n۷ طبقه و در هر طبقه ۴ خانه وجود داره؛ در هر طبقه یک بمب پنهانه. با انتخاب خانه‌ی امن بالا می‌ری و ضریب‌ها دقیقاً مثل مینی‌اپ هستن: ×۱٫۲۶، ×۱٫۶۸، ×۲٫۲۵، ×۳، ×۴، ×۵٫۳۳ و ×۷٫۱۱. هر زمان بعد از عبور از طبقه اول می‌تونی برداشت کنی.")
+        e4, h4 = TOWER_MULTS_BY_MODE["easy"], TOWER_MULTS_BY_MODE["hard"]
+        rules = (f"{_tw('tower')} برج گنج — بازی تک‌نفره\n\n"
+                 f"۸ طبقه داره و پشت یکی از درهای هر طبقه نگهبان قایم شده. هر طبقه رو رد کنی ضریبت بالاتر می‌ره و هر وقت خواستی (بعد از طبقه اول) برداشت می‌کنی.\n\n"
+                 f"🟢 آسان: ۴ در در هر طبقه، ضریب‌های کمتر (تا ×{e4[-1]:g})\n"
+                 f"🔴 سخت: ۳ در در هر طبقه، ضریب‌های بیشتر (تا ×{h4[-1]:g})\n\n"
+                 f"{_tw('lock')} قبل از باز شدن اولین در، «کد صداقت» ثبت می‌شه و آخر بازی رمزش نشون داده می‌شه.")
     else:
         rules = ("🎰 اسلات\n\n۱ نفره: روی یکی از نمادها (7️⃣ 🔔 🍋 🍇) شرط می‌بندی و بعد خودت روی پیام ربات ریپلای می‌کنی و 🎰 می‌فرستی.\n"
                  "هر سه تا نماد تو یکی باشه ×۳ | دوتاش ×۱٫۷ | فقط یکیش ×۰٫۳ | هیچی نیاد می‌بازی.\n\n"
                  "۲ نفره: ربات اسلات می‌ندازه؛ نماد امتیاز داره (🔔 صفر | 🍇 ۱۰ | 🍋 ۱۵ | 7️⃣ ۲۱) و هر کی امتیاز بیشتر بیاره کل پول رو می‌بره.")
     kb = InlineKeyboardMarkup([
         ([btn("🎲 شروع بت", "success", callback_data=f"cz:a:{uid}:jingo:1")] if game == "jingo"
-         else [btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1")] if game in ("mines", "crash", "tower")
+         else [btn("🟢 آسان · ۴ در", "success", callback_data=f"cz:a:{uid}:tower:e"),
+               btn("🔴 سخت · ۳ در", "danger", callback_data=f"cz:a:{uid}:tower:h")] if game == "tower"
+         else [btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1")] if game in ("mines", "crash")
          else [btn("👥 ۲ نفره", "success", callback_data=f"cz:a:{uid}:poison:2")] if game == "poison"
          else [btn("👤 ۱ نفره", "primary", callback_data=f"cz:a:{uid}:{game}:1"),
                btn("👥 ۲ نفره", "success", callback_data=f"cz:a:{uid}:{game}:2")]),
@@ -12995,8 +13220,8 @@ def panel_game(uid: int, game: str):
 
 
 def panel_amounts(uid: int, game: str, mode: str):
-    who = "۱ نفره" if mode == "1" else "۲ نفره"
-    if mode == "1":
+    who = ("حالت " + ("سخت" if mode == "h" else "آسان")) if game == "tower" else ("۱ نفره" if mode == "1" else "۲ نفره")
+    if mode == "1" or game == "tower":
         pre = ("pj" if game == "jingo" else "n" if game == "dice" else
                "pm" if game == "mines" else "pc" if game == "crash" else
                "tw" if game == "tower" else "ps")
@@ -13006,7 +13231,7 @@ def panel_amounts(uid: int, game: str, mode: str):
     for amt in BET_CHOICES:
         if game == "tower" and amt < MINI_MIN_BET:
             continue
-        row.append(btn(_fa_bet(amt), "primary", callback_data=f"cz:{pre}:{uid}:{amt}"))
+        row.append(btn(_fa_bet(amt), "primary", callback_data=f"cz:{pre}:{uid}:{amt}" + (f":{mode}" if game == "tower" else "")))
         if len(row) == 3:
             rows.append(row); row = []
     if row:
@@ -13987,6 +14212,8 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await casino_main_replace(q, uid)
     elif act == "g":
         await q.answer()
+        if parts[3] == "tower":
+            await _tower_emoji_ensure()
         text, kb = panel_game(uid, parts[3])
         await edit_html(q, text, kb)
     elif act == "a":
@@ -13995,7 +14222,7 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_html(q, text, kb)
     elif act == "tw":
         try:
-            await _casino_tower_start(q, user, int(parts[3]))
+            await _casino_tower_start(q, user, int(parts[3]), parts[4] if len(parts) > 4 else "e")
             await q.answer()
         except Exception as e:
             await q.answer(str(e)[:180], show_alert=True)
@@ -14008,6 +14235,12 @@ async def casino_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif act == "tc":
         try:
             await _casino_tower_cashout(q, user)
+            await q.answer()
+        except Exception as e:
+            await q.answer(str(e)[:180], show_alert=True)
+    elif act == "tx":
+        try:
+            await _casino_tower_cancel(q, user)
             await q.answer()
         except Exception as e:
             await q.answer(str(e)[:180], show_alert=True)
@@ -14555,9 +14788,10 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
             try:
                 fake_q = None
                 ud = {"id": user.id, "first_name": user.first_name, "username": user.username}
-                data = _tower_result_data(await _p_game_tower_start({"bet": amt}, ud))
+                await _tower_emoji_ensure()
+                data = _tower_result_data(await _p_game_tower_start({"bet": amt, "mode": custom_mode}, ud))
                 await send_html(bot, chat_id, _tower_bot_text(data),
-                                reply_markup=_tower_bot_keyboard(user.id, data["picks"]),
+                                reply_markup=_tower_bot_keyboard(user.id, data),
                                 reply_parameters=rp)
             except Exception as e:
                 await msg.reply_text(BP(str(e)), parse_mode="HTML")
