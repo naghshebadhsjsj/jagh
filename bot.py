@@ -1118,6 +1118,68 @@ textarea.inp{min-height:130px;resize:vertical}
 .st-note{background:var(--sec);border-radius:12px;padding:10px 12px;margin-top:10px;font-size:13.5px;line-height:1.9}
 .st-row{display:flex;gap:8px;margin-top:8px}.st-row button{flex:1}
 .st-opt{flex:1;border:2px solid var(--line);border-radius:12px;padding:9px 6px;background:none;font-weight:700;cursor:pointer;color:var(--fg)}.st-opt.on{border-color:#7c5cff;background:rgba(124,92,255,.12)}
+
+/* ───── موشک (نمای جدید) ───── */
+.rk2{direction:ltr;margin:-14px -14px -90px;padding:12px 12px 110px;min-height:100%;background:#060d22;color:#fff;font-family:inherit}
+.rk2 button{font-family:inherit}
+.rk2-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.rk2-back{display:flex;align-items:center;gap:8px;border:0;background:#111a33;color:#fff;border-radius:22px;padding:0 16px;height:44px;font-weight:800;font-size:15px;cursor:pointer}
+.rk2-title{display:flex;align-items:center;gap:8px;font-weight:800;font-size:19px}
+.rk2-title i{width:30px;height:30px;border-radius:50%;background:#0c1328;display:flex;align-items:center;justify-content:center}
+.rk2-title svg{width:17px;height:17px;color:#fff}
+.rk2-sp{width:92px}
+.rk2-bar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.rk2-pill{height:44px;min-width:44px;border:0;border-radius:15px;background:#111a33;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 12px;cursor:pointer}
+.rk2-pill svg{width:22px;height:22px}
+.rk2-dot{width:11px;height:11px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e99}.rk2-dot.bad{background:#ef4444;box-shadow:0 0 8px #ef444499}
+.rk2-grow{flex:1}
+.rk2-bal{height:44px;border-radius:22px;background:#111a33;display:flex;align-items:center;gap:6px;padding:0 5px 0 14px;font-weight:800;font-size:18px;max-width:46%}
+.rk2-bal b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rk2-bal svg{width:22px;height:22px;flex:none}
+.rk2-plus{width:34px;height:34px;border:0;border-radius:50%;background:#2a344f;color:#fff;font-size:22px;line-height:1;flex:none;cursor:pointer}
+.rk2-me{width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none;background:#111a33}
+.rk2-me>*{width:100%!important;height:100%!important;border-radius:50%}
+.rk2-chips{display:flex;gap:9px;overflow-x:auto;scrollbar-width:none;padding:2px 0 4px;margin-bottom:6px}.rk2-chips::-webkit-scrollbar{display:none}
+.rk2-chip{flex:0 0 auto;height:40px;min-width:62px;padding:0 17px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;background:#1a2340;color:#8591ad}
+.rk2-chip.hi{background:#1d4ed8;color:#fff}.rk2-chip.top{background:#5b2fd6;color:#fff}
+.rk2-chip.first{background:#fff;color:#0b1220;min-width:112px}.rk2-chip.first.lose{color:#e11d48}.rk2-chip.first.win{color:#16a34a}
+.rk2-stage{position:relative;height:350px;overflow:hidden;margin:0 -12px 10px}
+.rk2-p{position:absolute;top:0;left:var(--x);width:var(--s);height:var(--s);background:#fff;opacity:.85;animation:rk2fall var(--d) linear infinite;animation-delay:var(--dl)}
+.rk2-stage.cd .rk2-p{animation-duration:calc(var(--d)*3);opacity:.45}
+.rk2-stage.fly .rk2-p{animation-duration:calc(var(--d)*.28)}
+@keyframes rk2fall{from{transform:translateY(-20px)}to{transform:translateY(380px)}}
+.rk2-ship{position:absolute;left:50%;top:50%;width:200px;height:215px;margin:-108px 0 0 -100px;display:none;filter:drop-shadow(0 0 26px rgba(70,200,255,.45))}
+.rk2-stage.fly .rk2-ship,.rk2-stage.boom .rk2-ship{display:block}
+.rk2-stage.fly .rk2-ship{animation:rk2bob 1.7s ease-in-out infinite}
+.rk2-stage.fly .rk2-vent{animation:rk2vent .16s linear infinite alternate}
+@keyframes rk2bob{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-12px) rotate(2deg)}}
+@keyframes rk2vent{from{opacity:.75}to{opacity:1}}
+.rk2-stage.boom .rk2-ship{animation:rk2boom .75s ease-in forwards}
+@keyframes rk2boom{0%{transform:scale(1);opacity:1}30%{transform:scale(1.25) rotate(8deg);opacity:1;filter:drop-shadow(0 0 40px #ff9a3c)}100%{transform:scale(.2) rotate(40deg);opacity:0}}
+.rk2-ring{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px;border-radius:50%;border:4px solid #ffb25a;opacity:0}
+.rk2-stage.boom .rk2-ring{animation:rk2ring .8s ease-out}
+@keyframes rk2ring{from{transform:scale(1);opacity:1}to{transform:scale(11);opacity:0}}
+.rk2-cd{position:absolute;left:0;right:0;top:50%;transform:translateY(-52%);text-align:center;font-size:130px;line-height:1;font-weight:900;color:#e5e7eb;display:none}
+.rk2-stage.cd .rk2-cd{display:block}
+.rk2-cd.pop{animation:rk2pop .35s}
+@keyframes rk2pop{from{transform:translateY(-52%) scale(1.25);opacity:.4}}
+.rk2-ct{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;display:none}
+.rk2-stage.boom .rk2-ct{display:block;animation:rk2in .5s .5s both}
+@keyframes rk2in{from{opacity:0;transform:translateY(-50%) scale(.7)}}
+.rk2-ct b{display:block;font-size:64px;font-weight:900;color:#ff5a6e;text-shadow:0 0 28px #ef444488}.rk2-ct span{color:#aab4cc;font-size:15px}
+.rk2-panel{background:#141f3d;border-radius:26px;padding:14px}
+.rk2-main{width:100%;height:56px;border:0;border-radius:22px;background:#2f6bff;color:#fff;font-weight:800;font-size:19px;cursor:pointer}
+.rk2-main.green{background:#16a34a}.rk2-main:disabled{background:#233159;color:#8b97b6}
+.rk2-res{border-radius:16px;padding:10px 12px;margin-bottom:10px;text-align:center;font-weight:800;font-size:14.5px;direction:rtl}
+.rk2-res.win{background:#14532d99;color:#86efac}.rk2-res.lose{background:#7f1d1d99;color:#fecaca}
+.rk2-pl{direction:rtl;color:#8591ad;font-weight:800;font-size:17px;margin:14px 4px 6px}
+.rk2-row{display:flex;align-items:center;gap:12px;padding:8px 2px}
+.rk2-av{width:48px;height:48px;border-radius:50%;overflow:hidden;flex:none;background:#223055}.rk2-av>*{width:100%!important;height:100%!important;border-radius:50%}
+.rk2-nm{flex:1;min-width:0}.rk2-nm b{display:block;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rk2-nm span{font-size:15px;font-weight:700;color:#8591ad}
+.rk2-nm span.won{color:#4ade80}.rk2-nm span.lost{color:#ff6b7d}
+.rk2-am{display:flex;align-items:center;gap:6px;font-weight:800;font-size:17px;direction:ltr}.rk2-am svg{width:20px;height:20px}
+.rk2-empty{direction:rtl;text-align:center;color:#8591ad;padding:12px;font-size:14px}
+.rk2-sh{background:#0f1830;color:#fff;border-radius:18px;padding:14px;direction:rtl;line-height:1.9;font-size:14px}
 </style></head><body>
 <div id="app">
   <div id="views"></div>
@@ -3107,135 +3169,171 @@ function GamesScreen(){
   refresh();return box;
  }
  async function crash(){
-  let st,active=null,busy=false,stopped=false,timer=null,poll=null,watchPoll=null,raf=null,watchRound=null;
-  /* ساعت گوشی ممکنه با سرور فرق داشته باشه؛ اختلاف رو از جواب سرور حساب می‌کنیم تا ضریب جلوتر یا عقب‌تر نره */
+  const STAR='<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+  const SHIP='<svg viewBox="0 0 220 240"><defs><linearGradient id="rkwL" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f9fd"/><stop offset="1" stop-color="#a3b8cd"/></linearGradient><linearGradient id="rkwR" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9d8e7"/><stop offset="1" stop-color="#6a86a4"/></linearGradient><linearGradient id="rkvn" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#34e3c4"/><stop offset="1" stop-color="#0d9aa8"/></linearGradient><path id="rkst" d="M0-9l2.6 5.6 6.1.7-4.5 4.2 1.2 6L0 4.4l-5.4 3.1 1.2-6L-8.7-2.7l6.1-.7z"/></defs><ellipse cx="112" cy="136" rx="100" ry="92" fill="rgba(60,205,235,.14)"/><polygon points="26,150 152,26 120,158" fill="url(#rkwL)"/><polygon points="152,26 196,152 120,158" fill="url(#rkwR)"/><polygon points="120,158 152,26 138,168" fill="#566f8b"/><polyline points="60,118 108,70 126,150" fill="none" stroke="#ffffff" stroke-opacity=".7" stroke-width="2"/><g class="rk2-vent"><g transform="rotate(-38 70 176)"><rect x="34" y="162" width="64" height="26" rx="8" fill="url(#rkvn)"/><g stroke="#0a6e7a" stroke-width="3" opacity=".75"><path d="M44 164v22M54 164v22M64 164v22M74 164v22M84 164v22"/></g></g><g transform="rotate(-38 150 190)"><rect x="112" y="178" width="66" height="26" rx="8" fill="url(#rkvn)"/><g stroke="#0a6e7a" stroke-width="3" opacity=".75"><path d="M122 180v22M132 180v22M142 180v22M152 180v22M162 180v22"/></g></g></g><use href="#rkst" x="72" y="128" fill="#ffd84a" transform="scale(1.5)" transform-origin="72 128"/><use href="#rkst" x="150" y="64" fill="#ffd84a"/><use href="#rkst" x="92" y="196" fill="#ffd84a" transform="scale(1.6)" transform-origin="92 196"/><use href="#rkst" x="40" y="44" fill="#ffd84a" opacity=".5"/></svg>';
+  const WIFI='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.2" r="1.2" fill="#fff"/></svg>';
+  const SHIELD='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.6-3.2 7.8-8 9.5C7.2 19.8 4 16.600 4 12V6z"/></svg>';
+  const GEAR='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.700 1.700 0 0 0 .3-1.800 1.700 1.700 0 0 0-1.500-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.500-1.100 1.700 1.700 0 0 0-.3-1.800l-.1-.1a2 2 0 1 1 2.800-2.800l.1.1a1.700 1.700 0 0 0 1.800.3h0a1.700 1.700 0 0 0 1-1.500V3a2 2 0 1 1 4 0v.1a1.700 1.700 0 0 0 1 1.500h0a1.700 1.700 0 0 0 1.800-.3l.1-.1a2 2 0 1 1 2.800 2.800l-.1.100a1.700 1.700 0 0 0-.3 1.800v0a1.700 1.700 0 0 0 1.500 1H21a2 2 0 1 1 0 4h-.1a1.700 1.700 0 0 0-1.500 1z"/></svg>';
+  let st=null,stopped=false,busy=false,poll=null,tk=null,view=null,players=[],playersNext=[],stageS='',curM=1,lastCd=-1,me={id:0,name:''};
   let skew=0,lastOk=performance.now();
   const sNow=()=>Date.now()/1000+skew;
   async function apiS(path,body){const t0=Date.now()/1000;const r=await api(path,body);const t1=Date.now()/1000;if(r&&r.now)skew=Number(r.now)-(t0+t1)/2;lastOk=performance.now();return r}
-  function endUnknown(r){
-    /* سرور می‌گه بازیِ فعالی نداری ولی نتیجه‌اش به ما نرسیده؛ شمارنده نباید بی‌نهایت بالا بره */
-    if(!active)return;
-    clearInterval(timer);clearInterval(poll);active=null;
-    if(r&&r.balance!=null)balance.textContent=num(r.balance);
-    if(r&&r.hist)drawHist(r.hist);
-    mult.className='rk-mult lose';
-    if(r&&r.watch_phase==='crashed')mult.textContent=fx(r.mult);
-    status.textContent='⏹ این دور تموم شد؛ نتیجه‌اش توی موجودی ثبت شده.';
-    panel.replaceChildren(h('div',{class:'rk-hint'},'نتیجه‌ی این دور قبلاً ثبت شده است.'),
-      h('button',{class:'rk-main',onclick:()=>{mult.className='rk-mult cd';scene.reset();betPhase()}},'🔄 بازی دوباره'));
-    watchRounds();
-  }
-  const cv=h('canvas',{class:'rk-cv'}),scene=rocketScene(cv),status=h('div',{class:'rk-tgt'},'آماده‌ی پرواز…'),hist=h('div',{class:'rk-hist'});
-  const balance=h('b',{},'…'),mult=h('div',{class:'rk-mult cd'},'x1.00'),panel=h('div',{class:'rk-panel'});
-  const cash=h('button',{class:'rk-main green',onclick:cashout,disabled:true},'برداشت جایزه');
-  box.replaceChildren(h('div',{class:'rk-wrap'},topBar('💥 انفجار',balance),hist,h('div',{class:'rk-stage'},cv,mult,status),panel));
-  function drawHist(list){
-    hist.replaceChildren(h('span',{class:'rk-hl'},'سوابق'),...((list&&list.length)?list.map(v=>h('div',{class:'rk-chip '+(v>=3?'hi':'lo')},fx(v))):[h('span',{class:'rk-hl'},'هنوز پروازی ثبت نشده')]));
-  }
-  function clean(){
-    stopped=true;clearInterval(timer);clearInterval(poll);clearInterval(watchPoll);cancelAnimationFrame(raf);scene.stop();
-  }
+  const svgEl=(s,cls)=>{const d=h('span',{class:cls||''});d.innerHTML=s;return d.firstChild};
+  const dot=h('i',{class:'rk2-dot'});
+  const balance=h('b',{},'…');
+  const meBox=h('div',{class:'rk2-me'});
+  const first=h('div',{class:'rk2-chip first'},'در انتظار'),chips=h('div',{class:'rk2-chips'},first);
+  const stage=h('div',{class:'rk2-stage cd'});
+  for(let i=0;i<34;i++)stage.append(h('i',{class:'rk2-p',style:'--x:'+(Math.random()*100).toFixed(1)+'%;--s:'+(3+Math.random()*5).toFixed(1)+'px;--d:'+(5+Math.random()*7).toFixed(1)+'s;--dl:-'+(Math.random()*10).toFixed(1)+'s'}));
+  const ship=h('div',{class:'rk2-ship'});ship.innerHTML=SHIP;
+  const ring=h('div',{class:'rk2-ring'}),cd=h('div',{class:'rk2-cd'},'3');
+  const ctB=h('b',{},'x1.00'),ct=h('div',{class:'rk2-ct'},ctB,h('span',{},'موشک منفجر شد'));
+  stage.append(ship,ring,cd,ct);
+  const main=h('button',{class:'rk2-main'},'ثبت شرط');
+  const resBox=h('div',{class:'rk2-res',style:'display:none'});
+  const plabel=h('div',{class:'rk2-pl'},'بازیکنان (۰)'),plist=h('div',{}),empty=h('div',{class:'rk2-empty'},'هنوز کسی توی این پرواز شرط نبسته');
+  plist.append(empty);
+  const gearB=h('button',{class:'rk2-pill',onclick:openSettings});gearB.append(svgEl(GEAR));
+  const shieldB=h('button',{class:'rk2-pill',onclick:openRules});shieldB.append(svgEl(SHIELD));
+  const wifiP=h('button',{class:'rk2-pill',onclick:()=>toast(performance.now()-lastOk<2500?'اتصال برقراره ✅':'اتصال ضعیفه؛ در حال تلاش مجدد…',performance.now()-lastOk>=2500)},dot);wifiP.append(svgEl(WIFI));
+  const plus=h('button',{class:'rk2-plus',onclick:()=>{leave();openTab('store')}},'+');
+  const balP=h('div',{class:'rk2-bal'},balance,svgEl(STAR),plus);
+  const back=h('button',{class:'rk2-back',onclick:leave},'→ بازگشت');
+  const tI=h('i',{});tI.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c3 2.500 4.500 6 4.500 9.500L19 15l-3 1v3h-8v-3l-3-1 2.500-3.500C7.500 8 9 4.500 12 2z"/><circle cx="12" cy="10" r="1.800"/></svg>';
+  box.replaceChildren(h('div',{class:'rk2'},
+   h('div',{class:'rk2-top'},back,h('div',{class:'rk2-title'},tI,'موشک'),h('span',{class:'rk2-sp'})),
+   h('div',{class:'rk2-bar'},wifiP,shieldB,gearB,h('span',{class:'rk2-grow'}),balP,meBox),
+   chips,stage,
+   h('div',{class:'rk2-panel'},resBox,main,plabel,plist)));
+  api('/api/social/me').then(m=>{me={id:m.id,name:m.name};meBox.replaceChildren(avatar('user',m.id,m.name,44))}).catch(()=>{});
+  function clean(){stopped=true;clearInterval(poll);clearInterval(tk)}
   rkCleanup=clean;
-  function watchRounds(){
-    clearInterval(watchPoll);
-    const pollWatch=async()=>{
-      if(stopped||active||busy)return;
-      try{
-        const r=await apiS('/api/game/crash/state');
-        if(r.hist)drawHist(r.hist);
-        if(r.active){active=r;scene.reset();scene.setRate(r.rate||.12);run();return}
-        if(r.watch_round!==watchRound){watchRound=r.watch_round;scene.reset();mult.className='rk-mult cd'}
-        const now=sNow(),delay=Math.max(0,(r.t0||now)-now);
-        if(r.watch_phase==='waiting'){
-          mult.textContent='x1.00';status.textContent='🚀 پرواز خودکار بعدی تا '+num(delay.toFixed(1))+' ثانیه دیگر';
-          scene.reset();
-        }else if(r.watch_phase==='flying'){
-          const el=Math.max(0,now-r.t0),m=Math.max(1,Number(r.mult)||1);
-          scene.setRate(r.rate||.12);scene.setEl(el);scene.go();mult.textContent=fx(m);status.textContent='🚀 موشک در حال پرواز است؛ شرط بستن اختیاری است.';
-        }else if(r.watch_phase==='crashed'){
-          scene.boom(Math.log(Math.max(1,Number(r.mult)||1))/(r.rate||.12),Number(r.mult)||1);mult.textContent=fx(r.mult);mult.className='rk-mult lose';{const nd=Math.max(0,(r.next_t0||now)-now);status.textContent='💥 موشک منفجر شد؛ پرواز بعدی تا '+num(nd.toFixed(1))+' ثانیه دیگر';}
-        }
-      }catch(e){}
-    };
-    pollWatch();watchPoll=setInterval(pollWatch,220);
+  const lsGet=k=>{try{return localStorage.getItem(k)||''}catch(e){return ''}};
+  const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+  function drawHist(list){
+   chips.replaceChildren(first,...(list||[]).map(v=>h('div',{class:'rk2-chip'+(v>=10?' top':v>=2?' hi':'')},fx(v))));
   }
-  function betPhase(){
-    active=null;cash.disabled=true;mult.textContent='x1.00';status.textContent='موشک هر ۱۰ ثانیه خودکار پرواز می‌کند؛ برای شرکت شرط ببند یا فقط پرواز را تماشا کن.';
-    watchRounds();
-    const target=h('input',{class:'rk-inp',type:'number',min:'1.1',max:'100',step:'0.1',value:'',placeholder:'اختیاری؛ خالی = برداشت دستی',inputmode:'decimal'});
-    panel.replaceChildren(h('div',{class:'rk-lbl'},'💥 ضریب برداشت خودکار (اختیاری)'),target,
-      h('div',{class:'rk-hint'},'ضریب را وارد کنی برداشت خودکار می‌شود؛ اگر خالی بگذاری می‌توانی دستی برداشت کنی. اگر موشک زودتر منفجر شود، شرط از دست می‌رود.'),
-      betPicker(st,async bet=>{
-        if(busy)return;busy=true;
-        try{
-          const rawTarget=String(target.value||'').trim();const tgt=rawTarget?Number(rawTarget):null;if(rawTarget&&(!Number.isFinite(tgt)||tgt<1.1||tgt>100)){toast('ضریب هدف باید بین ۱٫۱ تا ۱۰۰ باشد یا خالی بماند.',1);return}
-          const r=await apiS('/api/game/crash/start',{bet,target:tgt});
-          clearInterval(watchPoll);balance.textContent=num(r.balance);active=r;scene.reset();scene.setRate(r.rate||.12);
-          status.textContent='شمارش معکوس شروع شد…';cash.disabled=true;run();
-        }catch(e){toast(e.message,1)}
-        finally{busy=false}
-      },'🚀 شروع انفجار'));
+  function setStage(s){
+   if(stageS===s)return;stageS=s;
+   stage.classList.remove('cd','fly','boom');void stage.offsetWidth;stage.classList.add(s);
   }
-  function run(){
-    clearInterval(timer);clearInterval(poll);
-    const tick=()=>{
-      if(stopped||!active)return;
-      const now=sNow(),delay=Math.max(0,active.t0-now);
-      if(delay>0){status.textContent='⏳ شروع پرواز تا '+num(delay.toFixed(1))+' ثانیه';mult.textContent='آماده…';return}
-       if(performance.now()-lastOk>2500){status.textContent='⚠️ اتصال ضعیفه؛ ضریب تا برگشتن اتصال ثابت می‌مونه…';return}
-      const el=Math.max(0,now-active.t0),m=Math.exp((active.rate||.12)*el);
-      scene.setRate(active.rate||.12);scene.setEl(el);scene.go();
-      mult.textContent=fx(m);status.textContent='🚀 موشک در حال اوج‌گیری است!';
-      cash.disabled=busy;
-    };
-    timer=setInterval(tick,60);tick();
-    poll=setInterval(async()=>{
-      if(stopped||busy||!active)return;
+  function openRules(){sheet('قوانین موشک',()=>h('div',{class:'rk2-sh'},'• هر ۱۰ ثانیه یک پرواز مشترک شروع می‌شه و همه‌ی شرط‌بندها توی همون پرواز هستن.\n• با شروع پرواز ضریب بالا می‌ره؛ هر لحظه بزنی «برداشت»، شرطت × ضریب همون لحظه به حسابت میاد.\n• اگه ضریب هدف گذاشته باشی، به همون ضریب خودکار برداشت می‌شه.\n• اگه موشک قبل از برداشتت منفجر بشه، شرط از دست می‌ره.'))}
+  function openSettings(){sheet('تنظیمات',close=>{
+   const inp=h('input',{class:'rk-inp',type:'number',min:'1.1',max:'100',step:'0.1',inputmode:'decimal',placeholder:'خالی = برداشت دستی',value:lsGet('rk_target')});
+   const sv=h('button',{class:'rk-main',onclick:()=>{const v=String(inp.value||'').trim();if(v&&(!(Number(v)>=1.1)||Number(v)>100))return toast('ضریب باید بین ۱٫۱ تا ۱۰۰ باشه.',1);lsSet('rk_target',v);toast('ذخیره شد ✅');close()}},'ذخیره');
+   return h('div',{class:'rk2-sh'},h('div',{style:'font-weight:800;margin-bottom:6px'},'ضریب برداشت خودکار پیش‌فرض'),inp,sv)})}
+  function openBet(){
+   if(!st)return;
+   sheet('ثبت شرط',close=>{
+    const target=h('input',{class:'rk-inp sm',type:'number',min:'1.1',max:'100',step:'0.1',value:lsGet('rk_target'),placeholder:'ضریب برداشت خودکار (اختیاری)',inputmode:'decimal'});
+    return h('div',{class:'rk2-sh'},
+     target,h('div',{class:'rk-hint'},'اگه ضریب بذاری خودکار برداشت می‌شه؛ خالی باشه خودت دستی برداشت می‌کنی.'),
+     betPicker(st,async bet=>{
+      if(busy)return;busy=true;
       try{
-        const r=await apiS('/api/game/crash/state');
-        if(r.hist)drawHist(r.hist);
-        if(r.done){finish(r);return}
-        if(r.active){balance.textContent=num(r.balance);active={...active,t0:r.t0,rate:r.rate,bet:r.bet};}
-        else{endUnknown(r);return}
-      }catch(e){/* خطای گذرای شبکه؛ تلاش بعدی انجام می‌شود */}
-    },220);
-    panel.replaceChildren(h('div',{class:'rk-lbl'},'شرط: '+num(active.bet)+' تومان'),
-      cash,h('div',{class:'rk-hint'},'هر لحظه می‌توانی برداشت کنی؛ منتظر نمان تا ضریب بیش از حد بالا برود.'));
+       const raw=String(target.value||'').trim();const tgt=raw?Number(raw):null;
+       if(raw&&(!Number.isFinite(tgt)||tgt<1.1||tgt>100)){toast('ضریب هدف باید بین ۱٫۱ تا ۱۰۰ باشه یا خالی بمونه.',1);return}
+       const r=await apiS('/api/game/crash/start',{bet,target:tgt});
+       balance.textContent=num(r.balance);resBox.style.display='none';
+       view={mode:'mine',phase:'run',t0:r.t0,rate:r.rate||.12,bet:r.bet,target:r.target};
+       close();pollOnce();
+      }catch(e){toast(e.message,1)}
+      finally{busy=false}
+     },'🚀 تایید شرط'));
+   });
   }
   async function cashout(){
-    if(!active||busy)return;busy=true;cash.disabled=true;
-    try{const r=await api('/api/game/crash/cashout',{});finish(r)}
-    catch(e){toast(e.message,1);cash.disabled=false}
-    finally{busy=false}
+   if(busy||!view||view.mode!=='mine')return;busy=true;main.disabled=true;
+   try{const r=await api('/api/game/crash/cashout',{});onFinish(r)}
+   catch(e){toast(e.message,1)}
+   finally{busy=false}
   }
-  function finish(r){
-    if(!active)return;
-    clearInterval(timer);clearInterval(poll);active=null;balance.textContent=num(r.balance);
-    drawHist(r.hist||[]);
-    if(r.result==='win'){
-      scene.win(Math.log(Math.max(1,r.mult||1))/(r.rate||.12));
-      mult.textContent=fx(r.mult);mult.className='rk-mult win';
-      status.textContent='🏆 برداشت موفق؛ جایزه به حسابت واریز شد!';
-      panel.replaceChildren(h('div',{class:'rk-lbl'},'💰 جایزه: '+num(r.payout)+' تومان'),
-        h('div',{class:'rk-hint'},'سود خالص: '+num(r.profit)+' تومان'));
-    }else{
-      scene.boom(Math.log(Math.max(1,r.crash||1))/(active?.rate||.12),r.crash||1);
-      mult.textContent=fx(r.crash);mult.className='rk-mult lose';
-      status.textContent='💥 انفجار! این دور شرطت از دست رفت.';
-      panel.replaceChildren(h('div',{class:'rk-lbl'},'ضریب انفجار: '+fx(r.crash)),
-        h('div',{class:'rk-hint'},'برای دور بعدی دوباره شرط انتخاب کن.'));
+  main.onclick=()=>{if(view&&view.mode==='mine')cashout();else openBet()};
+  function onFinish(r){
+   balance.textContent=num(r.balance);if(r.hist)drawHist(r.hist);
+   resBox.style.display='block';
+   if(r.result==='win'){
+    resBox.className='rk2-res win';resBox.textContent='✅ برداشت موفق '+fx(r.mult)+' • دریافتی '+num(r.payout)+' • سود '+num(r.profit);
+    view={mode:'watch',phase:'flying',t0:view?view.t0:0,rate:r.rate||.12};
+   }else{
+    resBox.className='rk2-res lose';resBox.textContent='💥 منفجر شد '+fx(r.crash)+' • شرطت سوخت';
+    view={mode:'watch',phase:'crashed',crashMult:Number(r.crash),t0:view?view.t0:0,rate:r.rate||.12,next:0};
+   }
+   clearTimeout(onFinish.t);onFinish.t=setTimeout(()=>{resBox.style.display='none'},6000);
+   pollOnce();
+  }
+  const rows=new Map();
+  function renderPlayers(m){
+   const list=(view&&view.showNext)?playersNext:players;
+   plabel.textContent='بازیکنان ('+num(list.length)+')';
+   const seen=new Set();
+   list.forEach((p,i)=>{
+    seen.add(p.uid);let r=rows.get(p.uid);
+    if(!r){
+     const mu=h('span',{}),nm=h('b',{}),am=h('div',{class:'rk2-am'}),av=h('div',{class:'rk2-av'});
+     av.append(avatar('user',p.uid,p.name,48));am.append(h('span',{}),svgEl(STAR));
+     r={row:h('div',{class:'rk2-row'},av,h('div',{class:'rk2-nm'},nm,mu),am),mu,nm,am:am.firstChild};rows.set(p.uid,r);
     }
-    active=null;
-    const again=h('button',{class:'rk-main',onclick:()=>{mult.className='rk-mult cd';scene.reset();betPhase()}},'🔄 بازی دوباره');
-    panel.append(again);
-    watchRounds();
+    const live=p.state==='fly'?(view&&view.phase!=='crashed'&&sNow()>=(view.t0||0)?m:1):p.mult;
+    r.nm.textContent=p.name+(p.uid===me.id?' (تو)':'');
+    r.mu.textContent=(p.state==='won'?'✓ ':p.state==='lost'?'✗ ':'')+fx(live);r.mu.className=p.state==='won'?'won':p.state==='lost'?'lost':'';
+    r.am.textContent=num(p.bet);
+    if(plist.children[i]!==r.row)plist.insertBefore(r.row,plist.children[i]||null);
+   });
+   for(const [k,r] of rows)if(!seen.has(k)){r.row.remove();rows.delete(k)}
+   if(list.length){empty.remove()}else if(!empty.parentNode)plist.append(empty);
+  }
+  function tick(){
+   if(stopped||!view)return;
+   const now=sNow(),v=view,live=performance.now()-lastOk<2500;
+   dot.className='rk2-dot'+(live?'':' bad');
+   let m=curM;
+   const nextIn=v.next?v.next-now:99;
+   v.showNext=false;
+   if(v.phase==='crashed'&&nextIn<=3.2){
+    v.showNext=true;setStage('cd');const n=Math.max(1,Math.ceil(nextIn));
+    if(n!==lastCd){lastCd=n;cd.textContent=String(n);cd.classList.remove('pop');void cd.offsetWidth;cd.classList.add('pop')}
+    first.className='rk2-chip first';first.textContent='در انتظار';m=1;
+   }else if(v.phase==='crashed'){
+    setStage('boom');ctB.textContent=fx(v.crashMult);first.className='rk2-chip first lose';first.textContent=fx(v.crashMult);
+   }else if(now<v.t0){
+    setStage('cd');const n=Math.max(1,Math.ceil(v.t0-now));
+    if(n!==lastCd){lastCd=n;cd.textContent=String(n);cd.classList.remove('pop');void cd.offsetWidth;cd.classList.add('pop')}
+    first.className='rk2-chip first';first.textContent='در انتظار';m=1;
+   }else{
+    if(live)m=Math.max(1,Math.floor(Math.exp((v.rate||.12)*(now-v.t0))*100)/100);
+    setStage('fly');first.className='rk2-chip first';first.textContent=fx(m);
+   }
+   curM=m;
+   if(v.mode==='mine'){
+    if(now<v.t0){main.disabled=true;main.className='rk2-main';main.textContent='شرطت ثبت شد • منتظر پرواز…'}
+    else{main.disabled=false;main.className='rk2-main green';main.textContent='برداشت '+fx(m)+' • '+num(Math.floor(v.bet*m+1e-6))}
+   }else{main.disabled=false;main.className='rk2-main';main.textContent='ثبت شرط'}
+   renderPlayers(m);
+  }
+  async function pollOnce(){
+   if(stopped||busy)return;
+   try{
+    const r=await apiS('/api/game/crash/state');
+    if(stopped)return;
+    st=r;balance.textContent=num(r.balance);if(r.hist)drawHist(r.hist);
+    if(r.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
+    if(r.done&&r.result){onFinish(r);return}
+    if(r.active){
+     view={mode:'mine',phase:'run',t0:r.t0,rate:r.rate||.12,bet:r.bet,target:r.target};
+     players=r.players||[];
+    }else{
+     const keepCrash=view&&view.mode==='watch'&&view.phase==='crashed'&&r.watch_phase==='flying'&&view.t0===r.t0;
+     if(!keepCrash)view={mode:'watch',phase:r.watch_phase,t0:r.t0,rate:r.rate||.12,crashMult:r.watch_phase==='crashed'?Number(r.mult):0,next:r.next_t0||0};
+     players=r.players||[];playersNext=r.players_next||[];
+    }
+   }catch(e){}
   }
   try{
-    st=await apiS('/api/game/crash/state');balance.textContent=num(st.balance);drawHist(st.hist||[]);
-    if(st.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
-    if(st.active){active=st;scene.setRate(st.rate||.12);run()}
-    else if(st.done){drawHist(st.hist||[]);status.textContent=st.result==='win'?'🏆 بازی قبلی با برد تمام شد.':'💥 بازی قبلی به انفجار رسید.';betPhase()}
-    else {betPhase();}
+   st=await apiS('/api/game/crash/state');balance.textContent=num(st.balance);drawHist(st.hist||[]);
+   if(st.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
+   await pollOnce();
+   tk=setInterval(tick,60);poll=setInterval(pollOnce,250);tick();
   }catch(e){toast(e.message,1);clean();home()}
  }
 
@@ -6003,6 +6101,53 @@ def _mini_mines_mult(k: int) -> float:
 
 
 _MINI_HIST_LOADED = False
+_MINI_CRASH_ROUNDS: dict = {}   # round_id -> {uid: {name, bet, target, res, m}}؛ فقط برای نمایش لیست بازیکنان پرواز
+
+
+def _mini_crash_register(round_id: int, uid: int, name: str, bet: int, target):
+    _MINI_CRASH_ROUNDS.setdefault(round_id, {})[uid] = {"name": name, "bet": bet, "target": target, "res": None, "m": None}
+    for k in sorted(_MINI_CRASH_ROUNDS)[:-8]:
+        _MINI_CRASH_ROUNDS.pop(k, None)
+
+
+async def _mini_crash_players(rid, t0, cp, now) -> list:
+    """بازیکنان یک دور موشک با وضعیت لحظه‌ای‌شان (در پرواز / برداشت کرده / منفجر شده). نقطه انفجار فقط بعد از وقوع لو می‌ره."""
+    if rid is None:
+        return []
+    rec = dict(_MINI_CRASH_ROUNDS.get(rid) or {})
+    try:
+        rows = await pool.fetch(
+            "SELECT g.uid, g.bet, g.state, u.name FROM mini_games g LEFT JOIN users u ON u.user_id=g.uid "
+            "WHERE g.kind='crash' AND (g.state::json->>'round_id')::bigint=$1", int(rid))
+    except Exception:
+        rows = []
+    for r in rows:
+        uid = int(r["uid"])
+        if uid in rec:
+            continue
+        try:
+            s = json.loads(r["state"]) if isinstance(r["state"], str) else dict(r["state"])
+        except Exception:
+            s = {}
+        rec[uid] = {"name": r["name"] or "کاربر", "bet": int(r["bet"]), "target": s.get("target"), "res": None, "m": None}
+    started = now >= t0
+    el = max(0.0, now - t0)
+    out = []
+    for uid, p in rec.items():
+        tgt = p.get("target")
+        st_, m = "fly", (_mini_mult_at(el) if started else 1.0)
+        if p["res"] == "win":
+            st_, m = "won", float(p["m"])
+        elif p["res"] == "crash":
+            st_, m = "lost", float(p["m"])
+        elif cp is not None and started:
+            if tgt and tgt <= cp and el >= _mini_time_for(tgt):
+                st_, m = "won", float(tgt)
+            elif el >= _mini_time_for(cp):
+                st_, m = "lost", float(cp)
+        out.append({"uid": uid, "name": p["name"], "bet": p["bet"], "mult": m, "state": st_})
+    out.sort(key=lambda x: -x["bet"])
+    return out[:30]
 
 
 async def _mini_hist_ensure():
@@ -6071,6 +6216,10 @@ async def _mini_crash_finish(uid: int, bet: int, st: dict, res: str, m: float) -
     payout = int(bet * m + 1e-6) if win else 0
     if payout > 0:
         await _give(uid, payout)
+    _rec = (_MINI_CRASH_ROUNDS.get(st.get("round_id")) or {}).get(uid)
+    if _rec:
+        _rec["res"] = "win" if win else "crash"
+        _rec["m"] = m if win else st["crash"]
     return {"done": True, "active": False, "result": "win" if win else "crash", "mult": m, "crash": st["crash"],
             "bet": bet, "payout": payout, "profit": payout - bet, "balance": await _mini_balance(uid), "hist": _MINI_HIST[:14],
             "rate": MINI_CRASH_RATE}
@@ -6102,6 +6251,7 @@ async def _p_game_crash_start(b, user):
             "ON CONFLICT(round_id) DO UPDATE SET round_id=EXCLUDED.round_id RETURNING starts_at,crash_point",
             round_id, starts_at, _mini_crash_point(), now)
         st = {"crash": float(rr["crash_point"]), "t0": float(rr["starts_at"]), "target": tgt, "round_id": round_id}
+        _mini_crash_register(round_id, uid, str(user.get("first_name") or user.get("username") or "کاربر")[:24], bet, tgt)
         try:
             await pool.execute("INSERT INTO mini_games (uid, kind, bet, state, created_at) VALUES ($1,'crash',$2,$3,$4)",
                                uid, bet, json.dumps(st), now)
@@ -6112,7 +6262,7 @@ async def _p_game_crash_start(b, user):
                "balance": await _mini_balance(uid)})
 
 
-async def _mini_crash_watch_state(bal: int) -> dict:
+async def _mini_crash_watch_state_core(bal: int) -> dict:
     """نمای عمومی دورهای موشک؛ پرواز مستقل از شرط کاربران و بدون افشای نقطه انفجار."""
     now = time.time()
     slot = int(now // MINI_CRASH_DELAY)
@@ -6142,6 +6292,20 @@ async def _mini_crash_watch_state(bal: int) -> dict:
             "mult": 1.0, "rate": MINI_CRASH_RATE}
 
 
+async def _mini_crash_watch_state(bal: int) -> dict:
+    d = await _mini_crash_watch_state_core(bal)
+    try:
+        rid, now, t0 = int(d["watch_round"]), float(d["now"]), float(d["t0"])
+        cp = await pool.fetchval("SELECT crash_point FROM mini_crash_rounds WHERE round_id=$1", rid)
+        d["players"] = await _mini_crash_players(rid, t0, float(cp) if cp is not None else None, now)
+        if d.get("next_t0"):
+            d["players_next"] = await _mini_crash_players(rid + 1, float(d["next_t0"]), None, now)
+    except Exception:
+        log.debug("crash players failed", exc_info=True)
+        d.setdefault("players", [])
+    return d
+
+
 async def _g_game_crash_state(qs, user):
     uid, bal = await _mini_ctx(user)
     async with _mini_lock(uid):
@@ -6154,7 +6318,8 @@ async def _g_game_crash_state(qs, user):
         res, m = _mini_crash_eval(st, False)
         if res == "run":
             return _j({**_mini_base(bal), "active": True, "done": False, "t0": st["t0"], "now": time.time(),
-                       "rate": MINI_CRASH_RATE, "bet": bet, "target": st.get("target")})
+                       "rate": MINI_CRASH_RATE, "bet": bet, "target": st.get("target"),
+                       "players": await _mini_crash_players(st.get("round_id"), st["t0"], st["crash"], time.time())})
         return _j(await _mini_crash_finish(uid, bet, st, res, m))
 
 
