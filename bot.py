@@ -7403,19 +7403,11 @@ async def get_user(user_id: int):
 
 # ───────────────────────── عضویت اجباری ─────────────────────────
 async def missing_channels(bot, user_id: int) -> list[str]:
-    """لیست کانال‌هایی که کاربر عضوشون نیست."""
+    """لیست کانال‌هایی که کاربر مطمئناً عضوشون نیست (خطای بررسی = غیرعضو حساب نمیشه)."""
     missing = []
     for ch in CHANNELS:
-        try:
-            m = await bot.get_chat_member(ch, user_id)
-            ok = m.status in ("member", "administrator", "creator") or (
-                m.status == "restricted" and getattr(m, "is_member", False)
-            )
-        except Exception as e:
-            # معمولاً یعنی ربات توی اون کانال ادمین نیست
-            log.warning("get_chat_member failed for %s: %s", ch, e)
-            ok = False
-        if not ok:
+        r = await _check_one_channel(bot, ch, user_id)
+        if r is False:
             missing.append(ch)
     return missing
 
@@ -17812,20 +17804,49 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_html(q, B(result), view_kb)
 
 
+async def _check_one_channel(bot, ch: str, uid: int):
+    """True = عضو، False = عضو نیست، None = بررسی ممکن نشد (خطای شبکه/فلود/ادمین‌نبودن ربات).
+    خطاهای موقت (تایم‌اوت، فلود، قطعی شبکه) چند بار دوباره امتحان میشن تا عضوِ واقعی به‌اشتباه «غیرعضو» حساب نشه."""
+    from telegram.error import TimedOut as _TO, NetworkError as _NE
+    last = None
+    for attempt in range(3):
+        try:
+            m = await bot.get_chat_member(ch, uid)
+        except RetryAfter as e:
+            last = e
+            await asyncio.sleep(min(float(getattr(e, "retry_after", 1) or 1), 3.0) + 0.2)
+            continue
+        except (_TO, _NE) as e:
+            last = e
+            await asyncio.sleep(0.4 * (attempt + 1))
+            continue
+        except BadRequest as e:
+            t = str(e).lower()
+            if "user not found" in t or "participant_id_invalid" in t:
+                return False        # کاربر اصلاً تو کانال نیست
+            last = e                # chat not found / not enough rights ...: مشکل تنظیمات ربات، نه غیرعضو بودن کاربر
+            break
+        except Exception as e:
+            last = e
+            break
+        st = str(getattr(m, "status", ""))
+        return st in ("creator", "administrator", "member") or (st == "restricted" and bool(getattr(m, "is_member", False)))
+    log.warning("force-join check failed for %s (uid=%s): %r", ch, uid, last)
+    return None
+
+
 async def is_channel_member(bot, uid: int):
-    """True = عضو هر دو کانال، False = حداقل عضو یکی نیست، None = خطای بررسی."""
+    """True = عضو همه‌ی کانال‌ها، False = حداقل یکی رو مطمئناً عضو نیست، None = بررسی ممکن نشد.
+    مهم: None هرگز نباید کاربر رو بلاک کنه (قبلاً هر خطای موقت تلگرام باعث میشد عضوِ واقعی هم «غیرعضو» بشه)."""
     if _MEMBER_OK.get(uid, 0) > time.time():
         return True
-    results = await asyncio.gather(*(bot.get_chat_member(ch, uid) for ch in FORCE_CHANNELS), return_exceptions=True)
-    for channel, m in zip(FORCE_CHANNELS, results):
-        if isinstance(m, BaseException):
-            log.warning("force-join check failed for %s (ربات باید در کانال ادمین باشد): %r", channel, m)
-            return None
-        st = str(getattr(m, "status", ""))
-        ok = st in ("creator", "administrator", "member") or (st == "restricted" and getattr(m, "is_member", False))
-        if not ok:
-            _MEMBER_OK.pop(uid, None)
-            return False
+    results = await asyncio.gather(*(_check_one_channel(bot, ch, uid) for ch in FORCE_CHANNELS))
+    if any(r is False for r in results):
+        _MEMBER_OK.pop(uid, None)
+        return False
+    if any(r is None for r in results):
+        _MEMBER_OK[uid] = time.time() + 30   # خطای موقت: کوتاه اجازه بده تا فشار روی API نیاد
+        return None
     _MEMBER_OK[uid] = time.time() + 120
     if len(_MEMBER_OK) > 20000:
         _MEMBER_OK.clear()
@@ -17892,6 +17913,15 @@ def _install_auto_reply():
             try:
                 ctx = _REPLY_CTX.get()
                 if ctx and endpoint in _REPLY_SEND_METHODS and isinstance(data, dict):
+                    # تسک‌های پس‌زمینه (حلقه‌ی بازی، تایمر، ...) کانتکست رو از لحظه‌ی ساختنشون کپی می‌کنن؛ بدون این شرط
+                    # بعداً روی پیام قدیمیِ کاربر ریپلای می‌زدن. فقط همون تسکِ پردازش آپدیت، یا ارسال تازه (زیر ۱۵ ثانیه) مجازه.
+                    try:
+                        _cur = asyncio.current_task()
+                    except RuntimeError:
+                        _cur = None
+                    _fresh = (time.time() - ctx[2]) < 15
+                    if not (_cur is ctx[3] or _fresh):
+                        return await orig(self, endpoint, data, *a, **kw)
                     if (data.get("reply_parameters") is None and data.get("reply_to_message_id") is None
                             and str(data.get("chat_id")) == str(ctx[0])):
                         data["reply_parameters"] = {"message_id": int(ctx[1]), "allow_sending_without_reply": True}
@@ -17914,7 +17944,7 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ثبت گروه‌ها و کنترل دسترسی‌ها."""
     try:   # هر چی ربات تو این آپدیت می‌فرسته، روی پیامِ همین کاربر (یا پیامِ دکمه‌ای که زده) ریپلای میشه
         _rm = update.effective_message if (update.message or update.callback_query) else None
-        _REPLY_CTX.set((_rm.chat_id, _rm.message_id) if _rm is not None and getattr(_rm, "message_id", None) else None)
+        _REPLY_CTX.set((_rm.chat_id, _rm.message_id, time.time(), asyncio.current_task()) if _rm is not None and getattr(_rm, "message_id", None) else None)
     except Exception:
         _REPLY_CTX.set(None)
     cm = getattr(update, "my_chat_member", None)
@@ -17990,7 +18020,7 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cq = update.callback_query
         if cq and cq.data == "fj:check":
             ok = await is_channel_member(context.bot, user.id)
-            if ok is not True:
+            if ok is False:
                 await cq.answer("❌ هنوز عضویتت در هر دو کانال تایید نشده! اول عضو شو و دوباره بزن.", show_alert=True)
             else:
                 await cq.answer("✅ عضویتت تایید شد، حالا می‌تونی از ربات استفاده کنی.", show_alert=True)
@@ -18001,7 +18031,7 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
             raise ApplicationHandlerStop
         ok = await is_channel_member(context.bot, user.id)
-        if ok is not True:  # اگر عضویت قابل تأیید نباشد، دسترسی داده نمی‌شود
+        if ok is False:  # فقط وقتی مطمئنیم عضو نیست بلاک میشه؛ خطای بررسی (None) کاربر رو بلاک نمی‌کنه
             if cq:
                 try:
                     await cq.answer("📢 برای استفاده باید عضو هر دو کانال @selfsaz_iran و @JinGo_Game باشی.", show_alert=True)
