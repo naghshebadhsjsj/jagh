@@ -1180,6 +1180,31 @@ textarea.inp{min-height:130px;resize:vertical}
 .rk2-am{display:flex;align-items:center;gap:6px;font-weight:800;font-size:17px;direction:ltr}.rk2-am svg{width:20px;height:20px}
 .rk2-empty{direction:rtl;text-align:center;color:#8591ad;padding:12px;font-size:14px}
 .rk2-sh{background:#0f1830;color:#fff;border-radius:18px;padding:14px;direction:rtl;line-height:1.9;font-size:14px}
+
+/* ───── برج ───── */
+.rk2.tw{background-color:#20252b;background-image:radial-gradient(rgba(255,255,255,.07) 1.5px,transparent 1.7px);background-size:26px 26px}
+.tw .rk2-pill,.tw .rk2-bal,.tw .rk2-back,.tw .rk2-me{background:#2e343b}
+.tw-win{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 auto 16px;min-width:150px;width:max-content;max-width:90%;height:52px;border-radius:26px;background:#4b5058;border:2px solid #6b727b;font-size:27px;font-weight:900;padding:0 24px}
+.tw-win svg{width:26px;height:26px;flex:none}
+.tw-board{display:flex;flex-direction:column;gap:14px;margin-bottom:16px}
+.tw-row{display:flex;gap:8px;align-items:center;border-radius:26px;border:3px solid transparent;padding:3px}
+.tw-row.act{border-color:#d9b92e;background:rgba(217,185,46,.16);padding:4px}
+.tw-t{flex:1;min-width:0;height:42px;border-radius:21px;border:2px solid #3c434b;background:#2d3339;display:flex;align-items:center;justify-content:center;color:#7d858e;font-size:18px;font-weight:900;padding:0;font-family:inherit}
+.tw-t svg{width:16px;height:16px}
+.tw-row.act .tw-t{background:linear-gradient(#ffb41f,#ef8700);border-color:#ffcb52;color:#fff;font-size:28px;cursor:pointer;text-shadow:0 2px 3px #0006;box-shadow:0 3px 0 #a85d00}
+.tw-row.act .tw-t:active{transform:translateY(2px);box-shadow:0 1px 0 #a85d00}
+.tw-t.safe{background:linear-gradient(#37d67c,#12924a)!important;border-color:#74eba5!important;color:#fff;font-size:22px!important;box-shadow:none!important}
+.tw-t.dim{opacity:.38;box-shadow:none!important}
+.tw-t.bomb{background:#4a2530;border-color:#7a2f40;color:#fff;font-size:20px;opacity:.85}
+.tw-t.boom{background:linear-gradient(#ff5a6e,#b91c1c)!important;border-color:#ffa0ab!important;color:#fff;font-size:22px!important;animation:twshk .4s}
+@keyframes twshk{20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+.tw-t.pop{animation:twpop .28s}@keyframes twpop{from{transform:scale(.7)}}
+.tw-m{flex:2.25;min-width:0;height:42px;border-radius:21px;border:2px solid #3c434b;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:25px;color:#fff;background:#282d33}
+.tw-row.act .tw-m{background:rgba(255,255,255,.07);border-color:#8d7d2c}
+.tw-m.done{background:#14532d;border-color:#22c55e;color:#bbf7d0}
+.tw-main{width:100%;height:58px;border:0;border-radius:29px;background:#3095f3;color:#fff;font-weight:900;font-size:21px;cursor:pointer;font-family:inherit}
+.tw-main.green{background:#16a34a}.tw-main:disabled{background:#3a424b;color:#8a929b}
+.tw-res{margin-bottom:12px}
 </style></head><body>
 <div id="app">
   <div id="views"></div>
@@ -2928,7 +2953,8 @@ function GamesScreen(){
    [z=>svgIc('rocket',z),'انفجار','شرط و ضریب هدف را پیش از پرواز تعیین کن؛ برداشت خودکار روی ضریب انتخابی.','crash','blue'],
    [z=>svgIc('mine',z),'مین','۲۵ خانه و ۳ مین؛ خانه‌های امن را باز کن و در زمان مناسب برداشت بزن.','mines','red'],
    [z=>svgIc('skull',z),'سم یا خوراکی','میز دونفره با انتظار برای حریف؛ اگر تا ۱۲۰ ثانیه کسی نیاید، شرط برمی‌گردد.','poison','red'],
-   [z=>svgIc('target',z),'خط و نشان','کاروم دونفره با مهره‌های فیزیکی و نوبت ۶۰ ثانیه‌ای.','carrom','green']];
+   [z=>svgIc('target',z),'خط و نشان','کاروم دونفره با مهره‌های فیزیکی و نوبت ۶۰ ثانیه‌ای.','carrom','green'],
+    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج','۷ طبقه، ۴ خانه و یک بمب در هر طبقه؛ بالا برو و تا ×۷٫۱۱ برنده شو.','tower','gold']];
   const grid=h('div',{class:'games-grid'},...G.map(([ic,t,d,key,cls])=>{
    const v=h('div',{class:'gvisual'},ic(64));
    if(key==='crash'){v.style.background='radial-gradient(circle,#073c42,#050b1e 72%)';v.replaceChildren(h('div',{class:'rocket-mark'},svgIc('rocket',76)))}
@@ -2937,7 +2963,7 @@ function GamesScreen(){
   box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),grid);
  }
  function play(k){clearInterval(cdT);
-  if(k==='crash')crash(); else if(k==='mines')mines();
+  if(k==='crash')crash(); else if(k==='mines')mines(); else if(k==='tower')tower();
   else if(k==='poison'||k==='carrom'){
     const sc=SocialScreen({games:k});
     sc.style.cssText='position:relative;inset:auto;display:block;background:transparent;min-height:60vh';
@@ -3169,7 +3195,7 @@ function GamesScreen(){
   refresh();return box;
  }
  async function crash(){
-  const STAR='<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+  const STAR='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#f6b91a" stroke="#b9800b" stroke-width="1.6"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="#b9800b" stroke-width="1.4"/><path d="M12 8v8M9.6 10.2h3.4a1.5 1.5 0 0 1 0 3h-2a1.5 1.5 0 0 0 0 3h3.4" fill="none" stroke="#8a5a00" stroke-width="1.5" stroke-linecap="round"/></svg>';
   const SHIP='<svg viewBox="0 0 220 240"><defs><linearGradient id="rkwL" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f9fd"/><stop offset="1" stop-color="#a3b8cd"/></linearGradient><linearGradient id="rkwR" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9d8e7"/><stop offset="1" stop-color="#6a86a4"/></linearGradient><linearGradient id="rkvn" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#34e3c4"/><stop offset="1" stop-color="#0d9aa8"/></linearGradient><path id="rkst" d="M0-9l2.6 5.6 6.1.7-4.5 4.2 1.2 6L0 4.4l-5.4 3.1 1.2-6L-8.7-2.7l6.1-.7z"/></defs><ellipse cx="112" cy="136" rx="100" ry="92" fill="rgba(60,205,235,.14)"/><polygon points="26,150 152,26 120,158" fill="url(#rkwL)"/><polygon points="152,26 196,152 120,158" fill="url(#rkwR)"/><polygon points="120,158 152,26 138,168" fill="#566f8b"/><polyline points="60,118 108,70 126,150" fill="none" stroke="#ffffff" stroke-opacity=".7" stroke-width="2"/><g class="rk2-vent"><g transform="rotate(-38 70 176)"><rect x="34" y="162" width="64" height="26" rx="8" fill="url(#rkvn)"/><g stroke="#0a6e7a" stroke-width="3" opacity=".75"><path d="M44 164v22M54 164v22M64 164v22M74 164v22M84 164v22"/></g></g><g transform="rotate(-38 150 190)"><rect x="112" y="178" width="66" height="26" rx="8" fill="url(#rkvn)"/><g stroke="#0a6e7a" stroke-width="3" opacity=".75"><path d="M122 180v22M132 180v22M142 180v22M152 180v22M162 180v22"/></g></g></g><use href="#rkst" x="72" y="128" fill="#ffd84a" transform="scale(1.5)" transform-origin="72 128"/><use href="#rkst" x="150" y="64" fill="#ffd84a"/><use href="#rkst" x="92" y="196" fill="#ffd84a" transform="scale(1.6)" transform-origin="92 196"/><use href="#rkst" x="40" y="44" fill="#ffd84a" opacity=".5"/></svg>';
   const WIFI='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.2" r="1.2" fill="#fff"/></svg>';
   const SHIELD='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.6-3.2 7.8-8 9.5C7.2 19.8 4 16.600 4 12V6z"/></svg>';
@@ -3317,7 +3343,7 @@ function GamesScreen(){
     const r=await apiS('/api/game/crash/state');
     if(stopped)return;
     st=r;balance.textContent=num(r.balance);if(r.hist)drawHist(r.hist);
-    if(r.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
+    if(r.other==='mines'||r.other==='tower'){toast('اول بازی فعال دیگه‌ات را تمام کن.',1);clean();r.other==='tower'?tower():mines();return}
     if(r.done&&r.result){onFinish(r);return}
     if(r.active){
      view={mode:'mine',phase:'run',t0:r.t0,rate:r.rate||.12,bet:r.bet,target:r.target};
@@ -3331,10 +3357,114 @@ function GamesScreen(){
   }
   try{
    st=await apiS('/api/game/crash/state');balance.textContent=num(st.balance);drawHist(st.hist||[]);
-   if(st.other==='mines'){toast('اول بازی مین فعال را تمام کن.',1);clean();mines();return}
+   if(st.other==='mines'||st.other==='tower'){toast('اول بازی فعال دیگه‌ات را تمام کن.',1);clean();st.other==='tower'?tower():mines();return}
    await pollOnce();
    tk=setInterval(tick,60);poll=setInterval(pollOnce,250);tick();
   }catch(e){toast(e.message,1);clean();home()}
+ }
+ async function tower(){
+  const COIN='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#f6b91a" stroke="#b9800b" stroke-width="1.6"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="#b9800b" stroke-width="1.4"/><path d="M12 8v8M9.6 10.2h3.4a1.5 1.5 0 0 1 0 3h-2a1.5 1.5 0 0 0 0 3h3.4" fill="none" stroke="#8a5a00" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  const WIFI='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.2" r="1.2" fill="#fff"/></svg>';
+  const SHIELD='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.6-3.2 7.8-8 9.5C7.2 19.8 4 16.6 4 12V6z"/></svg>';
+  const GEAR='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg>';
+  const LOCK='<svg viewBox="0 0 24 24" fill="#7d858e"><rect x="5" y="10.5" width="14" height="10" rx="2.6"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="#7d858e" stroke-width="2.4"/></svg>';
+  let st=null,game=null,end=null,busy=false,stopped=false,pingT=null,lastOk=performance.now(),me={id:0,name:''};
+  const svgEl=s=>{const d=h('span',{});d.innerHTML=s;return d.firstChild};
+  const dot=h('i',{class:'rk2-dot'}),balance=h('b',{},'…'),meBox=h('div',{class:'rk2-me'});
+  const winB=h('b',{},'0'),win=h('div',{class:'tw-win'},winB,svgEl(COIN));
+  const board=h('div',{class:'tw-board'}),resBox=h('div',{class:'rk2-res tw-res',style:'display:none'});
+  const main=h('button',{class:'tw-main'},'ثبت شرط');
+  const wifiP=h('button',{class:'rk2-pill',onclick:()=>toast(performance.now()-lastOk<4000?'اتصال برقراره ✅':'اتصال ضعیفه…',performance.now()-lastOk>=4000)},dot);wifiP.append(svgEl(WIFI));
+  const shieldB=h('button',{class:'rk2-pill',onclick:openRules});shieldB.append(svgEl(SHIELD));
+  const gearB=h('button',{class:'rk2-pill',onclick:openTable});gearB.append(svgEl(GEAR));
+  const plus=h('button',{class:'rk2-plus',onclick:()=>{leave();openTab('store')}},'+');
+  const balP=h('div',{class:'rk2-bal'},balance,svgEl(COIN),plus);
+  const back=h('button',{class:'rk2-back',onclick:leave},'→ بازگشت');
+  const tI=h('i',{});tI.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="3.5" width="16" height="4" rx="1.6"/><rect x="4" y="10" width="16" height="4" rx="1.6"/><rect x="4" y="16.5" width="16" height="4" rx="1.6"/></svg>';
+  box.replaceChildren(h('div',{class:'rk2 tw'},
+   h('div',{class:'rk2-top'},back,h('div',{class:'rk2-title'},tI,'برج'),h('span',{class:'rk2-sp'})),
+   h('div',{class:'rk2-bar'},wifiP,shieldB,gearB,h('span',{class:'rk2-grow'}),balP,meBox),
+   win,board,resBox,main));
+  api('/api/social/me').then(m=>{me={id:m.id,name:m.name};meBox.replaceChildren(avatar('user',m.id,m.name,44))}).catch(()=>{});
+  rkCleanup=()=>{stopped=true;clearInterval(pingT)};
+  pingT=setInterval(()=>{dot.className='rk2-dot'+(performance.now()-lastOk<4000?'':' bad')},1000);
+  const mults=()=>(st&&st.mults)||[1.26,1.68,2.25,3,4,5.33,7.11];
+  const fm=v=>Number(v).toFixed(2)+'x';
+  function openRules(){sheet('قوانین برج',()=>h('div',{class:'rk2-sh'},'• هر طبقه ۴ خانه داره و توی یکی‌شون بمب هست.\n• از پایین شروع می‌کنی؛ هر طبقه‌ای که رد کنی ضریبت بالاتر می‌ره.\n• هر لحظه می‌تونی «برداشت» بزنی و شرط × ضریب همون طبقه رو برداری.\n• اگه به بمب بخوری شرط می‌سوزه. با رد کردن هر ۷ طبقه خودکار برداشت می‌شه.'))}
+  function openTable(){sheet('جدول ضرایب',()=>h('div',{class:'rk2-sh'},...mults().map((m,i)=>h('div',{style:'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #ffffff14'},h('span',{},'طبقه '+num(i+1)),h('b',{style:'direction:ltr'},fm(m))))))}
+  function draw(){
+    const M=mults(),n=M.length,picks=game?game.picks:(end?end.picks:[]);
+    const rows=[];
+    for(let r=n-1;r>=0;r--){
+      const played=r<picks.length,active=game&&r===picks.length||(!game&&!end&&r===0);
+      const lostRow=end&&end.lost&&end.row===r;
+      const tiles=[];
+      for(let c=0;c<4;c++){
+        let cls='tw-t',inner=null,click=null;
+        if(game){
+          if(played){if(picks[r]===c){cls+=' safe';inner='✓'}else cls+=' dim'}
+          else if(r===picks.length){inner='?';click=()=>pick(c)}
+          else inner=svgEl(LOCK);
+        }else if(end){
+          const bomb=end.bombs&&end.bombs[r]===c;
+          if(played||(end.won&&r<n)){if(picks[r]===c){cls+=' safe';inner='✓'}else if(bomb){cls+=' bomb';inner='💣'}else cls+=' dim'}
+          else if(lostRow){if(c===end.col){cls+=' boom';inner='💣'}else if(bomb){cls+=' bomb';inner='💣'}else cls+=' dim'}
+          else{if(bomb){cls+=' bomb';inner='💣'}else{cls+=' dim';inner=svgEl(LOCK)}}
+        }else{
+          if(r===0){inner='?';click=()=>toast('اول شرط ببند 👇',1)}else inner=svgEl(LOCK);
+        }
+        const b=h('button',{class:cls,onclick:click},inner);
+        if(!click)b.disabled=false;
+        tiles.push(b);
+      }
+      rows.push(h('div',{class:'tw-row'+(active?' act':'')},...tiles,h('div',{class:'tw-m'+(played?' done':'')},fm(M[r]))));
+    }
+    board.replaceChildren(...rows);
+    winB.textContent=num(game?game.payout:(end&&end.won?end.payout:0));
+    if(game){
+      if(game.picks.length){main.disabled=false;main.className='tw-main green';main.textContent='برداشت • '+num(game.payout)}
+      else{main.disabled=true;main.className='tw-main';main.textContent='یه خانه از طبقه اول انتخاب کن'}
+    }else{main.disabled=false;main.className='tw-main';main.textContent='ثبت شرط'}
+  }
+  function banner(win,t){resBox.style.display='block';resBox.className='rk2-res tw-res '+(win?'win':'lose');resBox.textContent=t;clearTimeout(banner.t);banner.t=setTimeout(()=>{resBox.style.display='none'},7000)}
+  async function pick(c){
+    if(busy||!game)return;busy=true;
+    try{
+      const r=await api('/api/game/tower/open',{col:c});lastOk=performance.now();
+      balance.textContent=num(r.balance!=null?r.balance:st.balance);
+      if(r.lost){game=null;end=r;draw();banner(false,'💥 به بمب خوردی؛ شرط '+num(r.bet)+' سوخت.')}
+      else if(r.won){game=null;end=r;draw();banner(true,'🏆 همه‌ی طبقه‌ها رو رد کردی! '+fm(r.mult)+' • سود '+num(r.profit))}
+      else{game=r;draw()}
+    }catch(e){toast(e.message,1)}
+    finally{busy=false}
+  }
+  async function cashout(){
+    if(busy||!game)return;busy=true;main.disabled=true;
+    try{
+      const r=await api('/api/game/tower/cashout',{});lastOk=performance.now();
+      balance.textContent=num(r.balance);game=null;end=r;draw();banner(true,'✅ برداشت موفق '+fm(r.mult)+' • دریافتی '+num(r.payout)+' • سود '+num(r.profit));
+    }catch(e){toast(e.message,1);main.disabled=false}
+    finally{busy=false}
+  }
+  function openBet(){
+    if(!st)return;
+    sheet('ثبت شرط',close=>h('div',{class:'rk2-sh'},betPicker(st,async bet=>{
+      if(busy)return;busy=true;
+      try{
+        const r=await api('/api/game/tower/start',{bet});lastOk=performance.now();
+        balance.textContent=num(r.balance);st.balance=r.balance;game=r;end=null;resBox.style.display='none';close();draw();
+      }catch(e){toast(e.message,1)}
+      finally{busy=false}
+    },'🏗 شروع بازی')));
+  }
+  main.onclick=()=>{if(game)cashout();else openBet()};
+  try{
+    st=await api('/api/game/tower/state');lastOk=performance.now();balance.textContent=num(st.balance);
+    if(st.other==='crash'){toast('اول بازی موشک را تمام کن.',1);rkCleanup();crash();return}
+    if(st.other==='mines'){toast('اول بازی مین را تمام کن.',1);rkCleanup();mines();return}
+    if(st.active)game=st;
+    draw();
+  }catch(e){toast(e.message,1);rkCleanup();home()}
  }
 
  async function mines(){
@@ -6415,10 +6545,94 @@ async def _p_game_mines_cashout(b, user):
                    "balance": await _mini_balance(uid)})
 
 
-_GAME_GET = {"/api/game/crash/state": _g_game_crash_state, "/api/game/mines/state": _g_game_mines_state}
+
+# ───── برج (۷ طبقه × ۴ خانه، در هر طبقه یک بمب) ─────
+TOWER_MULTS = (1.26, 1.68, 2.25, 3.00, 4.00, 5.33, 7.11)
+TOWER_COLS = 4
+
+
+def _tower_view(st: dict, bet: int) -> dict:
+    k = len(st["picks"])
+    m = TOWER_MULTS[k - 1] if k else 1.0
+    return {"rows": len(TOWER_MULTS), "cols": TOWER_COLS, "mults": list(TOWER_MULTS), "picks": st["picks"],
+            "bet": bet, "mult": m, "payout": int(bet * m + 1e-6)}
+
+
+async def _p_game_tower_start(b, user):
+    uid, _bal = await _mini_ctx(user)
+    bet = _mini_bet(b)
+    async with _mini_lock(uid):
+        if await pool.fetchval("SELECT 1 FROM mini_games WHERE uid=$1", uid):
+            raise _ApiError("اول بازی قبلیت رو تموم کن.")
+        if await _take(uid, bet) is None:
+            raise _ApiError("موجودی کافی نیست.")
+        st = {"bombs": [random.randrange(TOWER_COLS) for _ in TOWER_MULTS], "picks": []}
+        try:
+            await pool.execute("INSERT INTO mini_games (uid, kind, bet, state, created_at) VALUES ($1,'tower',$2,$3,$4)",
+                               uid, bet, json.dumps(st), time.time())
+        except Exception:
+            await _give(uid, bet)
+            raise
+    return _j({**_tower_view(st, bet), "balance": await _mini_balance(uid)})
+
+
+async def _g_game_tower_state(qs, user):
+    uid, bal = await _mini_ctx(user)
+    row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+    base = {**_mini_base(bal), "rows": len(TOWER_MULTS), "cols": TOWER_COLS, "mults": list(TOWER_MULTS)}
+    if not row or row["kind"] != "tower":
+        return _j({**base, "active": False, "other": row["kind"] if row else None})
+    return _j({**base, "active": True, **_tower_view(json.loads(row["state"]), int(row["bet"]))})
+
+
+async def _p_game_tower_open(b, user):
+    uid, _bal = await _mini_ctx(user)
+    col = _int(b.get("col"))
+    if col is None or not 0 <= col < TOWER_COLS:
+        raise _ApiError("خونه نامعتبره")
+    async with _mini_lock(uid):
+        row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+        if not row or row["kind"] != "tower":
+            raise _ApiError("بازی فعالی نداری.")
+        st, bet = json.loads(row["state"]), int(row["bet"])
+        r = len(st["picks"])
+        if st["bombs"][r] == col:
+            await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+            return _j({"lost": True, "row": r, "col": col, "picks": st["picks"], "bombs": st["bombs"], "bet": bet,
+                       "balance": await _mini_balance(uid)})
+        st["picks"].append(col)
+        v = _tower_view(st, bet)
+        if len(st["picks"]) >= len(TOWER_MULTS):
+            await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+            await _give(uid, v["payout"])
+            return _j({**v, "won": True, "auto": True, "bombs": st["bombs"], "profit": v["payout"] - bet,
+                       "balance": await _mini_balance(uid)})
+        await pool.execute("UPDATE mini_games SET state=$2 WHERE uid=$1", uid, json.dumps(st))
+        return _j(v)
+
+
+async def _p_game_tower_cashout(b, user):
+    uid, _bal = await _mini_ctx(user)
+    async with _mini_lock(uid):
+        row = await pool.fetchrow("SELECT kind, bet, state FROM mini_games WHERE uid=$1", uid)
+        if not row or row["kind"] != "tower":
+            raise _ApiError("بازی فعالی نداری.")
+        st, bet = json.loads(row["state"]), int(row["bet"])
+        if not st["picks"]:
+            raise _ApiError("اول حداقل یه طبقه رو رد کن.")
+        v = _tower_view(st, bet)
+        await pool.execute("DELETE FROM mini_games WHERE uid=$1", uid)
+        await _give(uid, v["payout"])
+        return _j({**v, "won": True, "auto": False, "bombs": st["bombs"], "profit": v["payout"] - bet,
+                   "balance": await _mini_balance(uid)})
+
+
+_GAME_GET = {"/api/game/crash/state": _g_game_crash_state, "/api/game/mines/state": _g_game_mines_state, "/api/game/tower/state": _g_game_tower_state}
 _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cashout": _p_game_crash_cashout,
               "/api/game/mines/start": _p_game_mines_start, "/api/game/mines/open": _p_game_mines_open,
-              "/api/game/mines/cashout": _p_game_mines_cashout}
+              "/api/game/mines/cashout": _p_game_mines_cashout,
+              "/api/game/tower/start": _p_game_tower_start, "/api/game/tower/open": _p_game_tower_open,
+              "/api/game/tower/cashout": _p_game_tower_cashout}
 
 
 
