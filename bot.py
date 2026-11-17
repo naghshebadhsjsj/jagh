@@ -1084,17 +1084,52 @@ textarea.inp{min-height:130px;resize:vertical}
 .vw img{max-width:100%;max-height:100%}.vw .x{position:absolute;top:calc(12px + env(safe-area-inset-top));inset-inline-end:14px;color:#fff;font-size:26px;background:rgba(255,255,255,.15);border:0;border-radius:50%;width:40px;height:40px}
 .vw .nv{position:absolute;top:50%;color:#fff;font-size:30px;background:rgba(255,255,255,.15);border:0;border-radius:50%;width:42px;height:42px}
 .vw .cnt{position:absolute;bottom:calc(18px + env(safe-area-inset-bottom));color:#fff;font-size:14px}
+
+/* ───── نوار پایین جدید ───── */
+#app #tabs{position:relative;overflow:visible;align-items:flex-end;background:var(--bg);border-top:1px solid var(--line);box-shadow:0 -6px 22px rgba(0,0,0,.10);padding-top:4px}
+#app #tabs button{position:relative;padding:8px 0 7px;gap:3px;transition:color .18s}
+#app #tabs button svg{display:block;transition:transform .2s,filter .2s}
+#app #tabs button.on svg{transform:translateY(-2px) scale(1.12);filter:drop-shadow(0 3px 6px rgba(124,58,237,.55))}
+#app #tabs button.on{color:#7c5cff;font-weight:700}
+#app #tabs button.on::after{content:'';position:absolute;bottom:2px;width:16px;height:3px;border-radius:3px;background:#7c5cff}
+#app #tabs button.tb-home{flex:1.15;padding-top:0}
+#app #tabs button.tb-home img{width:58px;height:58px;border-radius:50%;object-fit:cover;object-position:50% 14%;margin-top:-26px;border:3px solid var(--bg);background:#0f1530;box-shadow:0 0 0 2px #7c5cff,0 8px 18px rgba(124,58,237,.5);transition:transform .2s}
+#app #tabs button.tb-home.on img{transform:translateY(-3px) scale(1.07);box-shadow:0 0 0 3px #7c5cff,0 10px 22px rgba(124,58,237,.7)}
+#app #tabs button.tb-home.on::after{display:none}
+.hm-hero{margin:14px;padding:18px 14px;border-radius:22px;background:linear-gradient(135deg,#1b1642,#3a1f7a);color:#fff;display:flex;align-items:center;gap:14px;box-shadow:0 10px 26px rgba(58,31,122,.35)}
+.hm-hero img{width:96px;height:96px;border-radius:50%;object-fit:cover;object-position:50% 14%;border:3px solid rgba(255,255,255,.85);background:#0f1530;flex:none}
+.hm-hero b{display:block;font-size:19px;margin-bottom:3px}.hm-hero small{opacity:.8;font-size:13px;line-height:1.7}
+.hm-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 14px 14px}
+.hm-tile{border:0;border-radius:20px;padding:18px 10px;color:#fff;font-weight:800;font-size:15px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 8px 18px rgba(0,0,0,.22)}
+.hm-tile:active{transform:scale(.96)}.hm-tile svg{width:32px;height:32px}
+.hm-tile.a{background:linear-gradient(135deg,#7c3aed,#4f46e5)}.hm-tile.b{background:linear-gradient(135deg,#f59e0b,#ea580c)}.hm-tile.c{background:linear-gradient(135deg,#0ea5e9,#2563eb)}.hm-tile.d{background:linear-gradient(135deg,#ec4899,#be185d)}
+/* فروشگاه */
+.st-seg{display:flex;gap:6px;margin:12px 14px 4px;padding:4px;background:var(--sec);border-radius:16px;position:sticky;top:0;z-index:3}
+.st-seg button{flex:1;border:0;border-radius:12px;padding:9px 4px;font-weight:800;font-size:13px;background:none;color:var(--hint);cursor:pointer}
+.st-seg button.on{background:linear-gradient(135deg,#f59e0b,#ec4899);color:#fff;box-shadow:0 4px 12px rgba(236,72,153,.35)}
+.st-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 14px}
+.st-card{border:0;border-radius:20px;padding:16px 10px;color:#fff;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(0,0,0,.22);display:flex;flex-direction:column;gap:5px;align-items:center}
+.st-card:active{transform:scale(.96)}.st-card .big{font-size:34px;line-height:1.1}.st-card b{font-size:15px}.st-card small{opacity:.92;font-size:12.5px}
+.st-card.t15{background:linear-gradient(135deg,#38bdf8,#2563eb)}.st-card.t25{background:linear-gradient(135deg,#f472b6,#db2777)}.st-card.t50{background:linear-gradient(135deg,#fbbf24,#ea580c)}.st-card.t100{background:linear-gradient(135deg,#a78bfa,#6d28d9)}
+.st-card.m0{background:linear-gradient(135deg,#34d399,#059669)}.st-card.m1{background:linear-gradient(135deg,#38bdf8,#0369a1)}.st-card.m2{background:linear-gradient(135deg,#f59e0b,#b45309)}.st-card.m3{background:linear-gradient(135deg,#a78bfa,#7c3aed)}
+.st-items{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.st-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:14px;padding:11px 12px;background:var(--sec);cursor:pointer;font-size:15px;font-weight:700;text-align:start}
+.st-item .e{font-size:26px}.st-item .p{margin-inline-start:auto;color:var(--hint);font-size:13px;font-weight:600}
+.st-note{background:var(--sec);border-radius:12px;padding:10px 12px;margin-top:10px;font-size:13.5px;line-height:1.9}
+.st-row{display:flex;gap:8px;margin-top:8px}.st-row button{flex:1}
+.st-opt{flex:1;border:2px solid var(--line);border-radius:12px;padding:9px 6px;background:none;font-weight:700;cursor:pointer;color:var(--fg)}.st-opt.on{border-color:#7c5cff;background:rgba(124,92,255,.12)}
 </style></head><body>
 <div id="app">
   <div id="views"></div>
   <nav id="tabs">
-    <button data-k="myself"><i data-ce="6233367447789899509"></i><span>خودم</span></button>
-    <button data-k="room"><i data-ce="5805493678956875998"></i><span>چت‌روم</span></button>
-    <button data-k="games"><i data-ce="5307866815148335163"></i><span>بازی‌ها</span></button>
-    <button data-k="store"><i>🛍️</i><span>فروشگاه</span></button>
-    <button data-k="chats"><i data-ce="5805161437466726782"></i><span>گپ‌ها</span></button>
-    <button data-k="users"><i data-ce="6213060666320754449"></i><span>کاربران</span></button>
-    <button data-k="panel"><i data-ce="5204118276635892650"></i><span>پشتیبانی</span></button>
+    <button data-k="games"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="11" rx="5.5"/><path d="M8 10.5v4M6 12.5h4"/><circle cx="15.5" cy="11.5" r=".8" fill="currentColor"/><circle cx="17.8" cy="13.6" r=".8" fill="currentColor"/></svg><span>بازی</span></button>
+    <button data-k="store"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg><span>فروشگاه</span></button>
+    <button data-k="home" class="tb-home"><img id="mascotImg" alt=""><span>خانه</span></button>
+    <button data-k="board"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 6H4v1.5A3 3 0 0 0 7 10.5M17 6h3v1.5a3 3 0 0 1-3 3"/><path d="M12 14v3.5M8.5 20h7"/></svg><span>لیدربرد</span></button>
+    <button data-k="myself"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg><span>پروفایل</span></button>
+    <button data-k="chats"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4V5z"/></svg><span>گپ‌ها</span></button>
+    <button data-k="users"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 5.5a3 3 0 0 1 0 6M18 19a5.5 5.5 0 0 0-2.5-4.6"/></svg><span>کاربران</span></button>
+    <button data-k="panel"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg><span>پشتیبانی</span></button>
   </nav>
 </div>
 <div id="toast"></div>
@@ -3369,7 +3404,7 @@ function MyselfScreen(){
  root.append(box);return root;
 }
 
-function StoreScreen(){
+function SubScreen(){
  const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'});
  const title=t=>h('div',{class:'ghead'},t);
  function render(){
@@ -3409,6 +3444,89 @@ function StoreScreen(){
  render();root.append(box);return root;
 }
 
+
+/* ───── خانه + فروشگاه جدید ───── */
+const MASCOT='data:image/jpeg;base64,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';
+const stIc=p=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';
+function HomeScreen(){
+ const root=h('div',{class:'scr'}),box=h('div',{class:'scroll'});
+ const nm=h('b',{},'سلام 👋'),sub=h('small',{},'به مینی‌اپ خوش اومدی؛ بازی کن، خرید کن و رتبه بگیر.');
+ api('/api/social/me').then(m=>{if(m&&m.name)nm.textContent='سلام '+m.name+' 👋'}).catch(()=>{});
+ const hero=h('div',{class:'hm-hero'},h('img',{src:MASCOT,alt:''}),h('div',{},nm,sub));
+ const tile=(cls,k,svg,label)=>{const b=h('button',{class:'hm-tile '+cls,onclick:()=>openTab(k)},h('span',{}),h('span',{},label));b.firstChild.innerHTML=stIc(svg);return b};
+ const grid=h('div',{class:'hm-grid'},
+  tile('a','games','<rect x="2.5" y="7" width="19" height="11" rx="5.5"/><path d="M8 10.5v4M6 12.5h4"/><circle cx="15.5" cy="11.5" r=".8" fill="currentColor"/><circle cx="17.8" cy="13.6" r=".8" fill="currentColor"/>','بازی'),
+  tile('b','store','<path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>','فروشگاه'),
+  tile('c','board','<path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M12 14v3.5M8.5 20h7"/>','لیدربرد'),
+  tile('d','myself','<circle cx="12" cy="8" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>','پروفایل'));
+ box.append(hero,grid);root.append(box);return root;
+}
+function StoreScreen(){
+ const root=h('div',{class:'scr'}),box=h('div',{class:'scroll'});
+ const seg=h('div',{class:'st-seg'}),body=h('div',{});
+ let cat=null,cur='gift',subEl=null;
+ const tabsDef=[['gift','⭐ گیفت استارزی'],['money','💰 پول بازی'],['sub','💎 اشتراک']];
+ function drawSeg(){seg.replaceChildren(...tabsDef.map(([k,l])=>h('button',{class:cur===k?'on':'',onclick:()=>{cur=k;drawSeg();render()}},l)))}
+ async function load(){
+  body.replaceChildren(h('div',{class:'empty'},'در حال دریافت فروشگاه…'));
+  try{cat=await api('/api/social/store/catalog');render()}catch(e){body.replaceChildren(h('div',{class:'empty err'},e.message))}
+ }
+ function render(){
+  if(cur==='sub'){if(!subEl)subEl=SubScreen();subEl.style.cssText='position:relative;inset:auto;min-height:75vh';body.replaceChildren(subEl);return}
+  if(!cat)return;
+  if(cur==='gift'){
+   body.replaceChildren(h('div',{class:'st-grid'},...cat.tiers.map(t=>h('button',{class:'st-card t'+t.tier,onclick:()=>openTier(t)},h('div',{class:'big'},'⭐'),h('b',{},'گیفت '+num(t.tier)+' استارزی'),h('small',{},t.price?num(t.price)+' تومان':'قیمت اعلام‌نشده')))));
+  }else{
+   body.replaceChildren(h('div',{class:'st-grid'},...cat.packages.map((p,i)=>h('button',{class:'st-card m'+(i%4),onclick:()=>openMoney(i,p)},h('div',{class:'big'},'💰'),h('b',{},p.title+' پول بازی'),h('small',{},num(p.price)+' تومان')))));
+  }
+ }
+ function cardBox(card,owner){return h('div',{class:'st-note'},'💳 شماره کارت (برای کپی بزن):',h('div',{style:'margin-top:6px'},h('button',{class:'btn gh',style:'width:100%;direction:ltr;letter-spacing:1px',onclick:()=>copy(card)},card)),owner?h('div',{style:'margin-top:6px'},'👤 به نام: '+owner):null)}
+ function receiptPart(){
+  const fi=h('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'sfile'});
+  const pick=h('button',{class:'btn gh',style:'width:100%;margin-top:8px',onclick:()=>fi.click()},'📸 انتخاب عکس رسید');
+  fi.onchange=()=>{pick.textContent=fi.files[0]?('✅ '+fi.files[0].name):'📸 انتخاب عکس رسید'};
+  return {fi,pick};
+ }
+ async function submit(btn,payload,fi,close){
+  const file=fi.files&&fi.files[0];if(!file)return toast('اول عکس رسید پرداخت رو انتخاب کن.',1);
+  btn.disabled=true;const old=btn.textContent;btn.textContent='در حال ثبت سفارش…';
+  try{const image_data=await imageData(file);const r=await api('/api/social/store/order',Object.assign({image_data},payload));toast(r.message||'سفارش ثبت شد.');close()}
+  catch(e){toast(e.message,1);btn.disabled=false;btn.textContent=old}
+ }
+ function openTier(t){
+  sheet('گیفت '+num(t.tier)+' استارزی',close=>{
+   const wrap=h('div',{});
+   if(!t.price){wrap.append(h('div',{class:'st-note'},'قیمت این بسته هنوز توسط پشتیبانی ثبت نشده.'));return wrap}
+   wrap.append(h('div',{class:'st-note'},'⭐ قیمت: '+num(t.price)+' تومان'),h('div',{class:'sh-t',style:'margin-top:10px'},'نوع گیفت رو انتخاب کن:'),
+    h('div',{class:'st-items'},...t.items.map(it=>h('button',{class:'st-item',onclick:()=>{close();openGift(t,it)}},h('span',{class:'e'},it.emoji),h('span',{},it.name),h('span',{class:'p'},num(t.price)+' تومان')))));
+   return wrap;
+  });
+ }
+ function openGift(t,it){
+  sheet(it.emoji+' '+it.name+' · '+num(t.tier)+' استارزی',close=>{
+   let anon=false;
+   const a0=h('button',{class:'st-opt on'},'👤 با اسم خودم'),a1=h('button',{class:'st-opt'},'🕶 ناشناس');
+   a0.onclick=()=>{anon=false;a0.classList.add('on');a1.classList.remove('on')};a1.onclick=()=>{anon=true;a1.classList.add('on');a0.classList.remove('on')};
+   const txt=h('textarea',{class:'inp',style:'min-height:70px',placeholder:'متن همراه گیفت (اختیاری، حداکثر ۲۵۰ حرف)',maxlength:'250'});
+   const rcp=h('input',{class:'inp',dir:'ltr',placeholder:'یوزرنیم گیرنده، مثلاً @username'});
+   const {fi,pick}=receiptPart();
+   const go=h('button',{class:'pb green',onclick:()=>{
+     const u=rcp.value.trim().replace('https://t.me/','').replace(/^@/,'');
+     if(!/^[A-Za-z0-9_]{5,32}$/.test(u))return toast('یوزرنیم گیرنده معتبر نیست (انگلیسی، حداقل ۵ کاراکتر).',1);
+     submit(go,{type:'gift',key:it.key,anonymous:anon,gift_text:txt.value.trim(),recipient:u},fi,close)}},'ثبت سفارش و ارسال برای پشتیبانی');
+   return h('div',{},h('div',{class:'st-note'},'💳 مبلغ سفارش: '+num(t.price)+' تومان'),h('div',{class:'st-row'},a0,a1),txt,rcp,cardBox(cat.gift_card,cat.gift_owner),pick,fi,go);
+  });
+ }
+ function openMoney(i,p){
+  sheet(p.title+' پول بازی',close=>{
+   const {fi,pick}=receiptPart();
+   const go=h('button',{class:'pb green',onclick:()=>submit(go,{type:'money',index:i},fi,close)},'ثبت سفارش و ارسال برای پشتیبانی');
+   return h('div',{},h('div',{class:'st-note'},'💰 '+p.title+' پول بازی ← '+num(p.price)+' تومان'+'\nبعد از تایید پشتیبانی، پول بازی به حسابت اضافه می‌شه.'),cardBox(cat.buy_card,cat.buy_owner),pick,fi,go);
+  });
+ }
+ drawSeg();root.append(seg,box);box.append(body);load();return root;
+}
+
 function LeaderboardScreen(){
  const root=h('div',{class:'scr'}),body=h('div',{class:'scroll'});
  root.append(h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},ceI('5307866815148335163',24),' لیدربرد')),body);
@@ -3435,10 +3553,10 @@ function LeaderboardScreen(){
 const lbCss=document.createElement('style');lbCss.textContent='.lb-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;direction:rtl;overscroll-behavior-x:contain;scrollbar-width:none;height:100%}.lb-track::-webkit-scrollbar{display:none}.lb-page{flex:0 0 100%;width:100%;padding:12px;overflow-y:auto;scroll-snap-align:start}.lb-hint{text-align:center;color:var(--hint);font-size:12px;padding:8px}.lb-podium-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:6px;padding:18px 0}.lb-winner{display:flex;flex-direction:column;align-items:center;justify-content:end;text-align:center;gap:6px;padding:9px 2px;border-radius:16px;background:var(--sec);min-width:0}.lb-winner.rank1{transform:translateY(-13px);min-height:150px;border:2px solid #e5b93f}.lb-winner.rank2,.lb-winner.rank3{min-height:124px}.lb-winner .av{border-radius:50%!important;border:3px solid #d6b34a}.lb-winner b{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lb-winner small{font-size:11px;color:var(--hint)}.lb-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.lb-value{font-size:12px;white-space:nowrap}.lb-rank{width:24px;text-align:center}';document.head.append(lbCss);
 
 /* ───── شروع ───── */
-const TABS={games:GamesScreen,store:StoreScreen,room:SocialScreen,myself:MyselfScreen,chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
+const TABS={home:HomeScreen,games:GamesScreen,store:StoreScreen,board:LeaderboardScreen,myself:MyselfScreen,chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
 function openTab(k){
  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
- if(!tabEls[k])tabEls[k]=TABS[k]();push(tabEls[k],true);
+ if(!tabEls[k]){tabEls[k]=TABS[k]();if(k==='board')tabEls[k].querySelectorAll('.backib').forEach(x=>x.style.display='none')}push(tabEls[k],true);
 }
 async function bootTabs(){
  /* صفحه‌ی آماده‌سازی: همه‌چیز (چت‌روم، بازی‌ها، فروشگاه، خودم) قبل از ورود کاربر بالا میاد */
@@ -3447,6 +3565,7 @@ async function bootTabs(){
   h('div',{style:'width:44px;height:44px;border:4px solid var(--line);border-top-color:var(--btn);border-radius:50%;animation:spn .9s linear infinite'}),
   h('div',{style:'font-size:14px;color:var(--hint)'},'در حال آماده‌سازی مینی‌اپ…'));
  document.body.append(splash);
+ const mi=document.getElementById('mascotImg');if(mi)mi.src=MASCOT;
  const rm=k=>document.querySelector('#tabs button[data-k="'+k+'"]')?.remove();
  let m=null;
  try{m=await api('/api/social/me')}catch(e){}
@@ -3466,13 +3585,13 @@ async function bootTabs(){
   const ic=b.querySelector('i[data-ce]');if(ic){const id=ic.getAttribute('data-ce');ic.replaceChildren(ceI(id,26))}
  });
  /* داده‌ی سرور رو از قبل گرم می‌کنیم و همه‌ی تب‌ها همین الان ساخته میشن تا دیتاشون بیاد */
- const warm=['/api/myself','/api/social/room','/api/social/leaderboard','/api/game/crash/state'].map(u=>api(u).catch(()=>null));
+ const warm=['/api/myself','/api/social/store/catalog','/api/social/leaderboard','/api/game/crash/state'].map(u=>api(u).catch(()=>null));
  for(const k of keys){try{if(!tabEls[k])tabEls[k]=TABS[k]()}catch(e){console.error(e)}}
  const loading=()=>keys.some(k=>tabEls[k]&&[...tabEls[k].querySelectorAll('.empty')].some(e=>/^در حال/.test(e.textContent||'')));
  const t0=performance.now();
  await Promise.race([Promise.allSettled(warm),new Promise(r=>setTimeout(r,6000))]);
  while(loading()&&performance.now()-t0<6000)await new Promise(r=>setTimeout(r,120));
- openTab('myself');
+ openTab('home');
  splash.style.transition='opacity .25s';splash.style.opacity='0';setTimeout(()=>splash.remove(),260);
 }
 bootTabs();
@@ -6137,7 +6256,145 @@ _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cas
               "/api/game/mines/cashout": _p_game_mines_cashout}
 
 
-_SOCIAL_GET={"/api/social/room/gamechat":_social_gamechat_get,"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/room/poison":_social_poison_state,"/api/social/room/carrom":_social_carrom_state,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments}
+
+async def _social_store_catalog(qs, user):
+    """کاتالوگ فروشگاه مینی‌اپ: گیفت استارزی + بسته‌های پول بازی."""
+    tiers = []
+    for tier in (15, 25, 50, 100):
+        price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0)
+        if not price:
+            olds = await pool.fetch("SELECT item_key,price FROM gift_prices WHERE item_key=ANY($1::text[])", [x[0] for x in GIFT_TIERS[tier]])
+            price = max((int(r["price"]) for r in olds), default=0)
+        tiers.append({"tier": tier, "price": price,
+                      "items": [{"key": k, "name": n, "emoji": fb} for k, n, _e, fb in GIFT_TIERS[tier]]})
+    return _j({"tiers": tiers,
+               "packages": [{"amount": a, "price": p, "title": t} for a, p, t in BUY_PACKAGES],
+               "gift_card": GIFT_CARD, "gift_owner": BUY_CARD_OWNER, "buy_card": BUY_CARD, "buy_owner": BUY_CARD_OWNER})
+
+
+async def _social_store_order(b, user):
+    """ثبت سفارش از مینی‌اپ (گیفت استارزی یا پول بازی) و ارسال برای پشتیبانی با همان دکمه‌های تایید/رد ربات."""
+    uid = int(user["id"])
+    raw = str(b.get("image_data") or "")
+    m = re.fullmatch(r"data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)", raw)
+    if not m:
+        raise _ApiError("رسید باید عکس JPG، PNG یا WEBP باشد.")
+    try:
+        data = base64.b64decode(m.group(2), validate=True)
+    except Exception:
+        raise _ApiError("فایل رسید معتبر نیست.")
+    if not data or len(data) > 4_000_000:
+        raise _ApiError("حجم رسید باید کمتر از ۴ مگابایت باشد.")
+    if BOT_REF is None:
+        raise _ApiError("ثبت سفارش در حال حاضر در دسترس نیست.", 503)
+    targets = [a for a in (set(OWNER_IDS) | set(STAFF) | set(ADMIN_IDS)) if has_perm(a, "pay") or a in ADMIN_IDS]
+    if not targets:
+        raise _ApiError("پشتیبانی برای دریافت سفارش تنظیم نشده.", 503)
+    full = html.escape(str(user.get("first_name") or "کاربر") + (" " + str(user.get("last_name")) if user.get("last_name") else ""))
+    uname = ("@" + html.escape(str(user["username"]))) if user.get("username") else "ندارد"
+    kind = str(b.get("type") or "")
+
+    async def deliver(caption, kb):
+        refs, file_id = [], None
+        for aid in targets:
+            try:
+                bio = BytesIO(data); bio.name = "receipt." + m.group(1)
+                msg = await BOT_REF.send_photo(chat_id=aid, photo=bio if file_id is None else file_id,
+                                               caption=caption, parse_mode="HTML", reply_markup=kb)
+                if file_id is None and msg.photo:
+                    file_id = msg.photo[-1].file_id
+                refs.append([aid, msg.message_id])
+            except Exception:
+                log.warning("store order delivery failed for %s", aid, exc_info=True)
+        return refs, file_id
+
+    await upsert_user(uid, str(user.get("first_name") or "کاربر"))
+    if kind == "gift":
+        key = str(b.get("key") or "")
+        if key not in GIFT_ITEMS:
+            raise _ApiError("گیفت نامعتبر است.")
+        tier, name, _eid, fb = GIFT_ITEMS[key]
+        price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0) \
+            or int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", key) or 0)
+        if price <= 0:
+            raise _ApiError("قیمت این گیفت هنوز توسط پشتیبانی ثبت نشده.")
+        text = str(b.get("gift_text") or "").strip()
+        if len(text) > 250:
+            raise _ApiError("متن گیفت حداکثر ۲۵۰ کاراکتر باشد.")
+        rcp = str(b.get("recipient") or "").strip().replace("https://t.me/", "").lstrip("@")
+        if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", rcp):
+            raise _ApiError("یوزرنیم گیرنده معتبر نیست.")
+        anonymous = bool(b.get("anonymous"))
+        tracking = "FG" + datetime.now().strftime("%y%m%d") + str(random.randint(100000, 999999))
+        now = time.time()
+        oid = await pool.fetchval("""INSERT INTO gift_orders
+            (tracking_code,user_id,tier,item_key,item_name,gift_text,recipient_username,price,status,created_at,anonymous)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10) RETURNING order_id""",
+            tracking, uid, tier, key, name, text, "@" + rcp, price, now, anonymous)
+        dt = datetime.fromtimestamp(now).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        caption = (f"🎁 <b>سفارش جدید گیفت استارزی (از مینی‌اپ)</b>\n"
+                   f"🔖 شماره پیگیری: <code>{tracking}</code>\n"
+                   f"🎀 اسم سفارش: <b>{html.escape(name)}</b>\n"
+                   f"📦 نوع سفارش: <b>خرید گیفت {tier} استارزی</b>\n"
+                   f"💳 قیمت سفارش: <b>{price:,} تومان</b>\n"
+                   f"🕒 زمان سفارش: <code>{dt}</code>\n"
+                   f"🕶 نوع ارسال: <b>{'ناشناس' if anonymous else 'با اسم فرستنده'}</b>\n"
+                   f"👤 گیرنده: <b>@{html.escape(rcp)}</b>\n"
+                   f"✍️ متن گیفت: <b>{html.escape(text or 'بدون متن')}</b>\n"
+                   f"🆔 سفارش‌دهنده: <code>{uid}</code> ({full} / {uname})\n"
+                   f"🧾 کد سفارش: <code>#{oid}</code>\n"
+                   f"📌 وضعیت: ⏳ در انتظار بررسی")
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید سفارش", callback_data=f"gvr:ok:{oid}"),
+                                    InlineKeyboardButton("❌ رد سفارش", callback_data=f"gvr:no:{oid}")]])
+        refs, file_id = await deliver(caption, kb)
+        if not refs:
+            await pool.execute("DELETE FROM gift_orders WHERE order_id=$1", oid)
+            raise _ApiError("ارسال سفارش به پشتیبانی ناموفق بود؛ دوباره تلاش کن.", 503)
+        await pool.execute("UPDATE gift_orders SET msg_refs=$2, receipt_file_id=$3 WHERE order_id=$1", oid, json.dumps(refs), file_id)
+        try:
+            m2 = await BOT_REF.send_photo(GIFT_CHANNEL, file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+            refs.append([m2.chat_id, m2.message_id])
+            await pool.execute("UPDATE gift_orders SET msg_refs=$2 WHERE order_id=$1", oid, json.dumps(refs))
+        except Exception:
+            log.warning("store gift order channel delivery failed", exc_info=True)
+        try:
+            await BOT_REF.send_message(uid, f"✅ سفارش گیفتت ثبت شد!\n🔖 شماره پیگیری: {tracking}\n📦 {name} · {tier} استارزی\nنتیجه بررسی پشتیبانی بهت اعلام می‌شه.")
+        except Exception:
+            pass
+        return _j({"ok": True, "message": f"سفارش ثبت شد و برای پشتیبانی رفت ✅ پیگیری: {tracking}"})
+
+    if kind == "money":
+        try:
+            i = int(b.get("index"))
+            amount, price, title = BUY_PACKAGES[i]
+        except (TypeError, ValueError, IndexError):
+            raise _ApiError("بسته نامعتبر است.")
+        pend = await pool.fetchval("SELECT count(*) FROM purchases WHERE user_id=$1 AND status='pending'", uid)
+        if pend >= BUY_MAX_PENDING:
+            raise _ApiError(f"تا الان {pend} درخواست در انتظار تایید داری؛ صبر کن پشتیبانی بررسی کنه.")
+        oid = await pool.fetchval("INSERT INTO purchases (user_id, amount, price, status, created_at) VALUES ($1,$2,$3,'pending',$4) RETURNING id",
+                                  uid, amount, price, time.time())
+        caption = (f"🧾 <b>رسید خرید پول بازی #{oid} (از مینی‌اپ)</b>\n\n"
+                   f"👤 کاربر: {full} ({uname})\n🆔 <code>{uid}</code>\n"
+                   f"💎 بسته: <b>{title}</b> ({amount:,} پول بازی)\n💳 مبلغ: <b>{price:,} تومن</b>")
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید", callback_data=f"bp:ok:{oid}"),
+                                    InlineKeyboardButton("❌ رد", callback_data=f"bp:no:{oid}")]])
+        refs, file_id = await deliver(caption, kb)
+        if not refs:
+            await pool.execute("DELETE FROM purchases WHERE id=$1", oid)
+            raise _ApiError("ارسال سفارش به پشتیبانی ناموفق بود؛ دوباره تلاش کن.", 503)
+        await pool.execute("UPDATE purchases SET file_id=$2 WHERE id=$1", oid, file_id)
+        PURCHASE_MSGS[oid] = [(a, mid) for a, mid in refs]
+        try:
+            await BOT_REF.send_message(uid, f"✅ رسید شماره #{oid} ثبت شد و برای پشتیبانی ارسال شد.\nبعد از بررسی، نتیجه همینجا بهت اعلام میشه.")
+        except Exception:
+            pass
+        return _j({"ok": True, "message": f"سفارش ثبت شد و برای پشتیبانی رفت ✅ شماره #{oid}"})
+
+    raise _ApiError("نوع سفارش نامعتبر است.")
+
+
+_SOCIAL_GET={"/api/social/room/gamechat":_social_gamechat_get,"/api/social/leaderboard":_g_leaderboard,"/api/social/me":_social_me,"/api/social/feed":_social_feed,"/api/social/stories":_social_stories,"/api/social/profile":_social_profile,"/api/social/room":_social_room,"/api/social/room/poison":_social_poison_state,"/api/social/room/carrom":_social_carrom_state,"/api/social/media":_social_media_get,"/api/social/emoji":_social_emoji_image,"/api/social/emojipack":_social_emoji_pack,"/api/social/comments":_social_comments,"/api/social/store/catalog":_social_store_catalog}
 async def _social_subscription_receipt(b, user):
     """ارسال رسید اشتراک ۳۰ روزه به مدیران برای بررسی دستی."""
     uid = int(user["id"])
@@ -6208,7 +6465,7 @@ async def mini_subscription_review_cb(update: Update, context: ContextTypes.DEFA
     else:
         await q.answer("عملیات نامعتبر است.", show_alert=True)
 
-_SOCIAL_POST={"/api/social/room/gamechat/send":_social_gamechat_send,"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/carrom/create":_social_carrom_create,"/api/social/room/carrom/join":_social_carrom_join,"/api/social/room/carrom/cancel":_social_carrom_cancel,"/api/social/room/carrom/shoot":_social_carrom_shoot,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read,"/api/social/subscription/receipt":_social_subscription_receipt,"/api/social/follow":_social_follow,"/api/social/profile/like":_social_profile_like}
+_SOCIAL_POST={"/api/social/room/gamechat/send":_social_gamechat_send,"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/carrom/create":_social_carrom_create,"/api/social/room/carrom/join":_social_carrom_join,"/api/social/room/carrom/cancel":_social_carrom_cancel,"/api/social/room/carrom/shoot":_social_carrom_shoot,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read,"/api/social/subscription/receipt":_social_subscription_receipt,"/api/social/store/order":_social_store_order,"/api/social/follow":_social_follow,"/api/social/profile/like":_social_profile_like}
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
@@ -6320,7 +6577,7 @@ async def _http_conn(reader, writer):
         clen = _int(headers.get("content-length"), 0, 0)
         if method not in ("GET", "HEAD", "POST"):
             status, ctype, body, extra = 405, "text/plain", b"method not allowed", {}
-        elif clen > (5_500_000 if urllib.parse.urlsplit(target).path in ("/api/social/post", "/api/social/story", "/api/social/subscription/receipt") else 200_000):
+        elif clen > (5_500_000 if urllib.parse.urlsplit(target).path in ("/api/social/post", "/api/social/story", "/api/social/subscription/receipt", "/api/social/store/order") else 200_000):
             status, ctype, body, extra = 413, "text/plain", b"too large", {}
         else:
             raw = await asyncio.wait_for(reader.readexactly(clen), 15 if clen < 300_000 else 90) if clen else b""
