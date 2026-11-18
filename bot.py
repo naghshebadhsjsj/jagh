@@ -1215,52 +1215,84 @@ textarea.inp{min-height:130px;resize:vertical}
 .tw-main{width:100%;height:58px;border:0;border-radius:29px;background:#3095f3;color:#fff;font-weight:900;font-size:21px;cursor:pointer;font-family:inherit}
 .tw-main.green{background:#16a34a}.tw-main:disabled{background:#3a424b;color:#8a929b}
 .tw-res{margin-bottom:12px}
-.fm{padding:0 0 18px;color:#fff;direction:rtl}
-.fm-hud{display:flex;align-items:center;gap:8px;margin:0 0 10px}
-.fm-pill{flex:1;display:flex;align-items:center;gap:7px;height:42px;padding:0 13px;border-radius:21px;background:#111a33;border:1px solid #ffffff14;font-weight:800;font-size:15px;min-width:0}
-.fm-pill b{font-size:16px}.fm-pill small{color:#9fb0d0;font-weight:600;font-size:11.5px;margin-inline-start:auto}
-.fm-pill .fm-bar{flex:1;height:7px;border-radius:5px;background:#ffffff1c;overflow:hidden;min-width:30px}
-.fm-pill .fm-bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#4ade80,#facc15);transition:width .4s}
-.fm-pill.warn .fm-bar i{background:linear-gradient(90deg,#fb923c,#ef4444)}
-.fm-rs{width:42px;height:42px;border:0;border-radius:50%;background:#111a33;color:#9fb0d0;font-size:18px;flex:none;border:1px solid #ffffff14}
-.fm-stage{position:relative;width:100%;aspect-ratio:1/1;border-radius:22px;overflow:hidden;background:#3c7a25;box-shadow:0 14px 40px #0007,0 0 0 1px #ffffff1c;touch-action:manipulation;-webkit-user-select:none;user-select:none}
-.fm-cv{position:absolute;inset:0;width:100%;height:100%;display:block}
-.fm-chip{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:5px;white-space:nowrap;border:0;border-radius:15px;padding:6px 11px;font:800 12px/1.2 inherit;color:#fff;background:#0b1220cc;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);box-shadow:0 4px 14px #0008,0 0 0 1px #ffffff26;cursor:pointer;z-index:3;transition:background .25s,opacity .25s}
-.fm-chip.go{background:linear-gradient(135deg,#16a34a,#65a30d);animation:fmPulse 1.3s ease-in-out infinite}
-.fm-chip.milk{background:linear-gradient(135deg,#2563eb,#38bdf8);animation:fmPulse 1.3s ease-in-out infinite}
-.fm-chip.dim{opacity:.62}
-.fm-chip i{font-style:normal;font-size:15px}
-@keyframes fmPulse{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.09)}}
-.fm-pop{position:absolute;transform:translate(-50%,-50%);z-index:5;pointer-events:none;font-weight:900;font-size:17px;color:#fff;text-shadow:0 2px 8px #000c,0 0 2px #000;animation:fmPop 1.5s ease-out forwards;white-space:nowrap}
-@keyframes fmPop{0%{opacity:0;transform:translate(-50%,-30%) scale(.6)}15%{opacity:1;transform:translate(-50%,-70%) scale(1.15)}100%{opacity:0;transform:translate(-50%,-260%) scale(1)}}
-.fm-card{background:linear-gradient(135deg,#1c3154,#111b31);border:1px solid #ffffff1c;border-radius:20px;padding:13px;margin:11px 0 0;box-shadow:0 8px 24px #0004}
-.fm-ch{display:flex;align-items:center;gap:9px;margin-bottom:9px}
-.fm-ch .ic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:21px;background:#ffffff14;flex:none}
-.fm-ch .t{font-weight:900;font-size:15.5px}.fm-ch .s{font-size:12px;color:#9fb0d0;margin-top:2px}
-.fm-lv{margin-inline-start:auto;font-size:11px;font-weight:800;padding:4px 9px;border-radius:10px;background:#facc1522;color:#facc15;flex:none}
-.fm-prog{height:9px;border-radius:6px;background:#ffffff1a;overflow:hidden;margin:2px 0 10px}
-.fm-prog i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,#34d399,#a3e635);transition:width .3s linear}
-.fm-prog.milk i{background:linear-gradient(90deg,#38bdf8,#e0f2fe)}
-.fm-row{display:flex;gap:8px}
-.fm-b{flex:1;border:0;border-radius:14px;padding:11px 8px;color:#fff;font-weight:900;font-size:13.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:linear-gradient(135deg,#16a34a,#4d9a1f);box-shadow:0 4px 12px #0004;min-width:0}
-.fm-b small{font-weight:700;opacity:.85;font-size:11px}
-.fm-b.blue{background:linear-gradient(135deg,#2563eb,#6d28d9)}
-.fm-b.gold{background:linear-gradient(135deg,#d97706,#f59e0b);color:#201300}
-.fm-b.ghost{background:#ffffff14;box-shadow:none;color:#dbe6ff}
-.fm-b:disabled{opacity:.45;filter:grayscale(.4)}
-.fm-b:active:not(:disabled){transform:scale(.97)}
-.fm-items{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
-.fm-it{background:#ffffff0f;border-radius:14px;padding:9px 6px;text-align:center}
-.fm-it .e{font-size:22px}.fm-it .n{font-weight:900;font-size:17px;margin:2px 0}.fm-it .p{font-size:10.5px;color:#9fb0d0;margin-bottom:6px}
-.fm-it button{width:100%;border:0;border-radius:10px;padding:6px 0;font-weight:800;font-size:11.5px;background:#facc15;color:#241800}
-.fm-it button:disabled{opacity:.35}
-.fm-note{font-size:11.5px;color:#9fb0d0;text-align:center;margin:12px 6px 0;line-height:1.8}
+.fw{padding:0 0 18px;color:#fff;direction:rtl;-webkit-user-select:none;user-select:none}
+.fw-hud{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.fw-pill{flex:1;display:flex;align-items:center;gap:7px;height:42px;padding:0 13px;border-radius:21px;background:#111a33;border:1px solid #ffffff14;font-weight:800;font-size:15px;min-width:0}
+.fw-pill small{color:#9fb0d0;font-weight:700;font-size:11.5px;margin-inline-start:auto}
+.fw-bar{flex:1;height:7px;border-radius:5px;background:#ffffff1c;overflow:hidden;min-width:28px}
+.fw-bar i{display:block;height:100%;width:0;border-radius:5px;background:linear-gradient(90deg,#4ade80,#facc15);transition:width .4s}
+.fw-pill.warn .fw-bar i{background:linear-gradient(90deg,#fb923c,#ef4444)}
+.fw-rs{width:42px;height:42px;border-radius:50%;background:#111a33;color:#9fb0d0;font-size:18px;flex:none;border:1px solid #ffffff14}
+.fw-world{position:relative;width:100%;height:min(520px,calc(100vh - 290px));min-height:430px;border-radius:22px;overflow:hidden;box-shadow:0 14px 40px #0007,0 0 0 1px #ffffff1c;background:#3c7a25;touch-action:pan-y}
+.fw-strip{display:flex;width:300%;height:100%;direction:ltr;transition:transform .65s cubic-bezier(.65,0,.3,1)}
+.fw-p{position:relative;width:33.3333%;flex:none;height:100%;overflow:hidden;direction:rtl;background:linear-gradient(#7ccbff 0,#bfe8ff 34%,#5aa13a 34.2%,#3d7a26 100%)}
+.fw-sky{position:absolute;left:0;right:0;top:0;height:34%;pointer-events:none}
+.fw-sky .sun{position:absolute;right:12%;top:12%;width:46px;height:46px;border-radius:50%;background:radial-gradient(#fff6b0,#ffd23f 60%,#ffb703);box-shadow:0 0 34px 10px #ffe58a99}
+.fw-sky .cl{position:absolute;height:20px;width:74px;border-radius:20px;background:#fff;opacity:.92;box-shadow:22px -9px 0 -2px #fff,-18px -6px 0 -4px #fff;animation:fwCl 38s linear infinite}
+.fw-sky .c1{top:22%;left:-90px}.fw-sky .c2{top:52%;left:-90px;animation-duration:55s;animation-delay:-20s;transform:scale(.7)}
+@keyframes fwCl{to{transform:translateX(520px)}}
+.fw-sky .hill{position:absolute;left:-10%;right:-10%;bottom:-18px;height:46px;border-radius:50% 50% 0 0;background:#6bb04a}
+.fw-sign{position:absolute;top:calc(34% + 8px);right:10px;z-index:3;padding:5px 12px;border-radius:12px;background:#6b3f17;border:2px solid #d9a35f;font-weight:900;font-size:13px;box-shadow:0 3px 0 #3d2208}
+.fw-sign small{color:#ffd88a;font-size:11px;margin-inline-start:4px}
+.fw-grid{position:absolute;left:6%;right:6%;top:46%;bottom:25%;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(3,1fr);gap:6px;touch-action:none;z-index:2}
+.fw-plot{border-radius:12px;background:linear-gradient(#8a5a2b,#6e4520);box-shadow:inset 0 3px 7px #0006,0 2px 0 #4a2d10;display:grid;place-items:center;font-size:28px;transition:background .3s}
+.fw-plot span{display:block;pointer-events:none}
+.fw-plot.sown span{animation:fwPop .35s}.fw-plot.grow{background:linear-gradient(#6b4a22,#53391a)}.fw-plot.grow span{animation:fwSway 2.4s ease-in-out infinite}
+.fw-plot.ripe{background:linear-gradient(#a8742f,#7c5222);box-shadow:inset 0 3px 7px #0006,0 0 14px #ffe08a}
+.fw-plot.ripe span{animation:fwSway 1.4s ease-in-out infinite;filter:drop-shadow(0 0 6px #ffd23f)}.fw-plot.cut{background:linear-gradient(#7a5a34,#5e4426)}
+@keyframes fwPop{from{transform:scale(.2)}70%{transform:scale(1.4)}}@keyframes fwSway{50%{transform:rotate(7deg) scale(1.08)}}
+.fw-hint{position:absolute;left:10px;right:10px;bottom:10px;z-index:3;text-align:center;font-weight:800;font-size:12.5px;line-height:1.7;padding:8px 10px;border-radius:14px;background:#0009;backdrop-filter:blur(4px)}
+.fw-timer{display:none;position:absolute;left:50%;top:calc(34% + 8px);transform:translateX(-50%);z-index:3;padding:5px 12px;border-radius:12px;background:#0009;font-weight:800;font-size:12px;white-space:nowrap}
+.fw-seeds{position:absolute;left:10px;right:10px;bottom:58px;z-index:3;gap:8px;display:none}
+.fw-seed{flex:1;border:2px solid #ffffff30;border-radius:14px;padding:7px 4px;background:#00000066;color:#fff;font:800 13px/1.4 inherit;display:flex;flex-direction:column;align-items:center}
+.fw-seed small{font-size:10.5px;opacity:.8;font-weight:700}.fw-seed.on{border-color:#facc15;background:#facc1533}
+.fw-hen{position:absolute;left:8%;bottom:20%;font-size:20px;z-index:1;animation:fwHen 9s ease-in-out infinite}.fw-hen.h2{left:70%;bottom:23%;animation-duration:12s;font-size:15px}
+@keyframes fwHen{50%{transform:translateX(60px) scaleX(-1)}}
+.fw-bar2{background:repeating-linear-gradient(90deg,#8a5a2b 0 30px,#7a4e24 30px 32px);}
+.fw-bar2::after{content:"";position:absolute;left:0;right:0;bottom:0;height:24%;background:repeating-linear-gradient(100deg,#e4b84c 0 6px,#c99a2e 6px 9px);pointer-events:none}
+.fw-bar2 .fw-sign{top:10px}.fw-bar2 .fw-hint{z-index:4}
+.fw-cow{position:absolute;left:4%;right:4%;top:11%;aspect-ratio:320/240;touch-action:none;z-index:2}
+.fw-cow svg{width:100%;height:100%;display:block;overflow:visible}.fw-cow .head{transform-origin:70px 118px}
+.fw-cow.producing .head{animation:fwChew .5s ease-in-out infinite}@keyframes fwChew{50%{transform:rotate(3deg) translateY(2px)}}
+.teat{position:absolute;top:81.5%;width:5.2%;height:12%;border-radius:0 0 50% 50%/0 0 60% 60%;background:linear-gradient(#f9a8b8,#ec7a93);border:2px solid #2b2b2b;border-top:0;transform-origin:50% 0;touch-action:none;z-index:3}
+.fw-cow.ready .teat{animation:fwGlow 1s ease-in-out infinite}@keyframes fwGlow{50%{box-shadow:0 0 14px 5px #7dd3fc;background:#fff}}
+.fw-bucket{position:absolute;left:46.5%;top:86%;width:23.5%;height:14.5%;border:3px solid #6b7280;border-top:0;border-radius:0 0 12px 12px;background:#9ca3af55;overflow:hidden;display:flex;align-items:flex-end;z-index:1}
+.fw-bucket i{display:block;width:100%;height:0;background:linear-gradient(#fff,#dbeafe);transition:height .25s}
+.fw-drop{position:absolute;top:92%;width:2.4%;height:3.5%;border-radius:50%;background:#fff;z-index:2;animation:fwDrop .6s ease-in forwards}@keyframes fwDrop{to{transform:translateY(40px);opacity:0}}
+.fw-soy{position:absolute;left:14px;bottom:62px;z-index:5;display:none;flex-direction:column;align-items:center;gap:2px;touch-action:none}
+.fw-soy span{display:grid;place-items:center;width:58px;height:58px;border-radius:50%;background:#fff3;border:2px dashed #fff;font-size:30px;animation:fwPulse 1.2s ease-in-out infinite;position:relative;z-index:6}
+.fw-soy small{font-weight:800;font-size:11px;background:#0008;border-radius:8px;padding:2px 7px}@keyframes fwPulse{50%{box-shadow:0 0 0 9px #ffffff22}}
+.fw-barn{position:absolute;left:11%;right:11%;top:42%;height:36%;direction:ltr;cursor:pointer;z-index:2}
+.fw-barn .roof{position:absolute;left:-6%;right:-6%;top:-38%;height:46%;background:linear-gradient(#5b2a12,#3c1a0a);clip-path:polygon(50% 0,100% 100%,0 100%)}
+.fw-barn .wall{position:absolute;inset:0;background:repeating-linear-gradient(90deg,#c0392b 0 18px,#a52f23 18px 20px);border:4px solid #fff;border-radius:6px;overflow:hidden;box-shadow:0 8px 0 #0004}
+.fw-barn .inside{position:absolute;inset:0;background:#2a1608;display:flex;align-items:center;justify-content:center;gap:10px;font-size:30px}
+.fw-barn .door{position:absolute;top:0;bottom:0;width:50%;background:repeating-linear-gradient(90deg,#c0392b 0 18px,#a52f23 18px 20px);border:3px solid #fff;transition:transform .7s}
+.fw-barn .door::after{content:"";position:absolute;inset:6px;background:linear-gradient(45deg,transparent 46%,#fff 47% 53%,transparent 54%),linear-gradient(-45deg,transparent 46%,#fff 47% 53%,transparent 54%)}
+.fw-barn .door.l{left:0}.fw-barn .door.r{right:0}.fw-barn.open .door.l{transform:translateX(-96%)}.fw-barn.open .door.r{transform:translateX(96%)}
+.fw-sheet{position:absolute;left:0;right:0;bottom:0;max-height:82%;overflow:auto;z-index:6;background:linear-gradient(#1c3154f2,#0f1a30f7);border-radius:20px 20px 0 0;padding:12px;transform:translateY(105%);transition:transform .4s cubic-bezier(.3,.9,.3,1);backdrop-filter:blur(6px)}
+.fw-sheet.open{transform:none}
+.fw-sh{display:flex;align-items:center;gap:8px;margin-bottom:10px}.fw-sh small{color:#9fb0d0;font-weight:700}.fw-sh .x{margin-inline-start:auto;width:32px;height:32px;border-radius:50%;background:#ffffff1c;color:#fff;font-size:15px}
+.fw-items{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fw-it{background:#ffffff12;border-radius:14px;padding:8px 5px;text-align:center}.fw-it .e{font-size:24px}.fw-it .n{font-weight:900;font-size:18px}.fw-it .p{font-size:10.5px;color:#9fb0d0;margin-bottom:6px}
+.fw-it button{width:100%;border-radius:9px;padding:6px 0;font-weight:800;font-size:11.5px;background:#ffffff1f;color:#fff;margin-top:4px}.fw-it button.all{background:#facc15;color:#241800}.fw-it button:disabled{opacity:.35}
+.fw-sec{font-weight:900;font-size:13px;color:#ffd88a;margin:12px 2px 6px}
+.fw-upr{display:flex;align-items:center;gap:10px;background:#ffffff0f;border-radius:14px;padding:8px 10px;margin-bottom:7px}.fw-upr .e{font-size:24px}
+.fw-upr .t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13px}.fw-upr small{color:#9fb0d0;font-size:11px}
+.fw-b{border-radius:12px;padding:9px 12px;color:#fff;font-weight:900;font-size:12.5px;background:linear-gradient(135deg,#2563eb,#6d28d9);white-space:nowrap}.fw-b:disabled{opacity:.45;filter:grayscale(.4)}
+.fw-farmer{position:absolute;left:8px;bottom:6px;z-index:7;font-size:34px;pointer-events:none;filter:drop-shadow(0 3px 2px #0006)}.fw-farmer.flip span{transform:scaleX(-1)}.fw-farmer span{display:block}
+.fw-farmer.walk span{animation:fwWalk .26s ease-in-out infinite}@keyframes fwWalk{50%{transform:translateY(-7px) rotate(-6deg)}}.fw-farmer.walk.flip span{animation-name:fwWalk2}@keyframes fwWalk2{50%{transform:scaleX(-1) translateY(-7px) rotate(-6deg)}}
+.fw-pop{position:absolute;transform:translate(-50%,-50%);z-index:9;pointer-events:none;font-weight:900;font-size:17px;color:#fff;text-shadow:0 2px 8px #000c,0 0 2px #000;animation:fwUp 1.2s ease forwards;white-space:nowrap}
+@keyframes fwUp{from{opacity:0;margin-top:10px}15%{opacity:1}to{opacity:0;margin-top:-54px}}
+.fw-nav{display:flex;gap:8px;margin:10px 0 0}.fw-nav button{flex:1;border-radius:16px;padding:10px 4px;background:#111a33;border:1px solid #ffffff14;color:#9fb0d0;font:800 13px/1.3 inherit;display:flex;flex-direction:column;align-items:center;gap:2px}
+.fw-nav button i{font-style:normal;font-size:22px}.fw-nav button.on{background:linear-gradient(135deg,#16a34a,#65a30d);color:#fff;border-color:transparent}
+.fw-note{font-size:11.5px;color:#9fb0d0;text-align:center;margin:12px 6px 0;line-height:1.8}
 </style></head><body>
 <div id="app">
   <div id="views"></div>
   <nav id="tabs">
     <button data-k="games"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="11" rx="5.5"/><path d="M8 10.5v4M6 12.5h4"/><circle cx="15.5" cy="11.5" r=".8" fill="currentColor"/><circle cx="17.8" cy="13.6" r=".8" fill="currentColor"/></svg><span>بازی</span></button>
     <button data-k="store"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg><span>فروشگاه</span></button>
+    <button data-k="farm"><i>🌾</i><span>مزرعه</span></button>
     <button data-k="home" class="tb-home"><img id="mascotImg" alt=""><span>خانه</span></button>
     <button data-k="board"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 6H4v1.5A3 3 0 0 0 7 10.5M17 6h3v1.5a3 3 0 0 1-3 3"/><path d="M12 14v3.5M8.5 20h7"/></svg><span>لیدربرد</span></button>
     <button data-k="myself"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg><span>پروفایل</span></button>
@@ -3005,7 +3037,6 @@ function GamesScreen(){
    [z=>svgIc('skull',z),'سم یا خوراکی','میز دونفره با انتظار برای حریف؛ اگر تا ۱۲۰ ثانیه کسی نیاید، شرط برمی‌گردد.','poison','red'],
    [z=>svgIc('target',z),'خط و نشان','کاروم دونفره با مهره‌های فیزیکی و نوبت ۶۰ ثانیه‌ای.','carrom','green'],
     [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج گنج','برج گنج: ۸ طبقه؛ حالت آسان ۴ در و حالت سخت ۳ در؛ پشت یکی از درها نگهبانه. تا ×۵ در حالت آسان و تا ×۷ در حالت سخت برنده شو.','tower','gold']];
-  if(window.IS_STAFF)G.push([z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px;font-size:'+Math.round(z*.8)+'px;display:grid;place-items:center'},'🌾');return d},'مزرعه','گندم و سویا بکار، به گاو غذا بده و شیر بگیر، انبار رو ارتقا بده. (فعلاً فقط پشتیبان)','farm','green']);
   const grid=h('div',{class:'games-grid'},...G.map(([ic,t,d,key,cls])=>{
    const v=h('div',{class:'gvisual'},ic(64));
    if(key==='crash'){v.style.background='radial-gradient(circle,#073c42,#050b1e 72%)';v.replaceChildren(h('div',{class:'rocket-mark'},svgIc('rocket',76)))}
@@ -3015,7 +3046,6 @@ function GamesScreen(){
  }
  function play(k){clearInterval(cdT);
   if(k==='crash')crash(); else if(k==='mines')mines(); else if(k==='tower')tower();
-  else if(k==='farm'){const fs=FarmScreen();rkCleanup=()=>{try{fs._destroy&&fs._destroy()}catch(e){}};box.replaceChildren(h('div',{class:'ghead'},'🌾 مزرعه'),h('button',{class:'ib',style:'color:white',onclick:leave},'← بازگشت'),fs)}
   else if(k==='poison'||k==='carrom'){
     const sc=SocialScreen({games:k});
     sc.style.cssText='position:relative;inset:auto;display:block;background:transparent;min-height:60vh';
@@ -3823,280 +3853,131 @@ function HomeScreen(){
  root.append(box);return root;
 }
 
-/* ───── مزرعه (فعلاً فقط پشتیبان‌ها): صحنه‌ی متحرک روی عکس + بازی ───── */
+/* ───── مزرعه (تب جدا، فعلاً فقط پشتیبان‌ها): کاربر خودش می‌کاره، گاو رو می‌دوشه، انبار رو باز می‌کنه و ارتقا می‌ده ───── */
 function FarmScreen(){
- const SZ=1254;                                   /* مختصات همه‌ی چیزها روی عکس اصلی ۱۲۵۴×۱۲۵۴ */
- const FIELDS={wheat:{x:100,y:634,w:424,h:480},soy:{x:648,y:662,w:544,h:480}};
- const COWS=[{x:235,y:200,rx:62,ry:52,ph:0},{x:420,y:293,rx:55,ry:62,ph:1.7,me:1},{x:268,y:378,rx:62,ry:52,ph:3.1},{x:402,y:438,rx:48,ry:64,ph:4.6}];
- const HENS=[{x:878,y:545},{x:913,y:526},{x:812,y:566},{x:900,y:580}];
- const TREES=[{x:110,y:66,r:70},{x:548,y:42,r:48},{x:1152,y:76,r:64},{x:52,y:262,r:56},{x:66,y:532,r:56},{x:778,y:440,r:54},{x:1176,y:640,r:66},{x:60,y:1086,r:74},{x:1192,y:1112,r:74}];
- const WINDOWS=[[668,234,22,16],[1010,286,20,16],[1066,326,18,14],[1010,326,18,14],[1088,386,26,20]];
- const root=h('div',{class:'fm'});
- let S=null,off=0,busy=false,alive=true,raf=0,tk=0,lastDraw=0,sig='',W=0,DPR=1;
- const nowS=()=>Date.now()/1000+off;
- const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rnd=(a,b)=>a+Math.random()*(b-a);
- const fmtT=s=>{s=Math.max(0,Math.ceil(s));return num(Math.floor(s/60))+':'+String(s%60).padStart(2,'0').replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d])};
- const IMG=new Image();let imgOK=false;IMG.onload=()=>{imgOK=true;prep()};IMG.src='/farm/scene.jpg';
- const K=()=>(IMG.naturalWidth||1024)/SZ;
- /* ───── عناصر ───── */
- const coinsV=h('b',{},'۰'),barnBar=h('i'),barnTxt=h('small',{},'');
- const barnPill=h('div',{class:'fm-pill'},'📦',h('div',{class:'fm-bar'},barnBar),barnTxt);
- const hud=h('div',{class:'fm-hud'},
-  h('div',{class:'fm-pill'},'🪙',coinsV,h('small',{},'سکه')),
-  barnPill,
-  h('button',{class:'fm-rs',title:'شروع دوباره',onclick:async()=>{if(await ask('مزرعه از اول شروع بشه؟ همه‌چیز پاک میشه.'))act('reset')}},'⟲'));
- const cv=h('canvas',{class:'fm-cv'}),ctx=cv.getContext('2d');
- const chip=(cls,fn)=>h('button',{class:'fm-chip '+(cls||''),onclick:fn});
- const chW=chip('',()=>fieldTap('wheat')),chS=chip('',()=>fieldTap('soy')),chC=chip('',cowTap),chB=chip('',()=>card.barn.scrollIntoView({behavior:'smooth',block:'center'}));
- const at=(el,x,y)=>{el.style.left=(x/SZ*100)+'%';el.style.top=(y/SZ*100)+'%';return el};
- const stage=h('div',{class:'fm-stage'},cv,at(chW,312,560),at(chS,920,586),at(chC,420,226),at(chB,672,376));
- const card={field:h('div',{class:'fm-card'}),cow:h('div',{class:'fm-card'}),barn:h('div',{class:'fm-card'})};
- root.append(hud,stage,card.field,card.cow,card.barn,h('div',{class:'fm-note'},'🌾 این بخش فعلاً فقط برای پشتیبان‌ها فعاله و سکه‌ی مزرعه به پول ربات ربطی نداره.'));
- let fieldProg,fieldTxt,cowProg,cowTxt;
- /* ───── ذرات و افکت‌ها ───── */
- const P=[],SMOKE=[],POLLEN=[],BIRDS=[];
- for(let i=0;i<26;i++)POLLEN.push({x:Math.random()*SZ,y:Math.random()*SZ,s:rnd(1.2,2.8),v:rnd(8,22),ph:rnd(0,6.3)});
- const CLOUDS=[{x:-200,y:200,r:260,v:14},{x:500,y:700,r:300,v:10},{x:1000,y:-100,r:230,v:17}];
- function burst(kind,x,y,n){
-  for(let i=0;i<n;i++){
-   if(kind==='gold'){const a=rnd(0,6.28),s=rnd(40,190);P.push({t:'star',x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-60,g:260,l:0,L:rnd(.7,1.3),c:['#fde047','#facc15','#fff7b0','#fbbf24'][i%4],r:rnd(3,7)})}
-   else if(kind==='milk'){P.push({t:'dot',x:x+rnd(-12,12),y,vx:rnd(-60,60),vy:rnd(-220,-90),g:520,l:0,L:rnd(.6,1),c:'#f8fbff',r:rnd(3,5.5)})}
-   else if(kind==='leaf'){P.push({t:'dot',x:x+rnd(-30,30),y:y+rnd(-10,20),vx:rnd(-30,30),vy:rnd(-120,-40),g:60,l:0,L:rnd(.8,1.4),c:['#86efac','#4ade80','#bef264'][i%3],r:rnd(2.5,5)})}
-   else if(kind==='ring'){P.push({t:'ring',x,y,vx:0,vy:0,g:0,l:i*.12,L:.9,c:'#fde047',r:10})}
-  }
- }
- function pop(txt,x,y){const e=h('div',{class:'fm-pop'},txt);at(e,x,y);stage.append(e);setTimeout(()=>e.remove(),1600)}
- /* ───── پیش‌پردازش: نسخه‌ی «نهال» رنگ زمین‌ها (برای مرحله‌ی رشد) ───── */
- let young={};
- function prep(){
-  try{
-   const k=K();
-   for(const key of ['wheat','soy']){
-    const f=FIELDS[key],w=Math.round(f.w*k),hh=Math.round(f.h*k),c=document.createElement('canvas');c.width=w;c.height=hh;
-    const x=c.getContext('2d');x.drawImage(IMG,f.x*k,f.y*k,w,hh,0,0,w,hh);
-    const d=x.getImageData(0,0,w,hh),a=d.data;
-    for(let i=0;i<a.length;i+=4){const r=a[i],g=a[i+1],b=a[i+2];
-     if(key==='wheat'){a[i]=clamp(r*.52+g*.12,0,255);a[i+1]=clamp(g*.95+r*.1,0,255);a[i+2]=clamp(b*.5,0,255)}
-     else{a[i]=clamp(r*1.35+20,0,255);a[i+1]=clamp(g*1.2+22,0,255);a[i+2]=clamp(b*.8+4,0,255)}}
-    x.putImageData(d,0,0);young[key]=c;
-   }
-  }catch(e){young={}}
- }
- /* ───── رسم ───── */
- const sc=()=>W/SZ;
- function sprite(cx,cy,rx,ry,dx,dy,rot,px,py){
-  const s=sc(),k=K(),m=7,x0=cx-rx-m,y0=cy-ry-m,w0=2*(rx+m),h0=2*(ry+m);
-  ctx.save();ctx.beginPath();ctx.ellipse(cx*s,cy*s,rx*s,ry*s,0,0,6.2832);ctx.clip();
-  ctx.translate(px*s,py*s);ctx.rotate(rot);ctx.translate(dx*s,dy*s);ctx.translate(-px*s,-py*s);
-  ctx.drawImage(IMG,x0*k,y0*k,w0*k,h0*k,x0*s,y0*s,w0*s,h0*s);ctx.restore();
- }
- function soil(f){
-  const s=sc(),x=f.x*s,y=f.y*s,w=f.w*s,hh=f.h*s;
-  const g=ctx.createLinearGradient(0,y,0,y+hh);g.addColorStop(0,'#7a5733');g.addColorStop(1,'#5d3f23');ctx.fillStyle=g;ctx.fillRect(x,y,w,hh);
-  const rows=9,rw=w/rows;
-  for(let i=0;i<rows;i++){const rx=x+i*rw;
-   const gg=ctx.createLinearGradient(rx,0,rx+rw,0);gg.addColorStop(0,'#00000000');gg.addColorStop(.5,'#00000038');gg.addColorStop(1,'#00000000');ctx.fillStyle=gg;ctx.fillRect(rx,y,rw,hh);
-   ctx.fillStyle='#c8956a22';ctx.fillRect(rx+rw*.12,y,rw*.1,hh)}
-  ctx.fillStyle='#3a2512';for(let i=0;i<70;i++){const px=x+((i*7919)%1000)/1000*w,py=y+((i*104729)%1000)/1000*hh;ctx.fillRect(px,py,2,2)}
- }
- function crop(key,gr,t,ready){
-  const f=FIELDS[key],s=sc(),k=K(),N=16,sw=f.w/N;
-  const gg=.1+.9*(1-Math.pow(1-gr,2.2));
-  for(let pass=0;pass<2;pass++){
-   const src=pass===0?(young[key]||IMG):IMG;
-   if(pass===1){const a=young[key]?clamp((gr-.45)/.5,0,1):1;if(a<=0)continue;ctx.globalAlpha=a}
-   for(let i=0;i<N;i++){
-    const dx=(f.x+i*sw+sw/2)*s,by=(f.y+f.h)*s,dw=sw*s*1.7+1,dh=f.h*s*gg;
-    const sway=Math.sin(t*1.7+i*.55+(key==='soy'?1.3:0))*(.028+.012*Math.sin(t*.4))*(.35+.65*gg);
-    ctx.save();ctx.translate(dx,by);ctx.transform(1,0,sway,1,0,0);
-    if(pass===0&&young[key])ctx.drawImage(src,Math.max(0,(i-.35)*sw*k),0,Math.min(young[key].width-Math.max(0,(i-.35)*sw*k),sw*1.7*k),young[key].height,-dw/2,-dh,dw,dh);
-    else ctx.drawImage(src,(f.x+(i-.35)*sw)*k,f.y*k,sw*1.7*k,f.h*k,-dw/2,-dh,dw,dh);
-    ctx.restore();
-   }
-   ctx.globalAlpha=1;
-  }
-  if(ready){ /* برق طلایی روی محصول آماده */
-   ctx.save();ctx.beginPath();ctx.rect(f.x*s,f.y*s,f.w*s,f.h*s);ctx.clip();
-   const p=((t*.45)%1.6)-.3,gx=(f.x+f.w*p)*s;const g=ctx.createLinearGradient(gx-60*s,0,gx+60*s,0);
-   g.addColorStop(0,'#ffffff00');g.addColorStop(.5,'#fff3a855');g.addColorStop(1,'#ffffff00');ctx.globalCompositeOperation='lighter';ctx.fillStyle=g;ctx.fillRect(f.x*s,f.y*s,f.w*s,f.h*s);ctx.restore();
-  }
- }
- function dayFactor(){const d=new Date(),hr=window.FARM_HOUR!=null?window.FARM_HOUR:d.getHours()+d.getMinutes()/60;
-  if(hr>=7&&hr<17)return{n:0,sun:0};
-  if(hr>=17&&hr<19.5)return{n:(hr-17)/2.5*.55,sun:1-(Math.abs(hr-18.2)/1.6)};
-  if(hr>=19.5||hr<4.5)return{n:.62,sun:0};
-  if(hr>=4.5&&hr<7)return{n:.62*(1-(hr-4.5)/2.5),sun:Math.max(0,1-Math.abs(hr-6)/1.5)};
-  return{n:0,sun:0}}
- function draw(t,dt){
-  if(!imgOK){ctx.fillStyle='#3c7a25';ctx.fillRect(0,0,W,W);return}
-  const s=sc(),v=view();
-  ctx.setTransform(DPR,0,0,DPR,0,0);ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
-  ctx.drawImage(IMG,0,0,IMG.naturalWidth,IMG.naturalHeight,0,0,W,W);
-  /* زمین‌ها: خاک، بعد محصول در حال رشد */
-  for(const key of ['wheat','soy']){
-   const f=FIELDS[key];
-   if(v.fcrop===key){soil(f);crop(key,v.fg,t,v.fs==='ready')}
-   else soil(f);
-  }
-  /* درخت‌ها: تاب نرم باد */
-  for(const T of TREES){const r=Math.sin(t*1.05+T.x*.013)*.012+Math.sin(t*2.3+T.y*.02)*.005;sprite(T.x,T.y,T.r,T.r,0,0,r,T.x,T.y+T.r*.9)}
-  /* گاوها: چریدن (سر پایین/بالا) و جابه‌جایی کوچک */
-  for(const C of COWS){const b=Math.sin(t*1.4+C.ph),graze=Math.max(0,Math.sin(t*.7+C.ph*1.3));
-   sprite(C.x,C.y,C.rx,C.ry,0,b*.7+graze*1.4,graze*.035*(C.x%2?1:-1)+b*.008,C.x,C.y+C.ry*.7)}
-  /* مرغ‌ها: نوک زدن */
-  for(let i=0;i<HENS.length;i++){const H=HENS[i],pk=Math.max(0,Math.sin(t*3.1+i*1.9));sprite(H.x,H.y,22,22,0,pk*1.6,pk*.18*(i%2?1:-1),H.x,H.y+10)}
-  /* سایه‌ی ابرها */
-  for(const c of CLOUDS){c.x+=c.v*dt;c.y+=c.v*.4*dt;if(c.x-c.r>SZ+50){c.x=-c.r*1.2;c.y=rnd(-100,900)}if(c.y-c.r>SZ)c.y=-c.r;
-   const g=ctx.createRadialGradient(c.x*s,c.y*s,0,c.x*s,c.y*s,c.r*s);g.addColorStop(0,'rgba(8,24,12,.20)');g.addColorStop(1,'rgba(8,24,12,0)');ctx.fillStyle=g;ctx.fillRect((c.x-c.r)*s,(c.y-c.r)*s,c.r*2*s,c.r*2*s)}
-  /* پرتو نور خورشید که آروم رد میشه */
-  {const p=((t*.05)%1.4)-.2,cx=p*SZ*s*1.4;ctx.save();ctx.globalCompositeOperation='lighter';
-   const g=ctx.createLinearGradient(cx-140*s,0,cx+140*s,W*.6);g.addColorStop(0,'rgba(255,240,170,0)');g.addColorStop(.5,'rgba(255,236,160,.10)');g.addColorStop(1,'rgba(255,240,170,0)');ctx.fillStyle=g;ctx.fillRect(0,0,W,W);ctx.restore()}
-  /* دود دودکش */
-  if(Math.random()<dt*3.2)SMOKE.push({x:1100+rnd(-3,3),y:168,vx:rnd(5,18),vy:rnd(-34,-20),l:0,L:rnd(2.6,3.8),r:rnd(5,8)});
-  for(let i=SMOKE.length-1;i>=0;i--){const p=SMOKE[i];p.l+=dt;if(p.l>=p.L){SMOKE.splice(i,1);continue}p.x+=p.vx*dt+Math.sin(t*2+p.l*3)*.2;p.y+=p.vy*dt;const k2=p.l/p.L;
-   ctx.fillStyle='rgba(235,235,240,'+(.34*(1-k2))+')';ctx.beginPath();ctx.arc(p.x*s,p.y*s,(p.r+k2*16)*s,0,6.29);ctx.fill()}
-  /* گرده و ذرات معلق */
-  ctx.fillStyle='#fffbe0';for(const q of POLLEN){q.y-=q.v*dt*.5;q.x+=Math.sin(t*.8+q.ph)*10*dt;if(q.y<-10){q.y=SZ+10;q.x=Math.random()*SZ}
-   ctx.globalAlpha=.35+.35*Math.sin(t*2+q.ph);ctx.beginPath();ctx.arc(q.x*s,q.y*s,q.s*s*1.2,0,6.29);ctx.fill()}ctx.globalAlpha=1;
-  /* پروانه‌ها */
-  for(let i=0;i<3;i++){const cx=[150,980,560][i],cy=[420,430,620][i],a=t*(.6+i*.17)+i*2,x=(cx+Math.sin(a)*110+Math.sin(a*2.3)*30)*s,y=(cy+Math.sin(a*1.3)*60+Math.cos(a*.7)*30)*s,fl=Math.abs(Math.sin(t*14+i))*5*s+1.2*s;
-   ctx.fillStyle=['#fb7185','#fbbf24','#60a5fa'][i];ctx.beginPath();ctx.ellipse(x-2*s,y,2.4*s,fl,-.5,0,6.29);ctx.ellipse(x+2*s,y,2.4*s,fl,.5,0,6.29);ctx.fill()}
-  /* پرنده‌ها (هر چند ثانیه یه دسته) */
-  if(BIRDS.length===0&&Math.random()<dt*.045){const y0=rnd(60,260),n=3+Math.floor(Math.random()*3);for(let i=0;i<n;i++)BIRDS.push({x:-40-i*34,y:y0+Math.abs(i-1)*16,v:rnd(58,76),ph:rnd(0,6)})}
-  for(let i=BIRDS.length-1;i>=0;i--){const b=BIRDS[i];b.x+=b.v*dt;b.y-=dt*3;if(b.x>SZ+60){BIRDS.splice(i,1);continue}
-   const fl=Math.sin(t*9+b.ph)*7*s;ctx.strokeStyle='#1f2937';ctx.lineWidth=2*s;ctx.lineCap='round';ctx.beginPath();ctx.moveTo((b.x-9)*s,b.y*s-fl);ctx.quadraticCurveTo(b.x*s,b.y*s+3*s,(b.x+9)*s,b.y*s-fl);ctx.stroke();
-   ctx.fillStyle='rgba(0,0,0,.12)';ctx.beginPath();ctx.ellipse((b.x)*s,(b.y+90)*s,8*s,3*s,0,0,6.29);ctx.fill()}
-  /* ذرات بازی (جرقه، قطره‌ی شیر، حلقه) */
-  for(let i=P.length-1;i>=0;i--){const p=P[i];p.l+=dt;if(p.l<0)continue;if(p.l>=p.L){P.splice(i,1);continue}const k2=p.l/p.L;
-   p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=p.g*dt;ctx.globalAlpha=1-k2;
-   if(p.t==='ring'){ctx.strokeStyle=p.c;ctx.lineWidth=3*s;ctx.beginPath();ctx.arc(p.x*s,p.y*s,(p.r+k2*120)*s,0,6.29);ctx.stroke()}
-   else if(p.t==='star'){ctx.fillStyle=p.c;ctx.save();ctx.translate(p.x*s,p.y*s);ctx.rotate(p.l*6);const r=p.r*s;ctx.fillRect(-r,-r*.3,r*2,r*.6);ctx.fillRect(-r*.3,-r,r*.6,r*2);ctx.restore()}
-   else{ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x*s,p.y*s,p.r*s,0,6.29);ctx.fill()}}
-  ctx.globalAlpha=1;
-  /* شب/غروب: رنگ‌آمیزی و پنجره‌های روشن */
-  const df=dayFactor();
-  if(df.n>0){ctx.save();ctx.globalCompositeOperation='multiply';ctx.fillStyle='rgb('+Math.round(255-df.n*205)+','+Math.round(255-df.n*180)+','+Math.round(255-df.n*95)+')';ctx.fillRect(0,0,W,W);ctx.restore()}
-  if(df.sun>0){ctx.save();ctx.globalCompositeOperation='soft-light';ctx.fillStyle='rgba(255,150,60,'+(df.sun*.5)+')';ctx.fillRect(0,0,W,W);ctx.restore()}
-  if(df.n>.25){ctx.save();ctx.globalCompositeOperation='lighter';for(const [x,y,w,hh] of WINDOWS){const g=ctx.createRadialGradient((x+w/2)*s,(y+hh/2)*s,0,(x+w/2)*s,(y+hh/2)*s,34*s);g.addColorStop(0,'rgba(255,205,90,'+(.9*df.n)+')');g.addColorStop(1,'rgba(255,170,60,0)');ctx.fillStyle=g;ctx.fillRect((x-40)*s,(y-40)*s,(w+80)*s,(hh+80)*s)}ctx.restore()}
-  /* وینیت سینمایی */
-  const vg=ctx.createRadialGradient(W/2,W/2,W*.42,W/2,W/2,W*.78);vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,.38)');ctx.fillStyle=vg;ctx.fillRect(0,0,W,W);
-  /* حلقه‌ی روشن دور گاو فعال وقتی کاری داره */
-  if(v.cs==='ready'||v.cs==='hungry'){const C=COWS[1];ctx.strokeStyle=v.cs==='ready'?'rgba(125,211,252,'+(.55+.4*Math.sin(t*4))+')':'rgba(253,224,71,'+(.4+.35*Math.sin(t*4))+')';ctx.lineWidth=3*s;ctx.beginPath();ctx.ellipse(C.x*s,(C.y+C.ry*.62)*s,(C.rx+8)*s,16*s,0,0,6.29);ctx.stroke()}
- }
- /* ───── وضعیت‌های لحظه‌ای (سمت کلاینت از روی زمان سرور) ───── */
- function view(){
-  const n=nowS(),f=S.field,c=S.cow,v={fcrop:f.crop,fs:'empty',fg:0,cs:'hungry',cg:0};
-  if(f.crop){if(n>=f.ready_at){v.fs='ready';v.fg=1}else{v.fs='growing';v.fg=clamp((n-f.planted_at)/Math.max(1,f.ready_at-f.planted_at),0,1)}}
-  if(c.ready_at>0){if(n>=c.ready_at){v.cs='ready';v.cg=1}else{v.cs='producing';v.cg=clamp(1-(c.ready_at-n)/Math.max(1,c.secs),0,1)}}
-  v.fleft=f.crop?Math.max(0,f.ready_at-n):0;v.cleft=c.ready_at>0?Math.max(0,c.ready_at-n):0;return v;
- }
- /* ───── کارت‌های پایین ───── */
- const CROPE={wheat:'🌾',soy:'🫘'};
- const nn=(...a)=>a.filter(Boolean);
- function buildCards(){
-  const v=view(),L=S.lvl,up=(what,col)=>{const c=S.up_cost[what];return h('button',{class:'fm-b gold',disabled:c==null||S.coins<c,onclick:()=>act('upgrade',{what})},c==null?'⭐ حداکثر سطح':['⭐ ارتقا',h('small',{},num(c)+' 🪙')])};
-  /* زمین */
-  const fcrop=S.field.crop,cr=S.cfg.crops;
-  fieldProg=h('i');fieldTxt=h('div',{class:'s'},'');
-  card.field.replaceChildren(...nn(
-   h('div',{class:'fm-ch'},h('div',{class:'ic'},'🌱'),h('div',{},h('div',{class:'t'},'زمین'),fieldTxt),h('div',{class:'fm-lv'},'سطح '+num(L.field))),
-   fcrop?h('div',{class:'fm-prog'},fieldProg):null,
-   h('div',{class:'fm-row'},
-    v.fs==='empty'?[
-     h('button',{class:'fm-b',disabled:S.coins<cr.wheat.seed,onclick:()=>act('plant',{crop:'wheat'})},'🌾 گندم',h('small',{},num(cr.wheat.seed)+'🪙 · '+num(cr.wheat.yield)+' عدد · '+fmtT(cr.wheat.secs))),
-     h('button',{class:'fm-b',disabled:S.coins<cr.soy.seed,onclick:()=>act('plant',{crop:'soy'})},'🫘 سویا',h('small',{},num(cr.soy.seed)+'🪙 · '+num(cr.soy.yield)+' عدد · '+fmtT(cr.soy.secs)))]
-    :v.fs==='ready'?h('button',{class:'fm-b blue',onclick:()=>act('harvest')},'✋ برداشت '+CROPE[fcrop]+' ('+num(cr[fcrop].yield)+')')
-    :h('button',{class:'fm-b ghost',disabled:true},'در حال رشد '+CROPE[fcrop]+'…'),
-    up('field'))));
-  /* گاو */
-  cowProg=h('i');cowTxt=h('div',{class:'s'},'');
-  card.cow.replaceChildren(...nn(
-   h('div',{class:'fm-ch'},h('div',{class:'ic'},'🐄'),h('div',{},h('div',{class:'t'},'گاو'),cowTxt),h('div',{class:'fm-lv'},'سطح '+num(L.cow))),
-   v.cs==='producing'?h('div',{class:'fm-prog milk'},cowProg):null,
-   h('div',{class:'fm-row'},
-    v.cs==='hungry'?h('button',{class:'fm-b',disabled:S.items.soy<1,onclick:()=>act('feed')},'🫘 غذا بده',h('small',{},S.items.soy<1?'سویا نداری':'۱ سویا')):
-    v.cs==='ready'?h('button',{class:'fm-b blue',onclick:()=>act('milk')},'🥛 بدوش ('+num(S.cow.milk)+' شیر)'):
-    h('button',{class:'fm-b ghost',disabled:true},'در حال تولید شیر…'),
-    up('cow'))));
-  /* انبار */
-  const it=(k,e,p)=>h('div',{class:'fm-it'},h('div',{class:'e'},e),h('div',{class:'n'},num(S.items[k])),h('div',{class:'p'},num(p)+' 🪙 هر عدد'),h('button',{disabled:S.items[k]<1,onclick:()=>act('sell',{item:k,qty:'all'})},'فروش همه'));
-  card.barn.replaceChildren(...nn(
-   h('div',{class:'fm-ch'},h('div',{class:'ic'},'📦'),h('div',{},h('div',{class:'t'},'انبار'),h('div',{class:'s'},num(S.used)+' از '+num(S.cap)+' جا پره')),h('div',{class:'fm-lv'},'سطح '+num(L.barn))),
-   h('div',{class:'fm-items'},it('wheat','🌾',cr.wheat.price),it('soy','🫘',cr.soy.price),it('milk','🥛',S.cfg.milk_price)),
-   h('div',{class:'fm-row'},up('barn'))));
- }
- function sigOf(){const v=view();return [v.fs,v.fcrop,v.cs,S.coins,S.items.wheat,S.items.soy,S.items.milk,S.lvl.barn,S.lvl.field,S.lvl.cow,S.used].join('|')}
- function tickUI(){
-  if(!S)return;const v=view(),sg=sigOf();
-  if(sg!==sig){sig=sg;buildCards()}
-  coinsV.textContent=num(S.coins);barnBar.style.width=clamp(S.used/S.cap*100,0,100)+'%';barnTxt.textContent=num(S.used)+'/'+num(S.cap);
-  barnPill.classList.toggle('warn',S.used/S.cap>.85);
-  if(fieldProg)fieldProg.style.width=(v.fg*100)+'%';
-  if(fieldTxt)fieldTxt.textContent=v.fs==='empty'?'خالیه؛ گندم یا سویا بکار (فقط یکی)':v.fs==='ready'?CROPE[v.fcrop]+' رسیده! برداشتش کن':CROPE[v.fcrop]+' در حال رشد · '+fmtT(v.fleft)+' مونده';
-  if(cowProg)cowProg.style.width=(v.cg*100)+'%';
-  if(cowTxt)cowTxt.textContent=v.cs==='hungry'?'گرسنه‌ست؛ سویا بهش بده':v.cs==='ready'?'شیر آماده‌ست!':'شیر در حال تولید · '+fmtT(v.cleft)+' مونده';
-  /* چیپ‌های روی صحنه */
-  const setChip=(el,cls,o)=>{const kk=cls+'#'+o.key;if(el._h!==kk){el._h=kk;el.className='fm-chip '+cls;el.replaceChildren(h('i',{},o.e),o.t)}};
-  const ih=(e,t)=>({key:e+t,e,t});
-  for(const [key,el] of [['wheat',chW],['soy',chS]]){
-   const em=CROPE[key],nm=key==='wheat'?'گندم':'سویا';
-   if(v.fs==='empty')setChip(el,'',ih(em,nm+': بکار'));
-   else if(v.fcrop===key)setChip(el,v.fs==='ready'?'go':'',v.fs==='ready'?ih('✋','برداشت'):ih('🌱',num(Math.round(v.fg*100))+'٪ · '+fmtT(v.fleft)));
-   else setChip(el,'dim',ih('💤','خالی'));
-  }
-  setChip(chC,v.cs==='ready'?'milk':v.cs==='hungry'?'go':'',v.cs==='ready'?ih('🥛','بدوش'):v.cs==='hungry'?ih('🌿','غذا بده'):ih('⏳',fmtT(v.cleft)));
-  setChip(chB,'',ih('📦',num(S.used)+'/'+num(S.cap)));
- }
- /* ───── عملیات ───── */
- function fieldTap(key){
-  if(!S||busy)return;const v=view();
-  if(v.fs==='empty')return act('plant',{crop:key});
-  if(v.fs==='ready'&&v.fcrop===key)return act('harvest');
-  if(v.fcrop!==key)return toast('زمین فقط یه محصول می‌گیره؛ اول '+(v.fcrop==='wheat'?'گندم':'سویا')+' رو تموم کن',1);
-  toast(CROPE[key]+' هنوز نرسیده؛ '+fmtT(v.fleft)+' مونده');
- }
- function cowTap(){
-  if(!S||busy)return;const v=view();
-  if(v.cs==='hungry')return act('feed');
-  if(v.cs==='ready')return act('milk');
-  toast('شیر هنوز آماده نیست؛ '+fmtT(v.cleft)+' مونده');
- }
- async function act(path,body){
-  if(busy||!alive)return;busy=true;
-  try{
-   const r=await api('/api/farm/'+path,body||{});
-   S=r.state;off=S.now-Date.now()/1000;sig='';tickUI();
+ const NEED=8,CELLS=12,CE={wheat:'🌾',soy:'🫘',milk:'🥛'},CN={wheat:'گندم',soy:'سویا',milk:'شیر'};
+ const root=h('div',{class:'fw'});
+ let S=null,off=0,busy=false,place=0,sig='',barnOpen=false,pick='wheat',cowN=0;
+ const fld={sown:new Set(),cut:new Set()};
+ const nowS=()=>Date.now()/1000+off,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+ const fmtT=s=>{s=Math.max(0,Math.ceil(s));return (Math.floor(s/60)+':'+String(s%60).padStart(2,'0')).replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d])};
+ const imp=()=>{try{tg&&tgv('6.1')&&tg.HapticFeedback.impactOccurred('light')}catch(e){}};
+ /* ───── نوار بالا ───── */
+ const coinsV=h('b',{},'۰'),capBar=h('i'),capTxt=h('small',{},'');
+ const capPill=h('div',{class:'fw-pill'},'📦',h('div',{class:'fw-bar'},capBar),capTxt);
+ const hud=h('div',{class:'fw-hud'},h('div',{class:'fw-pill'},'🪙',coinsV),capPill,
+  h('button',{class:'fw-rs',onclick:async()=>{if(await ask('مزرعه از اول شروع بشه؟ همه‌چیز پاک میشه.'))act('reset')}},'⟲'));
+ const world=h('div',{class:'fw-world'}),strip=h('div',{class:'fw-strip'});
+ const farmer=h('div',{class:'fw-farmer'},h('span',{},'🧑‍🌾'));
+ const sky=()=>h('div',{class:'fw-sky'},h('i',{class:'sun'}),h('i',{class:'cl c1'}),h('i',{class:'cl c2'}),h('i',{class:'hill'}));
+ function sweep(el,fn){let on=false;
+  const hit=e=>{const t=document.elementFromPoint(e.clientX,e.clientY),p=t&&t.closest&&t.closest('[data-i]');if(p&&el.contains(p))fn(p)};
+  el.addEventListener('pointerdown',e=>{on=true;hit(e)});el.addEventListener('pointermove',e=>{if(on)hit(e)});
+  ['pointerup','pointercancel','pointerleave'].forEach(t=>el.addEventListener(t,()=>{on=false}))}
+ function pop(t,el){const w=world.getBoundingClientRect(),r=el.getBoundingClientRect();
+  const d=h('div',{class:'fw-pop',style:'left:'+(r.left-w.left+r.width/2)+'px;top:'+(r.top-w.top+r.height/3)+'px'},t);world.append(d);setTimeout(()=>d.remove(),1300)}
+ /* ───── ۱) زمین ───── */
+ const plots=[],grid=h('div',{class:'fw-grid'});
+ for(let i=0;i<CELLS;i++){const p=h('div',{class:'fw-plot','data-i':i},h('span',{}));plots.push(p);grid.append(p)}
+ const fHint=h('div',{class:'fw-hint'}),fTimer=h('div',{class:'fw-timer'}),seedBar=h('div',{class:'fw-seeds'}),fLv=h('small',{},'');
+ const pField=h('div',{class:'fw-p'},sky(),h('div',{class:'fw-sign'},'🌱 زمین ',fLv),fTimer,grid,fHint,seedBar,h('div',{class:'fw-hen'},'🐔'),h('div',{class:'fw-hen h2'},'🐤'));
+ sweep(grid,p=>{const i=+p.dataset.i;if(busy||!S)return;
+  if(S.field.status==='empty'){if(fld.sown.has(i))return;
+   const sd=S.cfg.crops[pick].seed;if(S.coins<sd)return toast('برای بذر '+CN[pick]+' '+num(sd)+' سکه لازمه',1);
+   fld.sown.add(i);imp();pop('🌱',p);paintField();if(fld.sown.size>=CELLS)act('plant',{crop:pick})}
+  else if(S.field.status==='ready'){if(fld.cut.has(i))return;fld.cut.add(i);imp();pop('✂️',p);paintField();if(fld.cut.size>=CELLS)act('harvest')}});
+ function paintSeeds(){seedBar.replaceChildren(...['wheat','soy'].map(k=>h('button',{class:'fw-seed'+(pick===k?' on':''),onclick:()=>{pick=k;paintSeeds()}},
+  CE[k]+' '+CN[k],h('small',{},num(S.cfg.crops[k].seed)+' 🪙 · '+fmtT(S.cfg.crops[k].secs)))))}
+ function paintField(){const st=S.field.status,c=S.field.crop;
+  const prog=st==='growing'?clamp((nowS()-S.field.planted_at)/Math.max(1,S.field.ready_at-S.field.planted_at),0,1):0;
+  plots.forEach((p,i)=>{let t='',cls='fw-plot';
+   if(st==='empty'){if(fld.sown.has(i)){t='🌱';cls+=' sown'}}
+   else if(st==='growing'){t=prog<.34?'🌱':prog<.68?'🌿':(c==='soy'?'🪴':'🌾');cls+=' grow'}
+   else if(fld.cut.has(i))cls+=' cut';else{t=CE[c];cls+=' ripe'}
+   if(p.className!==cls)p.className=cls;const e=p.firstChild;if(e.textContent!==t)e.textContent=t});
+  seedBar.style.display=st==='empty'?'flex':'none';fTimer.style.display=st==='growing'?'block':'none';
+  if(st==='growing')fTimer.textContent='⏳ '+fmtT(S.field.ready_at-nowS())+' تا رسیدن '+CN[c];
+  fHint.textContent=st==='empty'?'انگشتت رو روی زمین بکش تا بذر بپاشی 👆 ('+num(fld.sown.size)+'/'+num(CELLS)+')':
+   st==='growing'?'صبر کن '+CN[c]+' بزرگ بشه…':'رسید! انگشتت رو روی محصول بکش تا داس بزنی ✂️ ('+num(fld.cut.size)+'/'+num(CELLS)+')'}
+ /* ───── ۲) گاوداری ───── */
+ const cowBox=h('div',{class:'fw-cow'});
+ cowBox.innerHTML='<svg viewBox="0 0 320 240"><path d="M268 105q26 14 16 58" fill="none" stroke="#2b2b2b" stroke-width="5" stroke-linecap="round"/><ellipse cx="284" cy="166" rx="8" ry="12" fill="#2b2b2b"/>'+
+  '<g stroke="#2b2b2b" stroke-width="3"><rect x="226" y="165" width="26" height="58" rx="9" fill="#fff"/><rect x="82" y="165" width="26" height="58" rx="9" fill="#fff"/></g><rect x="226" y="212" width="26" height="12" rx="5" fill="#333"/><rect x="82" y="212" width="26" height="12" rx="5" fill="#333"/>'+
+  '<ellipse cx="170" cy="125" rx="112" ry="62" fill="#fff" stroke="#2b2b2b" stroke-width="3"/><path d="M120 80q30-14 46 6q-6 28-34 26q-22-8-12-32zM206 110q34-8 42 16q-6 30-38 22q-14-18-4-38zM160 150q22-6 28 10q-14 14-30 6z" fill="#2b2b2b"/>'+
+  '<g stroke="#2b2b2b" stroke-width="3"><rect x="118" y="168" width="26" height="56" rx="9" fill="#fff"/><rect x="198" y="168" width="26" height="56" rx="9" fill="#fff"/></g><rect x="118" y="212" width="26" height="12" rx="5" fill="#333"/><rect x="198" y="212" width="26" height="12" rx="5" fill="#333"/>'+
+  '<ellipse cx="186" cy="188" rx="40" ry="17" fill="#f9a8b8" stroke="#2b2b2b" stroke-width="3"/>'+
+  '<g class="head"><path d="M64 70q-12-22-24-18M96 72q10-22 26-14" fill="none" stroke="#e8d9a8" stroke-width="7" stroke-linecap="round"/><ellipse cx="96" cy="92" rx="18" ry="9" transform="rotate(30 96 92)" fill="#fff" stroke="#2b2b2b" stroke-width="3"/><ellipse cx="62" cy="118" rx="46" ry="40" fill="#fff" stroke="#2b2b2b" stroke-width="3"/><path d="M40 84q22-14 40 0q-6 14-20 14q-14 0-20-14z" fill="#2b2b2b"/><ellipse cx="36" cy="136" rx="26" ry="19" fill="#f9b8c4" stroke="#2b2b2b" stroke-width="3"/><circle cx="26" cy="134" r="3.5" fill="#2b2b2b"/><circle cx="44" cy="134" r="3.5" fill="#2b2b2b"/><circle cx="66" cy="108" r="6" fill="#111"/><circle cx="68" cy="106" r="2" fill="#fff"/></g></svg>';
+ const bucketFill=h('i'),bucket=h('div',{class:'fw-bucket'},bucketFill);
+ cowBox.append(bucket);
+ const teats=[160,178,196,214].map(x=>{const t=h('div',{class:'teat',style:'left:'+(x/320*100-2.6)+'%'});cowBox.append(t);return t});
+ const cHint=h('div',{class:'fw-hint'}),cLv=h('small',{},'');
+ const soy=h('div',{class:'fw-soy'},h('span',{},'🫘'),h('small',{},''));
+ const pCow=h('div',{class:'fw-p fw-bar2'},h('div',{class:'fw-sign'},'🐄 گاوداری ',cLv),cowBox,cHint,soy);
+ function drop(t){const d=h('div',{class:'fw-drop',style:'left:'+(parseFloat(t.style.left)+1)+'%'});cowBox.append(d);setTimeout(()=>d.remove(),700)}
+ teats.forEach(t=>{let y0=null,done=false;
+  t.addEventListener('pointerdown',e=>{if(!S||S.cow.status!=='ready'||busy)return;y0=e.clientY;done=false;e.preventDefault()});
+  t.addEventListener('pointermove',e=>{if(y0==null)return;const dy=clamp(e.clientY-y0,0,70);t.style.transition='none';t.style.transform='scaleY('+(1+dy/52)+')';
+   if(dy>32&&!done){done=true;imp();cowN++;drop(t);paintCow();if(cowN>=NEED)act('milk')}});
+  const end=()=>{y0=null;t.style.transition='transform .25s';t.style.transform=''};t.addEventListener('pointerup',end);t.addEventListener('pointercancel',end)});
+ let dr=null;const tok=()=>soy.firstChild;
+ soy.addEventListener('pointerdown',e=>{if(!S||S.cow.status!=='hungry'||busy)return;if(S.items.soy<1)return toast('سویا نداری؛ اول سویا بکار و برداشت کن',1);
+  dr={x:e.clientX,y:e.clientY,m:false};e.preventDefault()});
+ soy.addEventListener('pointermove',e=>{if(!dr)return;const dx=e.clientX-dr.x,dy=e.clientY-dr.y;if(Math.abs(dx)+Math.abs(dy)>8)dr.m=true;tok().style.transform='translate('+dx+'px,'+dy+'px) scale(1.35)'});
+ soy.addEventListener('pointerup',e=>{if(!dr)return;const r=cowBox.getBoundingClientRect(),inn=e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom,m=dr.m;dr=null;tok().style.transform='';if(inn||!m)act('feed')});
+ soy.addEventListener('pointercancel',()=>{dr=null;tok().style.transform=''});
+ function paintCow(){const st=S.cow.status;cowBox.className='fw-cow '+st;soy.style.display=st==='hungry'?'flex':'none';soy.lastChild.textContent='سویا: '+num(S.items.soy);
+  bucketFill.style.height=(st==='ready'?cowN/NEED*100:0)+'%';
+  cHint.textContent=st==='hungry'?'گاو گرسنه‌ست! دونه‌ی سویا رو بکش جلوی دهنش 🫘':st==='producing'?'گاو داره شیر می‌سازه… ⏳ '+fmtT(S.cow.ready_at-nowS()):'شیر آماده‌ست! پستون‌ها رو یکی‌یکی بکش پایین 👇 ('+num(cowN)+'/'+num(NEED)+')'}
+ /* ───── ۳) انبار ───── */
+ const sheet=h('div',{class:'fw-sheet'}),bHint=h('div',{class:'fw-hint'},'روی انبار بزن تا درش باز بشه 👆'),bLv=h('small',{},'');
+ const barnEl=h('div',{class:'fw-barn',onclick:()=>toggleBarn()});
+ barnEl.innerHTML='<div class="roof"></div><div class="wall"><div class="inside"><span>🌾</span><span>🥛</span><span>🫘</span></div><div class="door l"></div><div class="door r"></div></div>';
+ const pBarn=h('div',{class:'fw-p'},sky(),h('div',{class:'fw-sign'},'🏚 انبار ',bLv),barnEl,bHint,sheet);
+ function toggleBarn(v){barnOpen=v===undefined?!barnOpen:v;barnEl.classList.toggle('open',barnOpen);sheet.classList.toggle('open',barnOpen);bHint.style.visibility=barnOpen?'hidden':'visible'}
+ function paintSheet(){
+  const pr={wheat:S.cfg.crops.wheat.price,soy:S.cfg.crops.soy.price,milk:S.cfg.milk_price};
+  const items=['wheat','soy','milk'].map(k=>{const n=S.items[k];return h('div',{class:'fw-it'},h('div',{class:'e'},CE[k]),h('div',{class:'n'},num(n)),h('div',{class:'p'},CN[k]+' · '+num(pr[k])+' 🪙'),
+   h('button',{disabled:n<1,onclick:()=>act('sell',{item:k,qty:1})},'فروش ۱'),h('button',{class:'all',disabled:n<1,onclick:()=>act('sell',{item:k,qty:'all'})},'همه +'+num(n*pr[k])))});
+  const UP=[['barn','🏚','انبار','ظرفیت +۱۶ جا'],['field','🌱','زمین','بازده بیشتر و رشد سریع‌تر'],['cow','🐄','گاو','شیر بیشتر و تولید سریع‌تر']];
+  const ups=UP.map(([k,e,n,d])=>{const c=S.up_cost[k];return h('div',{class:'fw-upr'},h('span',{class:'e'},e),h('div',{class:'t'},h('b',{},n+' · سطح '+num(S.lvl[k])+' از '+num(S.max_lvl)),h('small',{},d)),
+   h('button',{class:'fw-b',disabled:c==null||S.coins<c,onclick:()=>act('upgrade',{what:k})},c==null?'حداکثر ✔':'⭐ '+num(c)+' 🪙'))});
+  sheet.replaceChildren(h('div',{class:'fw-sh'},h('b',{},'📦 داخل انبار'),h('small',{},num(S.used)+' / '+num(S.cap)+' جا'),h('button',{class:'x',onclick:()=>toggleBarn(false)},'✕')),
+   h('div',{class:'fw-items'},items),h('div',{class:'fw-sec'},'ارتقاها'),ups)}
+ /* ───── جابه‌جایی بین جاها ───── */
+ strip.append(pField,pCow,pBarn);world.append(strip,farmer);
+ const navB=[['🌱','زمین'],['🐄','گاوداری'],['🏚','انبار']].map(([e,t],i)=>h('button',{class:i?'':'on',onclick:()=>go(i)},h('i',{},e),t));
+ const nav=h('div',{class:'fw-nav'},navB);
+ function go(i){if(i===place)return;farmer.classList.toggle('flip',i<place);place=i;if(i!==2)toggleBarn(false);
+  strip.style.transform='translateX('+(-i*33.3333)+'%)';farmer.classList.add('walk');setTimeout(()=>farmer.classList.remove('walk'),700);navB.forEach((b,j)=>b.classList.toggle('on',j===i))}
+ root.append(hud,world,nav,h('div',{class:'fw-note'},'🌾 این بخش فعلاً فقط برای پشتیبان‌هاست و سکه‌ی مزرعه به پول ربات ربطی نداره.'));
+ /* ───── وضعیت ───── */
+ function paint(force){if(!S)return;
+  coinsV.textContent=num(S.coins);capBar.style.width=Math.min(100,S.used/S.cap*100)+'%';capTxt.textContent=num(S.used)+'/'+num(S.cap);capPill.classList.toggle('warn',S.used/S.cap>=.9);
+  const s=[S.coins,S.items.wheat,S.items.soy,S.items.milk,S.lvl.barn,S.lvl.field,S.lvl.cow,S.field.status,S.field.crop,S.cow.status].join();
+  if(force||s!==sig){sig=s;fLv.textContent='سطح '+num(S.lvl.field);cLv.textContent='سطح '+num(S.lvl.cow);bLv.textContent='سطح '+num(S.lvl.barn);paintSeeds();paintSheet()}
+  paintField();paintCow()}
+ async function act(path,body){if(busy)return;busy=true;
+  try{const r=await api('/api/farm/'+path,body||{});S=r.state;off=S.now-Date.now()/1000;fld.sown.clear();fld.cut.clear();cowN=0;paint(true);
    const fx=r.fx||{};
-   if(fx.kind==='plant'){const f=FIELDS[fx.crop];burst('leaf',f.x+f.w/2,f.y+f.h*.6,18);pop('🌱 کاشته شد',f.x+f.w/2,f.y+f.h*.45)}
-   else if(fx.kind==='harvest'){const f=FIELDS[fx.crop];burst('gold',f.x+f.w/2,f.y+f.h/2,46);pop('+'+num(fx.n)+' '+CROPE[fx.crop],f.x+f.w/2,f.y+f.h*.4)}
-   else if(fx.kind==='feed'){burst('leaf',420,300,14);pop('🫘 ناهار گاو',420,250)}
-   else if(fx.kind==='milk'){burst('milk',420,300,30);pop('+'+num(fx.n)+' 🥛',420,240)}
-   else if(fx.kind==='sell'){burst('gold',672,330,34);pop('+'+num(fx.gain)+' 🪙',672,300)}
-   else if(fx.kind==='upgrade'){const p={barn:[672,200],field:[312,860],cow:[420,300]}[fx.what]||[600,600];burst('ring',p[0],p[1],3);burst('gold',p[0],p[1],40);pop('⭐ ارتقا',p[0],p[1]-50)}
-   hap('success');if(r.msg)toast(r.msg);
-  }catch(e){toast(e.message,1);try{await load()}catch(_){}}
-  busy=false;
- }
- async function load(){const r=await api('/api/farm/state');S=r.state;off=S.now-Date.now()/1000;sig='';tickUI()}
- /* ───── حلقه‌ی رسم ───── */
- function fit(){const w=cv.clientWidth;if(!w)return false;DPR=Math.min(2,window.devicePixelRatio||1);const p=Math.round(w*DPR);if(cv.width!==p){cv.width=p;cv.height=p}W=w;return true}
- let prevT=performance.now();
- function loop(ts){
-  if(!alive)return;raf=requestAnimationFrame(loop);
-  if(!root.isConnected||document.hidden){prevT=ts;return}
-  if(ts-lastDraw<30)return;const dt=Math.min(.1,(ts-prevT)/1000);prevT=ts;lastDraw=ts;
-  if(!fit()||!S)return;
-  try{draw(ts/1000,dt)}catch(e){console.error(e)}
- }
- raf=requestAnimationFrame(loop);
- tk=setInterval(()=>{if(alive&&root.isConnected)try{tickUI()}catch(e){}},250);
- root._destroy=()=>{alive=false;cancelAnimationFrame(raf);clearInterval(tk)};
+   if(fx.kind==='plant')pop('🌱 کاشته شد',grid);else if(fx.kind==='harvest')pop('+'+num(fx.n)+' '+CE[fx.crop],grid);
+   else if(fx.kind==='feed')pop('🫘 ناهار گاو',cowBox);else if(fx.kind==='milk')pop('+'+num(fx.n)+' 🥛',cowBox);
+   else if(fx.kind==='sell')pop('+'+num(fx.gain)+' 🪙',barnEl);else if(fx.kind==='upgrade')pop('⭐ ارتقا',place===2?barnEl:place===1?cowBox:grid);
+   hap('success');if(r.msg)toast(r.msg)}
+  catch(e){toast(e.message,1);fld.sown.clear();fld.cut.clear();cowN=0;try{await load()}catch(_){}}
+  busy=false}
+ async function load(){const r=await api('/api/farm/state');S=r.state;off=S.now-Date.now()/1000;paint(true)}
+ setInterval(()=>{if(root.isConnected&&S&&!document.hidden&&!busy)try{paint(false)}catch(e){}},400);
+ root._load=()=>load().catch(()=>{});
  load().catch(e=>root.replaceChildren(h('div',{class:'empty err',style:'padding:30px;text-align:center'},e.message)));
  return root;
 }
+function FarmTab(){
+ const root=h('div',{class:'scr'}),box=h('div',{class:'scroll gscreen'}),fs=FarmScreen();
+ box.append(h('div',{class:'ghead'},'🌾 مزرعه'),fs);root.append(box);root._show=()=>fs._load&&fs._load();return root;
+}
 
 /* ───── شروع ───── */
-const TABS={home:HomeScreen,games:GamesScreen,store:StoreScreen,board:LeaderboardScreen,myself:MyselfScreen,chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
+const TABS={home:HomeScreen,games:GamesScreen,farm:FarmTab,store:StoreScreen,board:LeaderboardScreen,myself:MyselfScreen,chats:ChatsScreen,users:()=>UsersScreen(false),panel:PanelScreen},tabEls={};
 function openTab(k){
  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
  if(!tabEls[k]){tabEls[k]=TABS[k]();if(k==='board')tabEls[k].querySelectorAll('.backib').forEach(x=>x.style.display='none')}push(tabEls[k],true);
@@ -4115,7 +3996,7 @@ async function bootTabs(){
  window.IS_STAFF=!!(m&&m.is_support);
  if(!m||!m.is_support){
   /* کاربر عادی فقط: چت‌روم، فروشگاه، بازی‌ها و خودم */
-  ['chats','users','panel'].forEach(rm);
+  ['chats','users','panel','farm'].forEach(rm);
  }else{
   if(!(m.perms||[]).includes('group_msgs'))rm('chats');
   if(!(m.perms||[]).includes('panel'))rm('panel');
