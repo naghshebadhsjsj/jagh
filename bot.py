@@ -1787,7 +1787,7 @@ function ProfileScreen(uid){
 }
 
 /* ───── تب پنل ───── */
-const ACT={money_add:'➕ پول',money_sub:'➖ پول',jagh_add:'➕ واحد درسی',jagh_sub:'➖ واحد درسی',ban:'🚫 محرومیت',unban:'✅ رفع محرومیت',task_add:'📋 تسک جدید',task_del:'🗑 حذف تسک',toggle:'🔌 روشن/خاموش ربات',broadcast:'📢 پیام همگانی'};
+const ACT={money_add:'➕ پول',money_sub:'➖ پول',jagh_add:'➕ واحد درسی',jagh_sub:'➖ واحد درسی',ban:'🚫 محرومیت',unban:'✅ رفع محرومیت',task_add:'📋 تسک جدید',task_del:'🗑 حذف تسک',toggle:'🔌 روشن/خاموش ربات',broadcast:'📢 پیام همگانی',emoji_create:'✨ ساخت ایموجی پرمیوم'};
 
 function giveawayReferralSheet(){
  sheet('زیرمجموعه‌های قرعه‌کشی فعال',close=>{
@@ -1820,6 +1820,7 @@ function PanelScreen(){
       (has('ban')||has('unban'))?h('button',{class:'act',onclick:()=>push(UsersScreen(true))},'📛 لیست محروم‌ها'):null,
       (has('task_daily')||has('task_weekly'))?h('button',{class:'act',onclick:()=>push(TasksScreen())},'📋 تسک‌ها'):null,
       mk('broadcast','','📢 پیام همگانی',()=>push(BroadcastScreen())),
+      (has('panel')&&has('miniapp'))?h('button',{class:'act',onclick:()=>push(PremiumEmojiScreen())},'✨ ساخت ایموجی پرمیوم'):null,
       h('button',{class:'act',onclick:()=>push(LogScreen())},'🧾 گزارش عملیات')].filter(Boolean);
     body.replaceChildren(
       h('div',{class:'card'},h('div',{class:'row2',style:'padding:10px 0'},h('div',{},h('b',{},'وضعیت ربات'),h('div',{class:'sub'},me.bot_enabled?'🟢 روشن':'🔴 خاموش')),sw)),
@@ -1832,6 +1833,57 @@ function PanelScreen(){
   }
   let t0=0;el._show=()=>{if(Date.now()-t0>10000){t0=Date.now();load()}};
   return el;
+}
+
+
+function PremiumEmojiScreen(){
+  let imageDataUrl='',busy=false;
+  const file=h('input',{class:'inp',type:'file',accept:'image/png,image/jpeg,image/webp'});
+  const fallback=h('input',{class:'inp',type:'text',maxlength:'8',value:'✨',placeholder:'ایموجی جایگزین مثل ✨'});
+  const title=h('input',{class:'inp',type:'text',maxlength:'64',value:'ایموجی‌های پشتیبانی',placeholder:'نام مجموعه ایموجی'});
+  const preview=h('div',{style:'width:116px;height:116px;border:1px dashed var(--line);border-radius:22px;background:var(--sec);display:grid;place-items:center;overflow:hidden;margin:12px auto;font-size:13px;color:var(--hint)'},'پیش‌نمایش');
+  const status=h('div',{class:'sub',style:'text-align:center;margin-top:8px;line-height:1.8'},'یک تصویر انتخاب کن؛ پس‌زمینه شفاف بهتر دیده می‌شود.');
+  const go=h('button',{class:'btn',onclick:create},'✨ ساخت ایموجی پرمیوم');
+  file.onchange=async()=>{
+    imageDataUrl='';const f=file.files&&file.files[0];
+    if(!f){preview.replaceChildren('پیش‌نمایش');return}
+    if(!/^image\/(png|jpeg|webp)$/.test(f.type)){file.value='';return toast('فقط PNG، JPG یا WEBP قابل قبوله.',1)}
+    if(f.size>8*1024*1024){file.value='';return toast('حجم تصویر باید کمتر از ۸ مگابایت باشه.',1)}
+    try{
+      const src=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('خواندن تصویر ناموفق بود'));r.readAsDataURL(f)});
+      const im=await new Promise((res,rej)=>{const x=new Image();x.onload=()=>res(x);x.onerror=()=>rej(new Error('تصویر قابل خواندن نیست'));x.src=src});
+      if(im.width>5000||im.height>5000)throw new Error('ابعاد تصویر خیلی بزرگه.');
+      const c=document.createElement('canvas');c.width=100;c.height=100;const ctx=c.getContext('2d');
+      const scale=Math.min(100/im.width,100/im.height),w=Math.max(1,Math.round(im.width*scale)),hh=Math.max(1,Math.round(im.height*scale));
+      ctx.clearRect(0,0,100,100);ctx.drawImage(im,Math.round((100-w)/2),Math.round((100-hh)/2),w,hh);
+      imageDataUrl=c.toDataURL('image/png');
+      const img=h('img',{src:imageDataUrl,style:'width:100px;height:100px;object-fit:contain'});preview.replaceChildren(img);
+      status.textContent='تصویر آماده است • ۱۰۰×۱۰۰ پیکسل • پس‌زمینه شفاف';
+    }catch(e){file.value='';imageDataUrl='';preview.replaceChildren('پیش‌نمایش');toast(e.message||'پردازش تصویر ناموفق بود.',1)}
+  };
+  async function create(){
+    if(busy)return;
+    if(!imageDataUrl)return toast('اول تصویر ایموجی رو انتخاب کن.',1);
+    const alt=fallback.value.trim(),name=title.value.trim();
+    if(!alt||alt.length>8)return toast('یک ایموجی معمولی برای جایگزین وارد کن.',1);
+    if(!name||name.length>64)return toast('نام مجموعه باید بین ۱ تا ۶۴ کاراکتر باشه.',1);
+    busy=true;go.disabled=true;go.textContent='⏳ در حال ساخت در تلگرام…';
+    try{
+      const r=await api('/api/emoji/create',{image:imageDataUrl,emoji:alt,title:name});
+      status.replaceChildren(h('b',{},'✅ ایموجی ساخته شد'),h('div',{style:'margin-top:5px'},'کد: '+r.custom_emoji_id),h('div',{style:'margin-top:5px'},'مجموعه: '+r.pack_name));
+      toast('ایموجی ساخته شد و کدش به پی‌وی ربات ارسال شد.');
+      if(r.pack_url)status.append(h('div',{style:'margin-top:7px'},h('a',{href:r.pack_url,target:'_blank',style:'color:var(--link)'},'باز کردن مجموعه ایموجی')));
+    }catch(e){toast(e.message||'ساخت ایموجی ناموفق بود.',1);status.textContent=e.message||'ساخت ایموجی ناموفق بود.'}
+    finally{busy=false;go.disabled=false;go.textContent='✨ ساخت ایموجی پرمیوم'}
+  }
+  return h('div',{class:'scr'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'✨ سازنده ایموجی پرمیوم')),
+    h('div',{class:'scroll',style:'padding:12px'},
+      h('div',{class:'card'},h('h3',{},'ساخت ایموجی اختصاصی تلگرام'),h('div',{class:'sub'},'فقط برای پشتیبان‌های دارای دسترسی مینی‌اپ. تصویر انتخابی به ایموجی سفارشی تلگرام تبدیل می‌شود.'),preview,
+        h('label',{class:'sub'},'تصویر ایموجی'),file,
+        h('label',{class:'sub',style:'display:block;margin-top:12px'},'ایموجی جایگزین'),fallback,
+        h('label',{class:'sub',style:'display:block;margin-top:12px'},'نام مجموعه'),title,
+        go,status,
+        h('div',{class:'sub',style:'margin-top:12px;line-height:1.8'},'نکته: تلگرام ایموجی سفارشی را به‌عنوان مجموعه Custom Emoji ثبت می‌کند. برای افزودن و استفاده از مجموعه‌های سفارشی، حساب تلگرام باید شرایط Premium تلگرام را داشته باشد.'))));
 }
 
 function BroadcastScreen(){
@@ -7689,6 +7741,123 @@ async def mini_subscription_review_cb(update: Update, context: ContextTypes.DEFA
 
 _SOCIAL_POST={"/api/social/room/gamechat/send":_social_gamechat_send,"/api/social/profile/save":_social_profile_save,"/api/social/post":_social_post_create,"/api/social/story":_social_story_create,"/api/social/post/delete":_social_post_delete,"/api/social/story/delete":_social_story_delete,"/api/social/react":_social_react,"/api/social/comment":_social_comment_add,"/api/social/comment/delete":_social_comment_del,"/api/social/room/send":_social_room_send,"/api/social/room/poison/create":_social_poison_create,"/api/social/room/poison/join":_social_poison_join,"/api/social/room/poison/cancel":_social_poison_cancel,"/api/social/room/poison/move":_social_poison_move,"/api/social/room/carrom/create":_social_carrom_create,"/api/social/room/carrom/join":_social_carrom_join,"/api/social/room/carrom/cancel":_social_carrom_cancel,"/api/social/room/carrom/shoot":_social_carrom_shoot,"/api/social/room/react":_social_room_react,"/api/social/room/read":_social_room_read,"/api/social/subscription/receipt":_social_subscription_receipt,"/api/social/store/order":_social_store_order,"/api/social/follow":_social_follow,"/api/social/profile/like":_social_profile_like}
 
+
+async def _p_emoji_create(data: dict, user: dict):
+    """ساخت یک Custom Emoji واقعی در تلگرام؛ فقط اعضای مجاز پنل پشتیبانی."""
+    uid = int(user["id"])
+    if not (has_perm(uid, "panel") and has_perm(uid, "miniapp")):
+        raise _ApiError("این قابلیت فقط برای پشتیبانی فعاله.", 403)
+    if BOT_REF is None:
+        raise _ApiError("ربات هنوز آماده نیست؛ کمی بعد دوباره تلاش کن.", 503)
+
+    raw = data.get("image") or ""
+    match = re.fullmatch(r"data:image/png;base64,([A-Za-z0-9+/=]+)", raw)
+    if not match or len(raw) > 180_000:
+        raise _ApiError("تصویر نامعتبره؛ دوباره انتخابش کن.")
+    try:
+        src = base64.b64decode(match.group(1), validate=True)
+        if not src or len(src) > 128_000:
+            raise ValueError("image size")
+        with Image.open(BytesIO(src)) as im:
+            if im.format != "PNG" or im.width > 512 or im.height > 512:
+                raise ValueError("image format or dimensions")
+            im.load()
+            im = im.convert("RGBA")
+            im.thumbnail((100, 100), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+            canvas.alpha_composite(im, ((100 - im.width) // 2, (100 - im.height) // 2))
+            out = BytesIO()
+            canvas.save(out, format="PNG", optimize=True, compress_level=9)
+            sticker_bytes = out.getvalue()
+            if len(sticker_bytes) > 64 * 1024:
+                # PNG پالت‌دار برای تصاویر پرجزئیات؛ شفافیت حفظ می‌شود.
+                pal = canvas.quantize(colors=128, method=Image.Quantize.FASTOCTREE)
+                out = BytesIO()
+                pal.save(out, format="PNG", optimize=True, compress_level=9)
+                sticker_bytes = out.getvalue()
+            if len(sticker_bytes) > 64 * 1024:
+                raise ValueError("image too large")
+    except Exception as e:
+        log.info("custom emoji image rejected for %s: %s", uid, type(e).__name__)
+        raise _ApiError("تصویر قابل تبدیل نیست؛ یک PNG ساده‌تر و کم‌حجم‌تر انتخاب کن.")
+
+    emoji = str(data.get("emoji") or "✨").strip()
+    title = str(data.get("title") or "ایموجی پشتیبانی").strip()
+    if not emoji or len(emoji) > 8 or any(ord(ch) < 32 for ch in emoji):
+        raise _ApiError("ایموجی جایگزین معتبر نیست.")
+    if not title or len(title) > 64:
+        raise _ApiError("نام مجموعه باید بین ۱ تا ۶۴ کاراکتر باشه.")
+
+    try:
+        me = await _tg_call(BOT_REF.get_me)
+        bot_username = re.sub(r"[^A-Za-z0-9_]", "", me.username or "")
+        if not bot_username:
+            raise RuntimeError("bot username unavailable")
+        suffix = f"_by_{bot_username}"
+        stem = f"ce{uid}_{int(time.time())}_{random.randint(1000,9999)}"
+        pack_name = (stem[:64-len(suffix)] + suffix)
+        stickers = [{"sticker": "attach://emoji_file", "format": "static", "emoji_list": [emoji]}]
+        fields = {
+            "user_id": str(uid), "name": pack_name, "title": title,
+            "sticker_type": "custom_emoji", "stickers": json.dumps(stickers, ensure_ascii=False),
+        }
+        boundary = "----FarmEmoji" + str(random.getrandbits(64))
+        chunks = []
+        for key, value in fields.items():
+            chunks.extend([f"--{boundary}\r\n".encode(),
+                           f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
+                           value.encode("utf-8"), b"\r\n"])
+        chunks.extend([f"--{boundary}\r\n".encode(),
+                       b'Content-Disposition: form-data; name="emoji_file"; filename="emoji.png"\r\n',
+                       b"Content-Type: image/png\r\n\r\n", sticker_bytes, b"\r\n",
+                       f"--{boundary}--\r\n".encode()])
+        import urllib.request
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/createNewStickerSet",
+            data=b"".join(chunks),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        def _upload():
+            with urllib.request.urlopen(req, timeout=45) as response:
+                return json.loads(response.read().decode("utf-8"))
+        result = await asyncio.to_thread(_upload)
+        if not result.get("ok"):
+            desc = str(result.get("description") or "Telegram درخواست ساخت مجموعه را نپذیرفت.")
+            raise RuntimeError(desc[:300])
+        pack = await _tg_call(BOT_REF.get_sticker_set, pack_name)
+        sticker = next((x for x in (pack.stickers or []) if getattr(x, "custom_emoji_id", None)), None)
+        if sticker is None:
+            raise RuntimeError("Telegram set created but custom emoji id was not returned")
+        emoji_id = str(sticker.custom_emoji_id)
+        pack_url = f"https://t.me/addemoji/{pack_name}"
+        # اول تلاش می‌کنیم خودِ Custom Emoji را در پیام ربات نشان بدهیم.
+        sent_inline = False
+        try:
+            await _tg_call(BOT_REF.send_message, uid,
+                f"✨ ایموجی پرمیوم جدیدت ساخته شد!\n\n<tg-emoji emoji-id=\"{emoji_id}\">{html.escape(emoji)}</tg-emoji>\nکد ایموجی: <code>{emoji_id}</code>\nمجموعه: <a href=\"{pack_url}\">افزودن ایموجی به تلگرام</a>",
+                parse_mode="HTML", disable_web_page_preview=True)
+            sent_inline = True
+        except Exception:
+            # اگر مالک ربات امکان ارسال tg-emoji نداشته باشد، خود استیکر و کد را می‌فرستیم.
+            try:
+                await _tg_call(BOT_REF.send_sticker, uid, sticker.file_id)
+            except Exception:
+                pass
+            await _tg_call(BOT_REF.send_message, uid,
+                f"✨ ایموجی سفارشی ساخته شد!\nکد ایموجی: {emoji_id}\nمجموعه: {pack_url}\nبرای نمایش ایموجی، مجموعه را به تلگرام اضافه کن.")
+        await _audit(user, "emoji_create", None, f"custom_emoji_id={emoji_id}; pack={pack_name}")
+        return _j({"ok": True, "custom_emoji_id": emoji_id, "pack_name": pack_name,
+                   "pack_url": pack_url, "message_sent": True, "inline_custom_emoji": sent_inline})
+    except _ApiError:
+        raise
+    except Exception as e:
+        msg = str(e)
+        log.warning("custom emoji creation failed for support %s: %s", uid, msg, exc_info=True)
+        if "premium" in msg.lower():
+            raise _ApiError("تلگرام ساخت/ارسال ایموجی را به‌دلیل محدودیت Premium نپذیرفت. حساب مالک ربات باید شرایط لازم را داشته باشد.", 502)
+        raise _ApiError("ساخت ایموجی در تلگرام ناموفق بود: " + (msg[:180] or "خطای نامشخص"), 502)
+
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
 _API_PERM = {
@@ -7712,7 +7881,7 @@ _GET = {
 _POST = {
     "/api/user/adjust": _p_adjust, "/api/user/ban": _p_ban, "/api/user/unban": _p_unban,
     "/api/task/add": _p_task_add, "/api/task/delete": _p_task_del, "/api/toggle": _p_toggle,
-    "/api/bc/start": _p_bc_start,
+    "/api/bc/start": _p_bc_start, "/api/emoji/create": _p_emoji_create,
     "/api/myself/bank": _p_myself_bank, "/api/myself/transfer": _p_myself_transfer,
     "/api/myself/machine": _p_myself_machine, "/api/myself/car/collect": _p_myself_car_collect,
     "/api/myself/car/upgrade": _p_myself_car_upgrade, "/api/myself/car/color": _p_myself_car_color, "/api/myself/gender": _p_myself_gender, "/api/myself/special/buy": _p_myself_special_buy, "/api/myself/special/toggle": _p_myself_special_toggle,
