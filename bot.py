@@ -240,6 +240,81 @@ def perms_of(uid: int) -> set:
     """همه‌ی دسترسی‌های فعالِ یه کاربر (صاحب‌ها همه‌چیز)."""
     return set(SUPPORT_PERMS) if uid in OWNER_IDS else set(STAFF.get(uid, ()))
 
+
+# ───────── استخراج کد ایموجی پرمیوم با همان اکانت پشتیبان (Telethon Userbot) ─────────
+# برای امنیت، نشست اکانت فقط از Railway Variable خوانده می‌شود و داخل کد ذخیره نمی‌شود.
+USERBOT_CLIENT = None
+
+async def start_support_userbot():
+    """یوزربات را با اکانت پشتیبان مجاز بالا می‌آورد؛ نیازمند TELEGRAM_API_ID/API_HASH/USERBOT_SESSION است."""
+    global USERBOT_CLIENT
+    api_id = os.environ.get("TELEGRAM_API_ID", "").strip()
+    api_hash = os.environ.get("TELEGRAM_API_HASH", "").strip()
+    session = os.environ.get("USERBOT_SESSION", "").strip()
+    if not (api_id and api_hash and session):
+        log.warning("Support userbot disabled: TELEGRAM_API_ID, TELEGRAM_API_HASH or USERBOT_SESSION is missing")
+        return
+    try:
+        from telethon import TelegramClient, events
+        from telethon.sessions import StringSession
+        client = TelegramClient(StringSession(session), int(api_id), api_hash)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            log.error("Support userbot session is not authorized; create a fresh StringSession")
+            return
+        me = await client.get_me()
+        uid = int(me.id)
+        if not (has_perm(uid, "panel") and has_perm(uid, "miniapp")):
+            await client.disconnect()
+            log.error("Support userbot account %s does not have both panel and miniapp permissions", uid)
+            return
+
+        @client.on(events.NewMessage(outgoing=True, pattern=r"^\s*\.?کدشو\s+میخوام\s*$"))
+        async def _premium_emoji_code_handler(event):
+            try:
+                # فقط پیام‌های خود اکانت پشتیبان؛ در پی‌وی و گروه کار می‌کند.
+                if int(event.sender_id or 0) != uid:
+                    return
+                if not (has_perm(uid, "panel") and has_perm(uid, "miniapp")):
+                    return
+                target = await event.get_reply_message()
+                if target is None:
+                    await event.reply("برای گرفتن کد، روی پیام دارای ایموجی پرمیوم ریپلای کن و بنویس: .کدشو میخوام")
+                    return
+                ids = []
+                for entity in (getattr(target, "entities", None) or []):
+                    if entity.__class__.__name__ == "MessageEntityCustomEmoji":
+                        emoji_id = getattr(entity, "document_id", None)
+                        if emoji_id is not None and str(emoji_id) not in ids:
+                            ids.append(str(emoji_id))
+                if not ids:
+                    await event.reply("در پیام ریپلای‌شده ایموجی پرمیوم پیدا نکردم. روی پیام اصلی ریپلای کن و دوباره امتحان کن.")
+                    return
+                result = "🧩 کد ایموجی پرمیوم:\n" + "\n".join(f"{i}. <code>{html.escape(eid)}</code>" for i, eid in enumerate(ids[:40], 1))
+                await client.send_message(event.chat_id, result, reply_to=event.id, parse_mode="html")
+            except Exception:
+                log.exception("support userbot emoji extraction failed")
+                try:
+                    await event.reply("❌ هنگام استخراج کد خطایی رخ داد. دوباره امتحان کن.")
+                except Exception:
+                    pass
+
+        USERBOT_CLIENT = client
+        log.info("Support userbot connected as account %s", uid)
+    except ImportError:
+        log.error("Telethon is not installed; add 'Telethon' to requirements.txt")
+    except Exception:
+        log.exception("Could not start support userbot")
+
+async def stop_support_userbot():
+    global USERBOT_CLIENT
+    if USERBOT_CLIENT is not None:
+        try:
+            await USERBOT_CLIENT.disconnect()
+        finally:
+            USERBOT_CLIENT = None
+
 TRIGGER_WORD = ""
 COOLDOWN_SECONDS = 5 * 60 + 5  # پایه ۵:۰۵؛ با پنج ارتقا به ۴:۴۰ می‌رسد
 MIN_REWARD = 500     # پول هر امتیاز (تومن)، شانسی بین این دو عدد
@@ -8672,6 +8747,7 @@ async def startup(app: Application):
     BOT_REF = app.bot
     try:
         await init_db(app)
+        await start_support_userbot()
         app.bot_data["car_task"] = asyncio.create_task(car_profit_loop())
         app.bot_data["energy_task"] = asyncio.create_task(energy_decay_loop())
         app.bot_data["bank_interest_task"] = asyncio.create_task(bank_interest_loop())
@@ -8707,6 +8783,7 @@ async def startup(app: Application):
 
 
 async def close_db(app: Application):
+    await stop_support_userbot()
     if pool:
         await pool.close()
 
@@ -24838,9 +24915,6 @@ def main():
     app.add_handler(CallbackQueryHandler(jobs_reset_pick, pattern=r"^sr:[mfa]$"))
     app.add_handler(CommandHandler("myid", my_id, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("eid", emoji_ids, filters=filters.ChatType.PRIVATE))
-    app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.Regex(r"^\.کدشو میخوام$"), support_emoji_code_request
-    ))
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Entity("custom_emoji") | filters.CaptionEntity("custom_emoji")),
         emoji_ids_auto), group=-1)
