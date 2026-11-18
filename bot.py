@@ -1837,40 +1837,44 @@ function PanelScreen(){
 
 
 function PremiumEmojiScreen(){
-  let imageDataUrl='',busy=false;
-  const file=h('input',{class:'inp',type:'file',accept:'image/png,image/jpeg,image/webp'});
+  let mediaDataUrl='',mediaKind='',mediaUrl='',busy=false;
+  const file=h('input',{class:'inp',type:'file',accept:'image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime'});
   const fallback=h('input',{class:'inp',type:'text',maxlength:'8',value:'✨',placeholder:'ایموجی جایگزین مثل ✨'});
   const title=h('input',{class:'inp',type:'text',maxlength:'64',value:'ایموجی‌های پشتیبانی',placeholder:'نام مجموعه ایموجی'});
   const preview=h('div',{style:'width:116px;height:116px;border:1px dashed var(--line);border-radius:22px;background:var(--sec);display:grid;place-items:center;overflow:hidden;margin:12px auto;font-size:13px;color:var(--hint)'},'پیش‌نمایش');
-  const status=h('div',{class:'sub',style:'text-align:center;margin-top:8px;line-height:1.8'},'یک تصویر انتخاب کن؛ پس‌زمینه شفاف بهتر دیده می‌شود.');
+  const status=h('div',{class:'sub',style:'text-align:center;margin-top:8px;line-height:1.8'},'عکس با کیفیت اصلی دریافت می‌شود؛ ویدیو به ایموجی متحرک تبدیل می‌شود.');
   const go=h('button',{class:'btn',onclick:create},'✨ ساخت ایموجی پرمیوم');
+  function clearPreview(){if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=''}preview.replaceChildren('پیش‌نمایش')}
   file.onchange=async()=>{
-    imageDataUrl='';const f=file.files&&file.files[0];
-    if(!f){preview.replaceChildren('پیش‌نمایش');return}
-    if(!/^image\/(png|jpeg|webp)$/.test(f.type)){file.value='';return toast('فقط PNG، JPG یا WEBP قابل قبوله.',1)}
-    if(f.size>8*1024*1024){file.value='';return toast('حجم تصویر باید کمتر از ۸ مگابایت باشه.',1)}
+    mediaDataUrl='';mediaKind='';clearPreview();const f=file.files&&file.files[0];
+    if(!f)return;
+    const isVideo=f.type.startsWith('video/');
+    const allowedImage=['image/png','image/jpeg','image/webp'].includes(f.type);
+    const allowedVideo=['video/mp4','video/webm','video/quicktime'].includes(f.type);
+    if(!allowedImage&&!allowedVideo){file.value='';return toast('فرمت عکس یا ویدیو پشتیبانی نمی‌شود.',1)}
+    if(f.size>(isVideo?3500000:3500000)){file.value='';return toast('حجم فایل باید کمتر از ۳.۵ مگابایت باشد.',1)}
     try{
-      const src=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('خواندن تصویر ناموفق بود'));r.readAsDataURL(f)});
-      const im=await new Promise((res,rej)=>{const x=new Image();x.onload=()=>res(x);x.onerror=()=>rej(new Error('تصویر قابل خواندن نیست'));x.src=src});
-      if(im.width>5000||im.height>5000)throw new Error('ابعاد تصویر خیلی بزرگه.');
-      const c=document.createElement('canvas');c.width=100;c.height=100;const ctx=c.getContext('2d');
-      const scale=Math.min(100/im.width,100/im.height),w=Math.max(1,Math.round(im.width*scale)),hh=Math.max(1,Math.round(im.height*scale));
-      ctx.clearRect(0,0,100,100);ctx.drawImage(im,Math.round((100-w)/2),Math.round((100-hh)/2),w,hh);
-      imageDataUrl=c.toDataURL('image/png');
-      const img=h('img',{src:imageDataUrl,style:'width:100px;height:100px;object-fit:contain'});preview.replaceChildren(img);
-      status.textContent='تصویر آماده است • ۱۰۰×۱۰۰ پیکسل • پس‌زمینه شفاف';
-    }catch(e){file.value='';imageDataUrl='';preview.replaceChildren('پیش‌نمایش');toast(e.message||'پردازش تصویر ناموفق بود.',1)}
+      const src=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('خواندن فایل ناموفق بود'));r.readAsDataURL(f)});
+      mediaDataUrl=src;mediaKind=isVideo?'video':'static';mediaUrl=URL.createObjectURL(f);
+      if(isVideo){
+        const v=h('video',{src:mediaUrl,muted:true,loop:true,autoplay:true,playsInline:true,style:'width:100px;height:100px;object-fit:contain'});preview.replaceChildren(v);v.play().catch(()=>{});
+        status.textContent='ویدیوی انتخاب‌شده • خروجی ۱۰۰×۱۰۰ • حداکثر ۳ ثانیه • بدون صدا';
+      }else{
+        const im=h('img',{src:mediaUrl,style:'width:100px;height:100px;object-fit:contain'});preview.replaceChildren(im);
+        status.textContent='عکس اصلی بدون کوچک‌سازی در مرورگر ارسال می‌شود؛ تبدیل نهایی با کیفیت بالا روی سرور انجام می‌شود.';
+      }
+    }catch(e){file.value='';mediaDataUrl='';mediaKind='';clearPreview();toast(e.message||'پردازش فایل ناموفق بود.',1)}
   };
   async function create(){
     if(busy)return;
-    if(!imageDataUrl)return toast('اول تصویر ایموجی رو انتخاب کن.',1);
+    if(!mediaDataUrl)return toast('اول عکس یا ویدیوی ایموجی رو انتخاب کن.',1);
     const alt=fallback.value.trim(),name=title.value.trim();
     if(!alt||alt.length>8)return toast('یک ایموجی معمولی برای جایگزین وارد کن.',1);
     if(!name||name.length>64)return toast('نام مجموعه باید بین ۱ تا ۶۴ کاراکتر باشه.',1);
     busy=true;go.disabled=true;go.textContent='⏳ در حال ساخت در تلگرام…';
     try{
-      const r=await api('/api/emoji/create',{image:imageDataUrl,emoji:alt,title:name});
-      status.replaceChildren(h('b',{},'✅ ایموجی ساخته شد'),h('div',{style:'margin-top:5px'},'کد: '+r.custom_emoji_id),h('div',{style:'margin-top:5px'},'مجموعه: '+r.pack_name));
+      const r=await api('/api/emoji/create',{media:mediaDataUrl,kind:mediaKind,emoji:alt,title:name});
+      status.replaceChildren(h('b',{},'✅ '+(mediaKind==='video'?'ایموجی متحرک':'ایموجی')+' ساخته شد'),h('div',{style:'margin-top:5px'},'کد: '+r.custom_emoji_id),h('div',{style:'margin-top:5px'},'مجموعه: '+r.pack_name));
       toast('ایموجی ساخته شد و کدش به پی‌وی ربات ارسال شد.');
       if(r.pack_url)status.append(h('div',{style:'margin-top:7px'},h('a',{href:r.pack_url,target:'_blank',style:'color:var(--link)'},'باز کردن مجموعه ایموجی')));
     }catch(e){toast(e.message||'ساخت ایموجی ناموفق بود.',1);status.textContent=e.message||'ساخت ایموجی ناموفق بود.'}
@@ -1878,12 +1882,15 @@ function PremiumEmojiScreen(){
   }
   return h('div',{class:'scr'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'✨ سازنده ایموجی پرمیوم')),
     h('div',{class:'scroll',style:'padding:12px'},
-      h('div',{class:'card'},h('h3',{},'ساخت ایموجی اختصاصی تلگرام'),h('div',{class:'sub'},'فقط برای پشتیبان‌های دارای دسترسی مینی‌اپ. تصویر انتخابی به ایموجی سفارشی تلگرام تبدیل می‌شود.'),preview,
-        h('label',{class:'sub'},'تصویر ایموجی'),file,
+      h('div',{class:'card'},h('h3',{},'ساخت ایموجی اختصاصی تلگرام'),h('div',{class:'sub'},'فقط برای پشتیبان‌های دارای دسترسی مینی‌اپ. عکس یا ویدیو انتخاب کن؛ فایل ویدیویی به ایموجی متحرک WEBM تبدیل می‌شود.'),preview,
+        h('label',{class:'sub'},'عکس یا ویدیو'),file,
         h('label',{class:'sub',style:'display:block;margin-top:12px'},'ایموجی جایگزین'),fallback,
         h('label',{class:'sub',style:'display:block;margin-top:12px'},'نام مجموعه'),title,
         go,status,
-        h('div',{class:'sub',style:'margin-top:12px;line-height:1.8'},'نکته: تلگرام ایموجی سفارشی را به‌عنوان مجموعه Custom Emoji ثبت می‌کند. برای افزودن و استفاده از مجموعه‌های سفارشی، حساب تلگرام باید شرایط Premium تلگرام را داشته باشد.'))));
+        h('div',{class:'sub',style:'margin-top:10px;line-height:1.8'},'قوانین ویدیو: حداکثر ۳ ثانیه، ۳۰ فریم، بدون صدا و خروجی ۱۰۰×۱۰۰. عکس‌ها هم بدون کاهش کیفیت در مرورگر به سرور فرستاده می‌شوند.')
+      )
+    )
+  );
 }
 
 function BroadcastScreen(){
@@ -7743,43 +7750,20 @@ _SOCIAL_POST={"/api/social/room/gamechat/send":_social_gamechat_send,"/api/socia
 
 
 async def _p_emoji_create(data: dict, user: dict):
-    """ساخت یک Custom Emoji واقعی در تلگرام؛ فقط اعضای مجاز پنل پشتیبانی."""
+    """ساخت Custom Emoji ثابت یا ویدیویی؛ فقط اعضای مجاز پنل پشتیبانی."""
+    import os, shutil, subprocess, tempfile
     uid = int(user["id"])
     if not (has_perm(uid, "panel") and has_perm(uid, "miniapp")):
         raise _ApiError("این قابلیت فقط برای پشتیبانی فعاله.", 403)
     if BOT_REF is None:
         raise _ApiError("ربات هنوز آماده نیست؛ کمی بعد دوباره تلاش کن.", 503)
 
-    raw = data.get("image") or ""
-    match = re.fullmatch(r"data:image/png;base64,([A-Za-z0-9+/=]+)", raw)
-    if not match or len(raw) > 180_000:
-        raise _ApiError("تصویر نامعتبره؛ دوباره انتخابش کن.")
-    try:
-        src = base64.b64decode(match.group(1), validate=True)
-        if not src or len(src) > 128_000:
-            raise ValueError("image size")
-        with Image.open(BytesIO(src)) as im:
-            if im.format != "PNG" or im.width > 512 or im.height > 512:
-                raise ValueError("image format or dimensions")
-            im.load()
-            im = im.convert("RGBA")
-            im.thumbnail((100, 100), Image.Resampling.LANCZOS)
-            canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
-            canvas.alpha_composite(im, ((100 - im.width) // 2, (100 - im.height) // 2))
-            out = BytesIO()
-            canvas.save(out, format="PNG", optimize=True, compress_level=9)
-            sticker_bytes = out.getvalue()
-            if len(sticker_bytes) > 64 * 1024:
-                # PNG پالت‌دار برای تصاویر پرجزئیات؛ شفافیت حفظ می‌شود.
-                pal = canvas.quantize(colors=128, method=Image.Quantize.FASTOCTREE)
-                out = BytesIO()
-                pal.save(out, format="PNG", optimize=True, compress_level=9)
-                sticker_bytes = out.getvalue()
-            if len(sticker_bytes) > 64 * 1024:
-                raise ValueError("image too large")
-    except Exception as e:
-        log.info("custom emoji image rejected for %s: %s", uid, type(e).__name__)
-        raise _ApiError("تصویر قابل تبدیل نیست؛ یک PNG ساده‌تر و کم‌حجم‌تر انتخاب کن.")
+    kind = str(data.get("kind") or "static").strip().lower()
+    if kind not in ("static", "video"):
+        raise _ApiError("نوع فایل پشتیبانی نمی‌شود.")
+    raw = str(data.get("media") or "")
+    if len(raw) > 4_900_000:
+        raise _ApiError("حجم فایل خیلی زیاده؛ حداکثر ۳.۵ مگابایت انتخاب کن.")
 
     emoji = str(data.get("emoji") or "✨").strip()
     title = str(data.get("title") or "ایموجی پشتیبانی").strip()
@@ -7788,6 +7772,83 @@ async def _p_emoji_create(data: dict, user: dict):
     if not title or len(title) > 64:
         raise _ApiError("نام مجموعه باید بین ۱ تا ۶۴ کاراکتر باشه.")
 
+    sticker_bytes = b""
+    sticker_format = kind
+    filename = "emoji.webp" if kind == "static" else "emoji.webm"
+    mime_type = "image/webp" if kind == "static" else "video/webm"
+    try:
+        if kind == "static":
+            match = re.fullmatch(r"data:image/(?:png|jpeg|webp);base64,([A-Za-z0-9+/=]+)", raw)
+            if not match:
+                raise ValueError("invalid image data")
+            src = base64.b64decode(match.group(1), validate=True)
+            if not src or len(src) > 3_500_000:
+                raise ValueError("image too large")
+            with Image.open(BytesIO(src)) as im:
+                if im.width > 6000 or im.height > 6000:
+                    raise ValueError("image dimensions")
+                im.load()
+                im = im.convert("RGBA")
+                # یک بار و فقط در خروجی نهایی به اندازه رسمی Custom Emoji تغییر اندازه می‌دهیم.
+                im.thumbnail((100, 100), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+                canvas.alpha_composite(im, ((100 - im.width) // 2, (100 - im.height) // 2))
+                out = BytesIO()
+                canvas.save(out, format="WEBP", lossless=True, quality=100, method=6)
+                sticker_bytes = out.getvalue()
+                if len(sticker_bytes) > 256 * 1024:
+                    out = BytesIO()
+                    canvas.save(out, format="WEBP", lossless=False, quality=96, method=6)
+                    sticker_bytes = out.getvalue()
+                if len(sticker_bytes) > 256 * 1024:
+                    raise ValueError("image too large after encoding")
+        else:
+            match = re.fullmatch(r"data:video/(?:mp4|webm|quicktime);base64,([A-Za-z0-9+/=]+)", raw)
+            if not match:
+                raise ValueError("invalid video data")
+            src = base64.b64decode(match.group(1), validate=True)
+            if not src or len(src) > 3_500_000:
+                raise ValueError("video too large")
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                raise RuntimeError("FFMPEG_MISSING")
+            with tempfile.TemporaryDirectory(prefix="tg_emoji_") as td:
+                inp = os.path.join(td, "input_video")
+                outp = os.path.join(td, "emoji.webm")
+                with open(inp, "wb") as f:
+                    f.write(src)
+                # 100x100 دقیق، حداکثر ۳ ثانیه و ۳۰fps، بدون صدا؛ نسبت تصویر و شفافیت حفظ می‌شود.
+                vf = "fps=30,scale=100:100:force_original_aspect_ratio=decrease:flags=lanczos,pad=100:100:(ow-iw)/2:(oh-ih)/2:color=black@0,format=yuva420p"
+                last_error = ""
+                for crf in (34, 39, 44, 48):
+                    cmd = [ffmpeg, "-y", "-i", inp, "-t", "3", "-an", "-vf", vf,
+                           "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0",
+                           "-crf", str(crf), "-deadline", "good", "-cpu-used", "5",
+                           "-row-mt", "1", "-auto-alt-ref", "0", "-metadata:s:v:0", "alpha_mode=1",
+                           "-f", "webm", outp]
+                    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                    if proc.returncode != 0:
+                        last_error = proc.stderr.decode("utf-8", "ignore")[-500:]
+                        continue
+                    with open(outp, "rb") as f:
+                        candidate = f.read()
+                    if candidate and len(candidate) <= 256 * 1024:
+                        sticker_bytes = candidate
+                        break
+                if not sticker_bytes:
+                    if last_error:
+                        log.warning("ffmpeg emoji conversion failed: %s", last_error)
+                    raise ValueError("video encode failed or output exceeded 256KB")
+    except _ApiError:
+        raise
+    except Exception as e:
+        log.info("custom emoji media rejected for %s: %s", uid, type(e).__name__)
+        if str(e) == "FFMPEG_MISSING":
+            raise _ApiError("برای ساخت ایموجی ویدیویی باید ffmpeg روی Railway نصب باشد. فایل nixpacks.toml بسته را هم کنار bot.py قرار بده و دوباره Deploy کن.", 503)
+        if kind == "video":
+            raise _ApiError("ویدیو قابل تبدیل نیست؛ ویدیوی کوتاه‌تر و کم‌حجم‌تری انتخاب کن. خروجی باید حداکثر ۳ ثانیه و ۲۵۶ کیلوبایت باشد.")
+        raise _ApiError("تصویر قابل تبدیل نیست؛ PNG یا WEBP باکیفیت و پس‌زمینه شفاف انتخاب کن.")
+
     try:
         me = await _tg_call(BOT_REF.get_me)
         bot_username = re.sub(r"[^A-Za-z0-9_]", "", me.username or "")
@@ -7795,8 +7856,8 @@ async def _p_emoji_create(data: dict, user: dict):
             raise RuntimeError("bot username unavailable")
         suffix = f"_by_{bot_username}"
         stem = f"ce{uid}_{int(time.time())}_{random.randint(1000,9999)}"
-        pack_name = (stem[:64-len(suffix)] + suffix)
-        stickers = [{"sticker": "attach://emoji_file", "format": "static", "emoji_list": [emoji]}]
+        pack_name = stem[:64-len(suffix)] + suffix
+        stickers = [{"sticker": "attach://emoji_file", "format": sticker_format, "emoji_list": [emoji]}]
         fields = {
             "user_id": str(uid), "name": pack_name, "title": title,
             "sticker_type": "custom_emoji", "stickers": json.dumps(stickers, ensure_ascii=False),
@@ -7808,8 +7869,8 @@ async def _p_emoji_create(data: dict, user: dict):
                            f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
                            value.encode("utf-8"), b"\r\n"])
         chunks.extend([f"--{boundary}\r\n".encode(),
-                       b'Content-Disposition: form-data; name="emoji_file"; filename="emoji.png"\r\n',
-                       b"Content-Type: image/png\r\n\r\n", sticker_bytes, b"\r\n",
+                       f'Content-Disposition: form-data; name="emoji_file"; filename="{filename}"\r\n'.encode(),
+                       f"Content-Type: {mime_type}\r\n\r\n".encode(), sticker_bytes, b"\r\n",
                        f"--{boundary}--\r\n".encode()])
         import urllib.request
         req = urllib.request.Request(
@@ -7819,7 +7880,7 @@ async def _p_emoji_create(data: dict, user: dict):
             method="POST",
         )
         def _upload():
-            with urllib.request.urlopen(req, timeout=45) as response:
+            with urllib.request.urlopen(req, timeout=60) as response:
                 return json.loads(response.read().decode("utf-8"))
         result = await asyncio.to_thread(_upload)
         if not result.get("ok"):
@@ -7831,23 +7892,21 @@ async def _p_emoji_create(data: dict, user: dict):
             raise RuntimeError("Telegram set created but custom emoji id was not returned")
         emoji_id = str(sticker.custom_emoji_id)
         pack_url = f"https://t.me/addemoji/{pack_name}"
-        # اول تلاش می‌کنیم خودِ Custom Emoji را در پیام ربات نشان بدهیم.
         sent_inline = False
         try:
             await _tg_call(BOT_REF.send_message, uid,
-                f"✨ ایموجی پرمیوم جدیدت ساخته شد!\n\n<tg-emoji emoji-id=\"{emoji_id}\">{html.escape(emoji)}</tg-emoji>\nکد ایموجی: <code>{emoji_id}</code>\nمجموعه: <a href=\"{pack_url}\">افزودن ایموجی به تلگرام</a>",
+                f"✨ {'ایموجی متحرک' if kind == 'video' else 'ایموجی پرمیوم'} جدیدت ساخته شد!\n\n<tg-emoji emoji-id=\"{emoji_id}\">{html.escape(emoji)}</tg-emoji>\nکد ایموجی: <code>{emoji_id}</code>\nمجموعه: <a href=\"{pack_url}\">افزودن ایموجی به تلگرام</a>",
                 parse_mode="HTML", disable_web_page_preview=True)
             sent_inline = True
         except Exception:
-            # اگر مالک ربات امکان ارسال tg-emoji نداشته باشد، خود استیکر و کد را می‌فرستیم.
             try:
                 await _tg_call(BOT_REF.send_sticker, uid, sticker.file_id)
             except Exception:
                 pass
             await _tg_call(BOT_REF.send_message, uid,
-                f"✨ ایموجی سفارشی ساخته شد!\nکد ایموجی: {emoji_id}\nمجموعه: {pack_url}\nبرای نمایش ایموجی، مجموعه را به تلگرام اضافه کن.")
-        await _audit(user, "emoji_create", None, f"custom_emoji_id={emoji_id}; pack={pack_name}")
-        return _j({"ok": True, "custom_emoji_id": emoji_id, "pack_name": pack_name,
+                f"✨ {'ایموجی متحرک' if kind == 'video' else 'ایموجی سفارشی'} ساخته شد!\nکد ایموجی: {emoji_id}\nمجموعه: {pack_url}\nبرای نمایش ایموجی، مجموعه را به تلگرام اضافه کن.")
+        await _audit(user, "emoji_create", None, f"kind={kind}; custom_emoji_id={emoji_id}; pack={pack_name}")
+        return _j({"ok": True, "kind": kind, "custom_emoji_id": emoji_id, "pack_name": pack_name,
                    "pack_url": pack_url, "message_sent": True, "inline_custom_emoji": sent_inline})
     except _ApiError:
         raise
@@ -7855,7 +7914,7 @@ async def _p_emoji_create(data: dict, user: dict):
         msg = str(e)
         log.warning("custom emoji creation failed for support %s: %s", uid, msg, exc_info=True)
         if "premium" in msg.lower():
-            raise _ApiError("تلگرام ساخت/ارسال ایموجی را به‌دلیل محدودیت Premium نپذیرفت. حساب مالک ربات باید شرایط لازم را داشته باشد.", 502)
+            raise _ApiError("تلگرام ساخت/ارسال ایموجی را به‌دلیل محدودیت Premium نپذیرفت. حساب مالک مجموعه باید شرایط لازم را داشته باشد.", 502)
         raise _ApiError("ساخت ایموجی در تلگرام ناموفق بود: " + (msg[:180] or "خطای نامشخص"), 502)
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
@@ -8511,7 +8570,7 @@ async def _http_conn(reader, writer):
         clen = _int(headers.get("content-length"), 0, 0)
         if method not in ("GET", "HEAD", "POST"):
             status, ctype, body, extra = 405, "text/plain", b"method not allowed", {}
-        elif clen > (5_500_000 if urllib.parse.urlsplit(target).path in ("/api/social/post", "/api/social/story", "/api/social/subscription/receipt", "/api/social/store/order") else 200_000):
+        elif clen > (5_500_000 if urllib.parse.urlsplit(target).path in ("/api/social/post", "/api/social/story", "/api/social/subscription/receipt", "/api/social/store/order", "/api/emoji/create") else 200_000):
             status, ctype, body, extra = 413, "text/plain", b"too large", {}
         else:
             raw = await asyncio.wait_for(reader.readexactly(clen), 15 if clen < 300_000 else 90) if clen else b""
