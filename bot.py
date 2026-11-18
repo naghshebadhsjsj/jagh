@@ -1223,9 +1223,9 @@ textarea.inp{min-height:130px;resize:vertical}
 .fw-bar i{display:block;height:100%;width:0;border-radius:5px;background:linear-gradient(90deg,#4ade80,#facc15);transition:width .4s}
 .fw-pill.warn .fw-bar i{background:linear-gradient(90deg,#fb923c,#ef4444)}
 .fw-rs{width:42px;height:42px;border-radius:50%;background:#111a33;color:#9fb0d0;font-size:18px;flex:none;border:1px solid #ffffff14}
-.fw-world{position:relative;width:100%;height:min(520px,calc(100vh - 290px));min-height:430px;border-radius:22px;overflow:hidden;box-shadow:0 14px 40px #0007,0 0 0 1px #ffffff1c;background:#3c7a25;touch-action:pan-y}
+.fw-world{position:relative;width:100%;height:min(660px,calc(100vh - 150px));min-height:520px;border-radius:22px;overflow:hidden;box-shadow:0 14px 40px #0007,0 0 0 1px #ffffff1c;background:#3c7a25;touch-action:pan-y}
 .fw-strip{display:flex;width:300%;height:100%;direction:ltr;transition:transform .65s cubic-bezier(.65,0,.3,1)}
-.fw-p{position:relative;width:33.3333%;flex:none;height:100%;overflow:hidden;direction:rtl;background:linear-gradient(#7ccbff 0,#bfe8ff 34%,#5aa13a 34.2%,#3d7a26 100%)}
+.fw-p{display:none;position:relative;width:100%;flex:1;min-height:0;overflow:hidden;direction:rtl;background:linear-gradient(#7ccbff 0,#bfe8ff 34%,#5aa13a 34.2%,#3d7a26 100%)}
 .fw-sky{position:absolute;left:0;right:0;top:0;height:34%;pointer-events:none}
 .fw-sky .sun{position:absolute;right:12%;top:12%;width:46px;height:46px;border-radius:50%;background:radial-gradient(#fff6b0,#ffd23f 60%,#ffb703);box-shadow:0 0 34px 10px #ffe58a99}
 .fw-sky .cl{position:absolute;height:20px;width:74px;border-radius:20px;background:#fff;opacity:.92;box-shadow:22px -9px 0 -2px #fff,-18px -6px 0 -4px #fff;animation:fwCl 38s linear infinite}
@@ -1286,6 +1286,46 @@ textarea.inp{min-height:130px;resize:vertical}
 .fw-nav{display:flex;gap:8px;margin:10px 0 0}.fw-nav button{flex:1;border-radius:16px;padding:10px 4px;background:#111a33;border:1px solid #ffffff14;color:#9fb0d0;font:800 13px/1.3 inherit;display:flex;flex-direction:column;align-items:center;gap:2px}
 .fw-nav button i{font-style:normal;font-size:22px}.fw-nav button.on{background:linear-gradient(135deg,#16a34a,#65a30d);color:#fff;border-color:transparent}
 .fw-note{font-size:11.5px;color:#9fb0d0;text-align:center;margin:12px 6px 0;line-height:1.8}
+
+.fw-p.show{display:block}
+.fw-map{position:absolute;inset:0;overflow:hidden;background:#6fae45}.fw-map>svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.fw-world.inov .fw-map{visibility:hidden}
+.fw-res{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;gap:4px;padding:6px;background:linear-gradient(#8a5528,#5e3615);border-bottom:3px solid #3a200a}
+.fw-rp{flex:1;display:flex;align-items:center;justify-content:center;gap:3px;height:30px;border-radius:15px;background:linear-gradient(#4a2c10,#33200c);border:2px solid #b07a3a;font-weight:900;font-size:12px;min-width:0;white-space:nowrap}
+.fw-rp i{font-style:normal;font-size:15px}.fw-rp.warn{border-color:#ef4444;color:#fecaca}
+.fw-side{position:absolute;right:6px;top:52px;z-index:5;display:flex;flex-direction:column;gap:8px}
+.fw-med{width:46px;height:46px;border-radius:50%;background:radial-gradient(#2f7a3d,#173d20);border:4px solid #d9a441;box-shadow:0 3px 0 #5a3a0c;font-size:21px;color:#fff}.fw-med:active{transform:scale(.93)}
+.fw-tip{position:absolute;left:8px;right:62px;bottom:84px;z-index:5;display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:14px;background:#f6e7bd;border:3px solid #7a4a1d;color:#3a230c;font-weight:800;font-size:12.5px;line-height:1.6}
+.fw-tip i{font-style:normal;font-size:28px;flex:none}
+.fw-signs{position:absolute;left:8px;right:8px;bottom:8px;z-index:5;display:flex;gap:8px}
+.fw-sg{flex:1;height:68px;border-radius:12px;background:linear-gradient(#a8672a,#7a4a1d);border:3px solid #4a2a0c;color:#fff7e0;font:900 13px/1.3 inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;box-shadow:0 3px 0 #2e1906}
+.fw-sg i{font-style:normal;font-size:24px}.fw-sg:active{transform:translateY(2px)}
+.fw-loc{position:absolute;transform:translate(-50%,-50%);border:0;background:none;padding:0;z-index:2;-webkit-tap-highlight-color:transparent}.fw-loc:active{transform:translate(-50%,-50%) scale(.96)}
+.fw-loc .bub{position:absolute;top:-24px;left:50%;transform:translateX(-50%);padding:3px 9px;border-radius:12px;background:#fff9e6;border:2px solid #6b3f17;color:#3a230c;font:800 11px/1.3 inherit;font-style:normal;white-space:nowrap;z-index:3}
+.fw-loc .bub.hop{animation:fwHop 1s ease-in-out infinite}@keyframes fwHop{50%{transform:translateX(-50%) translateY(-6px)}}
+.fw-loc .lvl{position:absolute;left:50%;bottom:-14px;transform:translateX(-50%);width:28px;height:28px;border-radius:50%;background:radial-gradient(#f0b75b,#b8741f);border:3px solid #6b3f17;font:900 13px/1 inherit;text-decoration:none;display:grid;place-items:center;color:#fff;text-shadow:0 1px 0 #0006;z-index:3}
+.lf .pat{aspect-ratio:2.1/1;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:5px;padding:8px;border-radius:18px;background:#8a5a2b;border:4px solid #a98551;box-shadow:0 5px 0 #5a3a18}
+.lf .pat span{display:grid;place-items:center;border-radius:8px;background:#6e4520;font-size:19px;box-shadow:inset 0 2px 4px #0006}
+.lf.rdy .pat{animation:fwBeat 1.1s ease-in-out infinite}@keyframes fwBeat{50%{transform:scale(1.045)}}
+.lc .pen{aspect-ratio:1.25/1;border-radius:16px;border:4px dashed #a98551;background:repeating-linear-gradient(100deg,#e4b84c 0 6px,#c99a2e 6px 9px);padding:4px;overflow:hidden}
+.lc .pen svg{width:100%;height:100%;display:block;animation:fwBob 3s ease-in-out infinite}@keyframes fwBob{50%{transform:translateY(-2px) scale(1.015)}}
+.lb .bn{position:relative;aspect-ratio:1/1.05}
+.lb .rf{position:absolute;left:-6%;right:-6%;top:0;height:42%;background:linear-gradient(#6b3a1c,#4a2410);clip-path:polygon(50% 0,100% 100%,0 100%)}
+.lb .wl{position:absolute;left:0;right:0;top:34%;bottom:0;background:repeating-linear-gradient(90deg,#c0392b 0 9px,#a52f23 9px 10px);border:3px solid #fff;border-radius:4px}
+.lb .dr{position:absolute;left:26%;right:26%;bottom:0;top:30%;background:#2a1608;border:3px solid #fff;border-bottom:0}
+.lb .sm{position:absolute;top:4%;right:18%;width:9px;height:9px;border-radius:50%;background:#fffd;animation:fwSm 2.6s ease-out infinite}.lb .s2{animation-delay:-1.3s}
+@keyframes fwSm{from{transform:translate(0,0) scale(.6);opacity:.9}to{transform:translate(8px,-34px) scale(1.8);opacity:0}}
+.fw-lock{position:absolute;transform:translate(-50%,-50%);width:15%;aspect-ratio:1.25/1;border-radius:50%;background:#8a5a2b;border:3px solid #a98551;box-shadow:inset 0 3px 6px #0006;font-size:17px;opacity:.9;z-index:1;display:grid;place-items:center;padding:0}
+.fw-amb{position:absolute;z-index:3;pointer-events:none;font-size:17px;font-style:normal;will-change:transform}
+.fw-amb.hen{animation:fwWk 8s linear infinite}@keyframes fwWk{0%{transform:translateX(0)}47%{transform:translateX(52px)}50%{transform:translateX(52px) scaleX(-1)}97%{transform:translateX(0) scaleX(-1)}100%{transform:translateX(0) scaleX(1)}}
+.fw-amb.vil{font-size:22px;animation:fwVil 16s linear infinite}@keyframes fwVil{0%{transform:translateX(0)}48%{transform:translateX(150px)}50%{transform:translateX(150px) scaleX(-1)}98%{transform:translateX(0) scaleX(-1)}100%{transform:translateX(0)}}
+.fw-amb.bf{font-size:14px;animation:fwBf 7s ease-in-out infinite}@keyframes fwBf{25%{transform:translate(30px,-18px)}50%{transform:translate(60px,4px)}75%{transform:translate(28px,22px)}}
+.fw-amb.cat{font-size:20px;animation:fwBob 4s ease-in-out infinite}
+.fw-ov{display:none;position:absolute;inset:0;z-index:8;flex-direction:column;background:#10230f}
+.fw-ov.on{display:flex;animation:fwIn .25s ease-out}@keyframes fwIn{from{opacity:0;transform:scale(.94)}}
+.fw-oh{flex:none;height:44px;display:flex;align-items:center;gap:10px;padding:0 10px;background:linear-gradient(#8a5528,#5e3615);border-bottom:3px solid #3a200a;font-weight:900}
+.fw-oh button{height:30px;padding:0 12px;border-radius:15px;background:linear-gradient(#4a2c10,#33200c);border:2px solid #b07a3a;color:#fff;font:800 12.5px/1 inherit}
+@media (prefers-reduced-motion:reduce){.fw *{animation:none!important}}
 </style></head><body>
 <div id="app">
   <div id="views"></div>
@@ -3857,18 +3897,16 @@ function HomeScreen(){
 function FarmScreen(){
  const NEED=8,CELLS=12,CE={wheat:'🌾',soy:'🫘',milk:'🥛'},CN={wheat:'گندم',soy:'سویا',milk:'شیر'};
  const root=h('div',{class:'fw'});
- let S=null,off=0,busy=false,place=0,sig='',barnOpen=false,pick='wheat',cowN=0;
+ let S=null,off=0,busy=false,place=-1,sig='',barnOpen=false,pick='wheat',cowN=0;
  const fld={sown:new Set(),cut:new Set()};
  const nowS=()=>Date.now()/1000+off,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
  const fmtT=s=>{s=Math.max(0,Math.ceil(s));return (Math.floor(s/60)+':'+String(s%60).padStart(2,'0')).replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d])};
  const imp=()=>{try{tg&&tgv('6.1')&&tg.HapticFeedback.impactOccurred('light')}catch(e){}};
- /* ───── نوار بالا ───── */
- const coinsV=h('b',{},'۰'),capBar=h('i'),capTxt=h('small',{},'');
- const capPill=h('div',{class:'fw-pill'},'📦',h('div',{class:'fw-bar'},capBar),capTxt);
- const hud=h('div',{class:'fw-hud'},h('div',{class:'fw-pill'},'🪙',coinsV),capPill,
-  h('button',{class:'fw-rs',onclick:async()=>{if(await ask('مزرعه از اول شروع بشه؟ همه‌چیز پاک میشه.'))act('reset')}},'⟲'));
- const world=h('div',{class:'fw-world'}),strip=h('div',{class:'fw-strip'});
- const farmer=h('div',{class:'fw-farmer'},h('span',{},'🧑‍🌾'));
+ /* ───── نوار منابع (چوبی) ───── */
+ const rv={},rpill=(k,e)=>{rv[k]=h('b',{},'۰');return h('div',{class:'fw-rp'},h('i',{},e),rv[k])};
+ const rbar=h('div',{class:'fw-res'},rpill('coins','🪙'),rpill('wheat','🌾'),rpill('soy','🫘'),rpill('milk','🥛'),rpill('cap','📦'));
+ const setT=(el,t)=>{if(el.textContent!==t)el.textContent=t};
+ const world=h('div',{class:'fw-world'});
  const sky=()=>h('div',{class:'fw-sky'},h('i',{class:'sun'}),h('i',{class:'cl c1'}),h('i',{class:'cl c2'}),h('i',{class:'hill'}));
  function sweep(el,fn){let on=false;
   const hit=e=>{const t=document.elementFromPoint(e.clientX,e.clientY),p=t&&t.closest&&t.closest('[data-i]');if(p&&el.contains(p))fn(p)};
@@ -3943,19 +3981,57 @@ function FarmScreen(){
    h('button',{class:'fw-b',disabled:c==null||S.coins<c,onclick:()=>act('upgrade',{what:k})},c==null?'حداکثر ✔':'⭐ '+num(c)+' 🪙'))});
   sheet.replaceChildren(h('div',{class:'fw-sh'},h('b',{},'📦 داخل انبار'),h('small',{},num(S.used)+' / '+num(S.cap)+' جا'),h('button',{class:'x',onclick:()=>toggleBarn(false)},'✕')),
    h('div',{class:'fw-items'},items),h('div',{class:'fw-sec'},'ارتقاها'),ups)}
- /* ───── جابه‌جایی بین جاها ───── */
- strip.append(pField,pCow,pBarn);world.append(strip,farmer);
- const navB=[['🌱','زمین'],['🐄','گاوداری'],['🏚','انبار']].map(([e,t],i)=>h('button',{class:i?'':'on',onclick:()=>go(i)},h('i',{},e),t));
- const nav=h('div',{class:'fw-nav'},navB);
- function go(i){if(i===place)return;farmer.classList.toggle('flip',i<place);place=i;if(i!==2)toggleBarn(false);
-  strip.style.transform='translateX('+(-i*33.3333)+'%)';farmer.classList.add('walk');setTimeout(()=>farmer.classList.remove('walk'),700);navB.forEach((b,j)=>b.classList.toggle('on',j===i))}
- root.append(hud,world,nav,h('div',{class:'fw-note'},'🌾 این بخش فعلاً فقط برای پشتیبان‌هاست و سکه‌ی مزرعه به پول ربات ربطی نداره.'));
+ /* ───── نقشه‌ی مزرعه (فقط transform/opacity انیمیت میشه تا لگ نکنه) ───── */
+ const TERR='<svg viewBox="0 0 360 560" preserveAspectRatio="xMidYMid slice"><defs><pattern id="fwg" width="26" height="26" patternUnits="userSpaceOnUse"><rect width="26" height="26" fill="#6fae45"/><path d="M5 18l2-5 2 5M17 8l2-5 2 5" stroke="#5e9a3a" stroke-width="1.6" fill="none"/></pattern>'+
+  '<symbol id="fwt" viewBox="0 0 40 52"><rect x="17" y="34" width="6" height="16" fill="#6b4423"/><ellipse cx="20" cy="22" rx="18" ry="20" fill="#2f7d32"/><ellipse cx="14" cy="16" rx="9" ry="9" fill="#4caf50"/></symbol>'+
+  '<symbol id="fwc" viewBox="0 0 20 52"><rect x="8" y="42" width="4" height="9" fill="#6b4423"/><path d="M10 44Q-4 22 10 1Q24 22 10 44z" fill="#1f6b34"/></symbol></defs>'+
+  '<rect width="360" height="560" fill="url(#fwg)"/><ellipse cx="180" cy="290" rx="174" ry="266" fill="none" stroke="#3f9ad6" stroke-width="42"/><ellipse cx="180" cy="290" rx="174" ry="266" fill="none" stroke="#86d0f5" stroke-width="14" opacity=".65"/>'+
+  '<ellipse cx="180" cy="290" rx="148" ry="240" fill="#7dbb52" stroke="#a98551" stroke-width="13"/><ellipse cx="180" cy="290" rx="148" ry="240" fill="none" stroke="#6b4f2a" stroke-width="13" stroke-dasharray="15 7" opacity=".5"/>'+
+  '<path d="M180 70V520M52 300H308M180 300Q120 360 96 440M180 300Q250 350 270 430" stroke="#ead9a2" stroke-width="20" stroke-linecap="round" fill="none"/>'+
+  '<g fill="#c9a56b" stroke="#6b4f2a" stroke-width="3"><circle cx="180" cy="48" r="13"/><circle cx="180" cy="532" r="13"/><circle cx="32" cy="290" r="13"/><circle cx="328" cy="290" r="13"/></g>'+
+  '<rect x="286" y="62" width="48" height="16" rx="3" fill="#8b5a2b" transform="rotate(28 310 70)"/>'+
+  '<use href="#fwt" x="62" y="96" width="34" height="44"/><use href="#fwt" x="270" y="92" width="34" height="44"/><use href="#fwc" x="20" y="180" width="14" height="40"/><use href="#fwc" x="326" y="196" width="14" height="40"/><use href="#fwt" x="52" y="400" width="32" height="42"/><use href="#fwc" x="168" y="480" width="14" height="40"/><use href="#fwt" x="296" y="410" width="32" height="42"/><use href="#fwc" x="120" y="86" width="12" height="34"/></svg>';
+ const map=h('div',{class:'fw-map'});map.innerHTML=TERR;
+ const loc=(cls,x,y,w,html,fn)=>{const b=h('button',{class:'fw-loc '+cls,style:'left:'+x+'%;top:'+y+'%;width:'+w+'%',onclick:fn});b.innerHTML=html;return b};
+ const fLoc=loc('lf',50,31,54,'<div class="pat">'+'<span></span>'.repeat(6)+'</div><em class="bub"></em><u class="lvl"></u>',()=>openPlace(0));
+ const cLoc=loc('lc',29,57,38,'<div class="pen">'+cowBox.querySelector('svg').outerHTML+'</div><em class="bub"></em><u class="lvl"></u>',()=>openPlace(1));
+ const bLoc=loc('lb',72,55,33,'<div class="bn"><div class="rf"></div><div class="wl"><div class="dr"></div></div><i class="sm"></i><i class="sm s2"></i></div><em class="bub"></em><u class="lvl"></u>',()=>openPlace(2));
+ const q=(b,s)=>b.querySelector(s),fMini=[...fLoc.querySelectorAll('.pat span')],fBubM=q(fLoc,'.bub'),cBubM=q(cLoc,'.bub'),bBubM=q(bLoc,'.bub');
+ const amb=(cls,x,y,t,st)=>h('i',{class:'fw-amb '+cls,style:'left:'+x+'%;top:'+y+'%;'+(st||'')},t);
+ map.append(fLoc,cLoc,bLoc,
+  ...[[18,17],[82,18],[17,71],[50,69],[83,71]].map(([x,y])=>h('button',{class:'fw-lock',style:'left:'+x+'%;top:'+y+'%',onclick:()=>toast('این زمین به‌زودی باز میشه 🔒')},'🔒')),
+  amb('hen',38,66,'🐔'),amb('hen',58,64,'🐓','animation-delay:-3s;animation-duration:11s'),amb('hen',46,45,'🐤','animation-delay:-6s'),amb('vil',30,43,'🧑‍🌾'),
+  amb('bf',60,40,'🦋'),amb('bf',22,50,'🦋','animation-delay:-4s'),amb('cat',66,70,'🐈'));
+ const tipT=h('div',{}),tip=h('div',{class:'fw-tip'},h('i',{},'🧑‍🌾'),tipT);
+ const sign=(e,t,i)=>h('button',{class:'fw-sg',onclick:()=>openPlace(i)},h('i',{},e),h('span',{},t));
+ const signs=h('div',{class:'fw-signs'},sign('🌾','زمین',0),sign('🐄','گاوداری',1),sign('🏚','انبار',2));
+ const med=(e,t,fn)=>h('button',{class:'fw-med',title:t,onclick:fn},e);
+ const side=h('div',{class:'fw-side'},
+  med('🔨','ارتقاها',()=>{openPlace(2);setTimeout(()=>toggleBarn(true),400)}),
+  med('❓','راهنما',()=>toast('روی زمین، گاوداری یا انبار بزن؛ دایره‌ی شماره‌دار سطح هر بخشه 🌾')),
+  med('⟲','شروع دوباره',async()=>{if(await ask('مزرعه از اول شروع بشه؟ همه‌چیز پاک میشه.'))act('reset')}));
+ /* ───── نمای نزدیک هر بخش ───── */
+ const ovT=h('b',{}),ov=h('div',{class:'fw-ov'},h('div',{class:'fw-oh'},h('button',{onclick:()=>closePlace()},'→ بازگشت'),ovT),pField,pCow,pBarn);
+ const TT=['🌾 زمین','🐄 گاوداری','🏚 انبار'],PN=[pField,pCow,pBarn];
+ function openPlace(i){place=i;PN.forEach((p,j)=>p.classList.toggle('show',j===i));ovT.textContent=TT[i];ov.classList.add('on');world.classList.add('inov')}
+ function closePlace(){ov.classList.remove('on');world.classList.remove('inov');toggleBarn(false);place=-1;try{paint(true)}catch(e){}}
+ world.append(map,rbar,side,tip,signs,ov);
+ root.append(world,h('div',{class:'fw-note'},'🌾 این بخش فعلاً فقط برای پشتیبان‌هاست و سکه‌ی مزرعه به پول ربات ربطی نداره.'));
  /* ───── وضعیت ───── */
+ const fprog=()=>S.field.status==='growing'?clamp((nowS()-S.field.planted_at)/Math.max(1,S.field.ready_at-S.field.planted_at),0,1):0;
+ function paintMap(){const st=S.field.status,c=S.field.crop,pr=fprog(),cs=S.cow.status,full=S.used/S.cap>=.9;
+  const t=st==='empty'?'':st==='growing'?(pr<.34?'🌱':pr<.68?'🌿':(c==='soy'?'🪴':'🌾')):CE[c];
+  fMini.forEach(m=>setT(m,t));fLoc.classList.toggle('rdy',st==='ready');
+  setT(fBubM,st==='empty'?'🌱 بکار':st==='growing'?'⏳ '+fmtT(S.field.ready_at-nowS()):'✂️ برداشت');fBubM.className='bub'+(st==='growing'?'':' hop');
+  setT(cBubM,cs==='hungry'?'🫘 غذا بده':cs==='producing'?'⏳ '+fmtT(S.cow.ready_at-nowS()):'🥛 بدوش');cBubM.className='bub'+(cs==='producing'?'':' hop');
+  setT(bBubM,full?'⚠️ پره':'📦 '+num(S.used)+'/'+num(S.cap));bBubM.className='bub'+(full?' hop':'');
+  setT(q(fLoc,'.lvl'),num(S.lvl.field));setT(q(cLoc,'.lvl'),num(S.lvl.cow));setT(q(bLoc,'.lvl'),num(S.lvl.barn));
+  setT(tipT,st==='ready'?'محصولت رسیده! برو زمین و داس بزن ✂️':cs==='ready'?'شیر آماده‌ست؛ برو گاو رو بدوش 🥛':cs==='hungry'&&S.items.soy>0?'گاو گرسنه‌ست؛ بهش سویا بده 🫘':st==='empty'?'زمینت خالیه؛ بذر بپاش 🌱':full?'انبارت داره پر میشه؛ چیزی بفروش یا ارتقا بده 📦':'همه‌چیز آرومه؛ منتظر رشد محصول باش ☀️')}
  function paint(force){if(!S)return;
-  coinsV.textContent=num(S.coins);capBar.style.width=Math.min(100,S.used/S.cap*100)+'%';capTxt.textContent=num(S.used)+'/'+num(S.cap);capPill.classList.toggle('warn',S.used/S.cap>=.9);
+  setT(rv.coins,num(S.coins));setT(rv.wheat,num(S.items.wheat));setT(rv.soy,num(S.items.soy));setT(rv.milk,num(S.items.milk));setT(rv.cap,num(S.used)+'/'+num(S.cap));rv.cap.parentNode.classList.toggle('warn',S.used/S.cap>=.9);
   const s=[S.coins,S.items.wheat,S.items.soy,S.items.milk,S.lvl.barn,S.lvl.field,S.lvl.cow,S.field.status,S.field.crop,S.cow.status].join();
   if(force||s!==sig){sig=s;fLv.textContent='سطح '+num(S.lvl.field);cLv.textContent='سطح '+num(S.lvl.cow);bLv.textContent='سطح '+num(S.lvl.barn);paintSeeds();paintSheet()}
-  paintField();paintCow()}
+  if(place>=0){paintField();paintCow()}else paintMap()}
  async function act(path,body){if(busy)return;busy=true;
   try{const r=await api('/api/farm/'+path,body||{});S=r.state;off=S.now-Date.now()/1000;fld.sown.clear();fld.cut.clear();cowN=0;paint(true);
    const fx=r.fx||{};
