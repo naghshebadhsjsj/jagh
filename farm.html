@@ -23,10 +23,10 @@ const tg=window.Telegram&&Telegram.WebApp;if(tg){tg.ready();tg.expand()}
 const TW=96,TH=48,N=14;
 const IM={};let pending=0;
 for(const k in SP){pending++;const i=new Image();i.onload=()=>{if(!--pending)start()};i.src=SP[k].src;IM[k]=i}
-const NAME={castle:'قلعه',hutY:'کلبه',houseR:'خانه',barn:'انبار',hutY2:'کلبه',stallR:'غرفه',stallB:'غرفه',stallY:'غرفه',hall:'تالار شهر',stable:'اصطبل',crop_tomato:'گوجه',crop_corn:'ذرت',crop_wheat:'گندم',crop_cotton:'پنبه',crop_berry:'بلوبری',cow:'گاو',sheep:'گوسفند',pig:'خوک',hen:'مرغ',duck:'اردک',goat:'بز',farmer:'کشاورز',hiker:'گردشگر',granny:'مادربزرگ',girl:'دختر کوچولو',woman:'بانوی مزرعه‌دار',ranger:'جنگل‌بان',lady:'بانوی بازار',chef:'آشپز'};
+const NAME={castle:'قلعه',hutY:'کلبه',houseR:'خانه',barn:'انبار',factory:'کارخانه‌ی فرآوری',hutY2:'کلبه',stallR:'غرفه',stallB:'غرفه',stallY:'غرفه',hall:'تالار شهر',stable:'اصطبل',crop_tomato:'گوجه',crop_corn:'ذرت',crop_wheat:'گندم',crop_cotton:'پنبه',crop_berry:'بلوبری',cow:'گاو',sheep:'گوسفند',pig:'خوک',hen:'مرغ',duck:'اردک',goat:'بز',farmer:'کشاورز',hiker:'گردشگر',granny:'مادربزرگ',girl:'دختر کوچولو',woman:'بانوی مزرعه‌دار',ranger:'جنگل‌بان',lady:'بانوی بازار',chef:'آشپز'};
 const CROP={crop_tomato:[20,30],crop_corn:[30,50],crop_wheat:[25,40],crop_cotton:[35,60],crop_berry:[40,80]}; // [seconds,coins]
 const ANI={cow:[45,25],sheep:[40,20],pig:[35,15],hen:[20,8],duck:[25,10],goat:[40,18]};
-const HDR=()=>({'Content-Type':'application/json','X-Init-Data':tg?tg.initData:''});
+const FARM_INIT=(tg&&tg.initData)||new URLSearchParams(location.search).get('tgWebAppData')||'';const HDR=()=>({'Content-Type':'application/json','X-Init-Data':FARM_INIT});
 let online=false;
 async function api(p,body){const r=await fetch(p,body?{method:'POST',headers:HDR(),body:JSON.stringify(body)}:{headers:HDR()});const j=await r.json();if(!r.ok)throw new Error(j.error||'خطا');return j}
 function applyState(s){online=true;coins=s.coins;const off=s.now-Date.now()/1000;
@@ -39,7 +39,7 @@ for(let i=0;i<N;i++){road.add(i+',6');road.add('6,'+i)}
 const FP=new Set();const mark=(x,y,w)=>{for(let a=0;a<w;a++)for(let b=0;b<w;b++)FP.add((Math.floor(x)+a)+','+(Math.floor(y)+b))};
 const BL=(k,x,y,w,sw,id)=>{mark(x,y,w);return add(k,x,y,w,sw,id)};
 // ---- map layout (14x14) ----
-BL('castle',1,1,3,3.1*TW);BL('hall',4,0,2,2.2*TW);BL('houseR',4,3,2,2*TW);BL('hutY',0,4,2,1.7*TW);
+BL('castle',1,1,3,3.1*TW);BL('hall',4,0,2,2.2*TW);BL('houseR',4,3,2,2*TW);BL('hutY',0,4,2,1.7*TW);BL('barn',2,4,2,2.05*TW,'factory');
 BL('barn',8,1,2,2.1*TW);BL('hutY2',11,1,2,1.8*TW);BL('stable',11,4,2,2.1*TW);BL('houseR',8,4,2,2*TW);
 BL('crop_tomato',8,8,2,2*TW,'f0');BL('crop_corn',10,8,2,2*TW,'f1');BL('crop_wheat',12,8,2,2*TW,'f2');
 BL('crop_cotton',8,10,2,2*TW,'f3');BL('crop_berry',10,10,2,2*TW,'f4');BL('crop_wheat',12,10,2,2*TW,'f5');
@@ -59,9 +59,9 @@ for(let i=0;i<N;i++)for(let j=0;j<N;j++){const key=i+','+j;if(FP.has(key)||road.
 const W=[];
 const walker=(k,h,pts,sp)=>{const p=pts[0|Math.random()*pts.length];W.push({k,h,x:p[0],y:p[1],pts,sp,tx:p[0],ty:p[1],wait:0,face:1,o:null})};
 const rp=[];for(const r of road){const [a,b]=r.split(',').map(Number);rp.push([a+.5,b+.5])}
-['farmer','hiker','granny','girl','woman','ranger','lady','chef'].forEach(k=>walker(k,95,rp,.9+Math.random()*.5));
+['farmer','hiker','granny','girl','woman','ranger','lady','chef','farmer','girl','granny','woman','hiker','lady'].forEach(k=>walker(k,95,rp,.75+Math.random()*.65));
 const pen=[];for(let i=.8;i<5.4;i+=.8)for(let j=8.8;j<13.4;j+=.8)pen.push([i,j]);
-['cow','sheep','pig','hen','duck','goat'].forEach((k,i)=>{walker(k,k=='cow'||k=='sheep'?64:52,pen,.4+Math.random()*.2);const w=W[W.length-1];w.x=1+i*.8;w.y=9.5+(i%3)*1.4;w.ani=1;w.id=k;w.t0=-1e12});
+['cow','sheep','pig','hen','duck','goat','cow','sheep','pig','hen','duck','goat'].forEach((k,i)=>{walker(k,k=='cow'||k=='sheep'?64:52,pen,.32+Math.random()*.28);const w=W[W.length-1];w.x=.7+(i%6)*.78;w.y=9.1+Math.floor(i/6)*2.1+(i%3)*.12;w.ani=1;w.id=k;w.t0=-1e12});
 // ---- render ----
 const cv=document.getElementById('c'),g=cv.getContext('2d');let cam={x:0,y:0,z:.4},dpr=1;
 const P=(i,j)=>[(i-j)*TW/2,(i+j)*TH/2];

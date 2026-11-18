@@ -4314,9 +4314,10 @@ function FarmScreen(){
  return root;
 }
 function FarmTab(){
- const root=h('div',{class:'scr fwfull'}),fs=FarmScreen(),x=h('button',{class:'fw-x',onclick:()=>openTab('home')},'✕');
- root.append(fs,x);
- root._show=()=>{$('#app').classList.add('fwon');try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes()}catch(e){}fs._load&&fs._load()};
+ /* نقشه‌ی تصویری مزرعه از farm.html؛ زمان برداشت و پاداش‌ها از API سمت سرور می‌آیند. */
+ const root=h('div',{class:'scr fwfull fw-embed'}),frame=h('iframe',{title:'مزرعه‌ی سه‌بعدی',allow:'fullscreen',src:'/farm?tgWebAppData='+encodeURIComponent(tg&&tg.initData||''),style:'width:100%;height:100%;border:0;display:block;background:#8fd3e8'}),x=h('button',{class:'fw-x',onclick:()=>openTab('home')},'✕');
+ root.append(frame,x);
+ root._show=()=>{$('#app').classList.add('fwon');try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes()}catch(e){};frame.src='/farm?tgWebAppData='+encodeURIComponent(tg&&tg.initData||'')};
  root._destroy=()=>{$('#app').classList.remove('fwon');try{tg.enableVerticalSwipes&&tg.enableVerticalSwipes()}catch(e){}};
  return root;
 }
