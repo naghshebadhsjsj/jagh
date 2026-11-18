@@ -24,7 +24,7 @@ if os.environ.get("DIAG") == "1":
 
     def _api(method, **params):
         data = _p.urlencode(params).encode()
-        with _u.urlopen(f"https://api.telegram.org/bot{_tok}/{method}", data=data, timeout=60) as r:
+        with _u.urlopen(f"https://api.telegram.org/bot{_tok}/{method}", data=data, timeout=25) as r:
             return _j.loads(r.read())
 
     _rep = ["🔧 گزارش عیب‌یابی",
@@ -7794,12 +7794,16 @@ async def _p_emoji_create(data: dict, user: dict):
                 canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
                 canvas.alpha_composite(im, ((100 - im.width) // 2, (100 - im.height) // 2))
                 out = BytesIO()
-                canvas.save(out, format="WEBP", lossless=True, quality=100, method=6)
+                canvas.save(out, format="WEBP", lossless=True, quality=100, method=4)
                 sticker_bytes = out.getvalue()
+                # فقط اگر از سقف تلگرام بیشتر شد، کیفیت را مرحله‌ای و کمترین مقدار لازم پایین می‌آوریم.
                 if len(sticker_bytes) > 256 * 1024:
-                    out = BytesIO()
-                    canvas.save(out, format="WEBP", lossless=False, quality=96, method=6)
-                    sticker_bytes = out.getvalue()
+                    for qv in (98, 95, 92, 89):
+                        out = BytesIO()
+                        canvas.save(out, format="WEBP", lossless=False, quality=qv, method=4)
+                        sticker_bytes = out.getvalue()
+                        if len(sticker_bytes) <= 256 * 1024:
+                            break
                 if len(sticker_bytes) > 256 * 1024:
                     raise ValueError("image too large after encoding")
         else:
@@ -7820,13 +7824,13 @@ async def _p_emoji_create(data: dict, user: dict):
                 # 100x100 دقیق، حداکثر ۳ ثانیه و ۳۰fps، بدون صدا؛ نسبت تصویر و شفافیت حفظ می‌شود.
                 vf = "fps=30,scale=100:100:force_original_aspect_ratio=decrease:flags=lanczos,pad=100:100:(ow-iw)/2:(oh-ih)/2:color=black@0,format=yuva420p"
                 last_error = ""
-                for crf in (34, 39, 44, 48):
+                for crf in (38, 43, 48):
                     cmd = [ffmpeg, "-y", "-i", inp, "-t", "3", "-an", "-vf", vf,
                            "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0",
-                           "-crf", str(crf), "-deadline", "good", "-cpu-used", "5",
+                           "-crf", str(crf), "-deadline", "realtime", "-cpu-used", "6",
                            "-row-mt", "1", "-auto-alt-ref", "0", "-metadata:s:v:0", "alpha_mode=1",
                            "-f", "webm", outp]
-                    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                    proc = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25)
                     if proc.returncode != 0:
                         last_error = proc.stderr.decode("utf-8", "ignore")[-500:]
                         continue
@@ -7880,8 +7884,18 @@ async def _p_emoji_create(data: dict, user: dict):
             method="POST",
         )
         def _upload():
-            with urllib.request.urlopen(req, timeout=60) as response:
-                return json.loads(response.read().decode("utf-8"))
+            try:
+                with urllib.request.urlopen(req, timeout=35) as response:
+                    body = response.read()
+            except urllib.error.HTTPError as exc:
+                body = exc.read()
+                try:
+                    payload = json.loads(body.decode("utf-8", "replace"))
+                    detail = payload.get("description") or payload.get("error") or str(exc)
+                except Exception:
+                    detail = body.decode("utf-8", "replace")[:500] or str(exc)
+                raise RuntimeError(f"Telegram HTTP {exc.code}: {detail}") from exc
+            return json.loads(body.decode("utf-8", "replace"))
         result = await asyncio.to_thread(_upload)
         if not result.get("ok"):
             desc = str(result.get("description") or "Telegram درخواست ساخت مجموعه را نپذیرفت.")
@@ -7915,7 +7929,7 @@ async def _p_emoji_create(data: dict, user: dict):
         log.warning("custom emoji creation failed for support %s: %s", uid, msg, exc_info=True)
         if "premium" in msg.lower():
             raise _ApiError("تلگرام ساخت/ارسال ایموجی را به‌دلیل محدودیت Premium نپذیرفت. حساب مالک مجموعه باید شرایط لازم را داشته باشد.", 502)
-        raise _ApiError("ساخت ایموجی در تلگرام ناموفق بود: " + (msg[:180] or "خطای نامشخص"), 502)
+        raise _ApiError("تلگرام نتوانست ایموجی را بسازد: " + (msg[:240] or "خطای نامشخص") + " — فرمت فایل یا محدودیت‌های مجموعه را بررسی کن.", 502)
 
 # هر مسیر API پنل برای کار کردن به کدوم دسترسی‌ها نیاز داره (هر کدوم باشه کافیه).
 # adjust / task add / task delete داخل خودِ تابع‌هاشون بر اساس نوع عملیات چک میشن.
@@ -12147,6 +12161,32 @@ async def emoji_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("\n".join(lines), parse_mode="HTML")
     except Exception:
         await msg.reply_text("\n".join(ids[:40]))
+
+
+async def support_emoji_code_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """پشتیبان روی پیام ایموجی ریپلای می‌کند و «.کدشو میخوام» می‌فرستد."""
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user or msg.chat.type != "private":
+        return
+    if not (has_perm(user.id, "panel") and has_perm(user.id, "miniapp")):
+        return
+    target = msg.reply_to_message
+    if target is None:
+        await msg.reply_text("برای گرفتن کد، روی پیام ایموجی پرمیوم ریپلای کن و بنویس: .کدشو میخوام")
+        return
+    ids = []
+    for entity in list(target.entities or []) + list(target.caption_entities or []):
+        if entity.type == "custom_emoji" and entity.custom_emoji_id and entity.custom_emoji_id not in ids:
+            ids.append(entity.custom_emoji_id)
+    if not ids:
+        await msg.reply_text("در پیام ریپلای‌شده ایموجی پرمیوم پیدا نکردم. پیام اصلی را فوروارد کن و دوباره امتحان کن.")
+        return
+    lines = [f'<tg-emoji emoji-id="{eid}">▫️</tg-emoji> <code>{eid}</code>' for eid in ids[:40]]
+    try:
+        await msg.reply_text("🧩 کد ایموجی پرمیوم:\n" + "\n".join(lines), parse_mode="HTML")
+    except Exception:
+        await msg.reply_text("🧩 کد ایموجی پرمیوم:\n" + "\n".join(ids[:40]))
 
 
 async def emoji_ids_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24798,6 +24838,9 @@ def main():
     app.add_handler(CallbackQueryHandler(jobs_reset_pick, pattern=r"^sr:[mfa]$"))
     app.add_handler(CommandHandler("myid", my_id, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("eid", emoji_ids, filters=filters.ChatType.PRIVATE))
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.Regex(r"^\.کدشو میخوام$"), support_emoji_code_request
+    ))
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Entity("custom_emoji") | filters.CaptionEntity("custom_emoji")),
         emoji_ids_auto), group=-1)
