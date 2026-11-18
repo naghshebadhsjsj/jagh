@@ -10521,14 +10521,14 @@ async def _ai_post(url: str, key: str, payload: dict) -> tuple:
     return await asyncio.to_thread(_call)
 
 
-async def ai_answer(question: str, ref: str = "") -> str | None:
+async def ai_answer(question: str, ref: str = "", system: str | None = None, history: list | None = None) -> str | None:
     """جواب هوش مصنوعی؛ اگه همه‌ی سرویس‌ها شکست خوردن None برمی‌گردونه."""
     user_msg = question if not ref else f"پیامی که کاربر روش ریپلای کرده: «{ref}»\n\nسؤال کاربر: {question}"
     for name, url, key, model in _ai_providers():
         if _AI_PROV_OFF.get(name, 0) > time.time():
             continue
-        payload = {"model": model, "max_tokens": 1024, "temperature": 0.8,
-                   "messages": [{"role": "system", "content": AI_SYSTEM}, {"role": "user", "content": user_msg}]}
+        _msgs = [{"role": "system", "content": system or AI_SYSTEM}, *(history or []), {"role": "user", "content": user_msg}]
+        payload = {"model": model, "max_tokens": 1024, "temperature": 0.8, "messages": _msgs}
         try:
             code, data = await _ai_post(url, key, payload)
             if code == 200 and data:
@@ -10590,6 +10590,87 @@ async def ai_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str)
         await msg.reply_text("الان هوش مصنوعی در دسترس نیست، یه کم بعد دوباره امتحان کن 😅")
         return True
     await msg.reply_text(ans[:3500])
+    return True
+
+
+# ───────── چت با «جینگو» (شخصیت خوابالو و بی‌حال) ─────────
+# کاربر می‌نویسه «جینگو سلام» / «جینگو حالت چطوره» و ربات با لحن خوابالو جواب میده.
+# از همون سرویس‌های هوش مصنوعیِ بالا (Gemini/Groq/OpenRouter) استفاده می‌کنه. فقط وقتی فعال میشه که پیام هیچ‌کدوم از
+# دستورهای دیگه‌ی ربات (جینگو بت، جینگو سرقت، جینگو اسم پت ...) نباشه؛ برای همین آخرِ on_group_text صدا زده میشه.
+JINGO_CHAT_RE = re.compile(r"^(?:ج[یي]نگو|jingo)(?:[\s:،,!؟?.]+(.*))?$", re.S | re.I)
+JINGO_USER_COOLDOWN = 6          # فاصله‌ی بین دو پیام هر نفر (ثانیه)؛ تو این فاصله بی‌صدا نادیده گرفته میشه
+JINGO_USER_PER_HOUR = 40         # حداکثر پیام هر نفر در ساعت
+JINGO_MAX_Q = 500
+JINGO_HIST_TURNS = 4             # چند رد و بدل آخر برای ادامه‌ی گفتگو یادش بمونه
+JINGO_HIST_TTL = 1800            # ثانیه
+JINGO_SYSTEM = (
+    "تو «جینگو» هستی؛ یه آدم فوق‌العاده خوابالو، بی‌حال و بی‌جون که تو یه گروه تلگرامی هست. انگار همین الان از خواب بیدارش کردن "
+    "یا هر لحظه ممکنه وسط حرف خوابش ببره. با لحن خودمونی و محاوره‌ای فارسی جواب بده. "
+    "قواعد: (۱) خیلی کوتاه جواب بده، یک تا سه جمله‌ی کوتاه و بیشتر نه. (۲) لحنت کش‌دار و کند باشه: از «هوووم...»، «آآآه...»، «اوف...»، "
+    "«خوابم میاد...»، «چشام باز نمیشه...»، خمیازه (مثلا «هاااا~»)، سه‌نقطه و کش دادن حروف استفاده کن؛ ولی تو هر پیام فقط یکی دو تاش رو بیار، زیاده‌روی نکن. "
+    "(۳) هیچ انرژی و هیجانی نداشته باش؛ علامت تعجب زیاد و ایموجی هیجانی نذار؛ حداکثر یه ایموجی خوابالو مثل 😴 یا 🥱 یا 💤 گاهی. "
+    "(۴) با اینکه بی‌حالی، به حرف کاربر واقعاً جواب بده؛ اگه سوالی پرسید جواب درست و کوتاه بده ولی با همون حال خواب‌آلود، و می‌تونی "
+    "وسطش گله کنی که بیدارت کرده یا بگی بذار بخوابم. (۵) همیشه تو نقش بمون و نگو که هوش مصنوعی یا مدل زبانی هستی؛ اگه پرسیدن کی هستی، بگو جینگو و خوابت میاد. "
+    "(۶) فحاشی، توهین، محتوای جنسی یا مضر نداشته باش. اگه چیز نامناسبی ازت خواستن، خوابالو و بی‌حوصله ردش کن. "
+    "(۷) اگه کاربر به زبان دیگه‌ای نوشت به همون زبان جواب بده ولی همین شخصیت رو حفظ کن.")
+_JG_LAST: dict[int, float] = {}
+_JG_USER_TS: dict[int, list] = {}
+_JG_HIST: dict[tuple, tuple] = {}   # (chat_id, user_id) -> (آخرین زمان, [پیام‌ها])
+
+
+async def jingo_chat_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    msg = update.effective_message
+    user = update.effective_user
+    m = JINGO_CHAT_RE.match(text.strip())
+    if not m or not msg or not user:
+        return False
+    if _is_bot_text_command(text):   # یکی از دستورهای واقعیِ ربات (مثلا جینگو بت)؛ دست نزن
+        return False
+    q = (m.group(1) or "").strip()
+    ref = ""
+    if msg.reply_to_message:
+        ref = (msg.reply_to_message.text or msg.reply_to_message.caption or "").strip()[:400]
+    if not q:
+        q = "(فقط اسمتو صدا زد)"
+    if not _ai_providers():
+        return False   # هوش مصنوعی فعال نیست؛ مثل قبل ساکت بمون
+    now = time.time()
+    if now - _JG_LAST.get(user.id, 0) < JINGO_USER_COOLDOWN:
+        return True
+    hist_ts = [t for t in _JG_USER_TS.get(user.id, []) if now - t < 3600]
+    if len(hist_ts) >= JINGO_USER_PER_HOUR:
+        _JG_USER_TS[user.id] = hist_ts
+        return True
+    today = time.strftime("%Y-%m-%d")
+    if _AI_DAY[0] != today:
+        _AI_DAY[0], _AI_DAY[1] = today, 0
+    if _AI_DAY[1] >= AI_DAILY_MAX:
+        await msg.reply_text("هوووم... امروز دیگه جون ندارم... برو بخواب 💤")
+        return True
+    _JG_LAST[user.id] = now
+    hist_ts.append(now)
+    _JG_USER_TS[user.id] = hist_ts
+    _AI_DAY[1] += 1
+    try:
+        await context.bot.send_chat_action(msg.chat_id, "typing")
+    except Exception:
+        pass
+    key = (msg.chat_id, user.id)
+    last_t, hist = _JG_HIST.get(key, (0, []))
+    if now - last_t > JINGO_HIST_TTL:
+        hist = []
+    system = JINGO_SYSTEM + f"\nاسم کسی که باهات حرف می‌زنه: {(user.first_name or user.full_name or '').strip()[:30]}"
+    ans = await ai_answer(q[:JINGO_MAX_Q], ref, system=system, history=hist)
+    if not ans:
+        await msg.reply_text("هاااا... نمی‌کشم الان... بعداً بیا 😴")
+        return True
+    ans = ans[:900]
+    hist = (hist + [{"role": "user", "content": q[:JINGO_MAX_Q]}, {"role": "assistant", "content": ans}])[-2 * JINGO_HIST_TURNS:]
+    _JG_HIST[key] = (now, hist)
+    if len(_JG_HIST) > 3000:   # جلوگیری از رشد بی‌پایان حافظه
+        for k in [k for k, v in _JG_HIST.items() if now - v[0] > JINGO_HIST_TTL]:
+            _JG_HIST.pop(k, None)
+    await msg.reply_text(ans)
     return True
 
 
@@ -10688,6 +10769,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if _word_key(text) in ("خلاف", "دزدی", "سرقت"):
         await show_robbery_menu(update, context)
+        return
+    if await jingo_chat_text(update, context, text):   # چت با جینگوی خوابالو: «جینگو سلام»
         return
     # «امتیاز» زدن حذف شد؛ دیگه هیچ پاداشی نداره و ربات به این کلمه جواب نمیده.
     return
@@ -14416,7 +14499,7 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
     cname = await pool.fetchval("SELECT name FROM users WHERE user_id = $1", creator) or "کاربر"
     a, b = _ulink(creator, cname), _ulink(user.id, user.full_name)
     await edit_html(q, f"<b>{GAME_FA[game]} — بازی شروع شد!\n\n{a} {VS_CE} {b}\n{MONEY_CE} شرط هر نفر: {bet:,} تومن</b>")
-    rp = ReplyParameters(message_id=q.message.message_id, allow_sending_without_reply=True)
+    rp = ReplyParameters(message_id=q.message.message_id, allow_sending_without_reply=True) if _msg_fresh(q.message) else None
     try:
         m1 = await bot.send_dice(chat_id, emoji=GAME_EMOJI[game], reply_parameters=rp)
         m2 = await bot.send_dice(chat_id, emoji=GAME_EMOJI[game], reply_parameters=rp)
@@ -17248,7 +17331,7 @@ async def car_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         try:
             await context.bot.send_message(q.message.chat_id, B(result), parse_mode="HTML",
-                                           reply_parameters=ReplyParameters(message_id=q.message.message_id, allow_sending_without_reply=True))
+                                           reply_parameters=ReplyParameters(message_id=q.message.message_id, allow_sending_without_reply=True) if _msg_fresh(q.message) else None)
         except Exception:
             log.warning("farsh result send failed", exc_info=True)
         await _repanel(q, context, uid, idx)
@@ -17896,6 +17979,19 @@ _USERNAME_SEEN: dict = {}
 # ربات تو چت دیگه می‌فرسته (مثلا پی‌وی همسر) دست‌نخورده می‌مونن.
 import contextvars as _ctxv
 _REPLY_CTX = _ctxv.ContextVar("reply_ctx", default=None)
+_REPLY_MAX_AGE = 300   # ثانیه؛ پیام قدیمی‌تر از این دیگه هدفِ ریپلای نمیشه
+
+
+def _msg_fresh(m, max_age: int = _REPLY_MAX_AGE) -> bool:
+    """True فقط اگه پیام تازه باشه. پیامِ قدیمی (مثلا پنل/میزِ چند ساعت پیش) یا غیرقابل‌دسترس (date=0) → False."""
+    try:
+        d = getattr(m, "date", None)
+        if d is None:
+            return False
+        ts = d.timestamp()
+        return ts > 0 and (time.time() - ts) <= max_age
+    except Exception:
+        return False
 _REPLY_SEND_METHODS = frozenset({
     "sendMessage", "sendPhoto", "sendVideo", "sendAnimation", "sendDocument", "sendSticker", "sendDice",
     "sendVoice", "sendAudio", "sendVideoNote", "sendPoll", "sendRichMessage", "sendLocation", "sendContact"})
@@ -17944,6 +18040,9 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ثبت گروه‌ها و کنترل دسترسی‌ها."""
     try:   # هر چی ربات تو این آپدیت می‌فرسته، روی پیامِ همین کاربر (یا پیامِ دکمه‌ای که زده) ریپلای میشه
         _rm = update.effective_message if (update.message or update.callback_query) else None
+        # دکمه‌ی روی پنل/پیامِ قدیمی (چند ساعت پیش) نباید باعث بشه ربات روی اون پیامِ قدیمی ریپلای بزنه
+        if _rm is not None and update.callback_query and not _msg_fresh(_rm):
+            _rm = None
         _REPLY_CTX.set((_rm.chat_id, _rm.message_id, time.time(), asyncio.current_task()) if _rm is not None and getattr(_rm, "message_id", None) else None)
     except Exception:
         _REPLY_CTX.set(None)
