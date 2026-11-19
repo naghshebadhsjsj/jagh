@@ -12110,6 +12110,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await pet_text(update, context, text):
         return
+    if await cafe_text(update, context, text):
+        return
     if _word_key(text) in ("تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks"):
         await show_tasks(update, context)
         return
@@ -19389,7 +19391,7 @@ def _is_bot_text_command(text: str) -> bool:
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
         "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده", "شجرهنامه", "پولتوجیبی", "ترکخانواده", "عاق", "فرزندخواندگی", "فرزندخوندگی", "جینگوفرزندخواندگی", "جینگوفرزندخوندگی", "جینگوفرزندخونده", "جینگوفرزندخوانده", "جینگوشجرهنامه", "درختخانواده",
         "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "جینگوسرقت", "دوئلدرسی", "دوئلدرس",
-        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "کازینو", "casino", "فروشگاه", "سکس", "موشک", "کراش",
+        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "کازینو", "جینگوکافه", "کافهجینگو", "جینگودعوتبهکافه", "جینگودعوتکافه", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
     if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in EDU_WORDS or key in LESSON_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
@@ -19410,6 +19412,7 @@ _USERNAME_SEEN: dict = {}
 import contextvars as _ctxv
 _REPLY_CTX = _ctxv.ContextVar("reply_ctx", default=None)
 _REPLY_MAX_AGE = 300   # ثانیه؛ پیام قدیمی‌تر از این دیگه هدفِ ریپلای نمیشه
+_STALE_GROUP_MSG_SECONDS = 120   # ثانیه؛ پیامِ گروهیِ قدیمی‌تر از این (مثلا صف‌مونده بعد از خاموشی/گیرِ ربات) اصلا پردازش نمیشه
 
 
 def _msg_fresh(m, max_age: int = _REPLY_MAX_AGE) -> bool:
@@ -19476,6 +19479,19 @@ async def gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _REPLY_CTX.set((_rm.chat_id, _rm.message_id, time.time(), asyncio.current_task()) if _rm is not None and getattr(_rm, "message_id", None) else None)
     except Exception:
         _REPLY_CTX.set(None)
+    # پیام/دستورِ قدیمیِ گروه (چند دقیقه/ساعت پیش که تو صفِ تلگرام مونده بود و حالا بعد از ری‌استارت یا گیر کردنِ ربات
+    # رسیده) نه جواب داده میشه نه ریپلای می‌خوره؛ دکمه‌ها و پی‌وی دست‌نخورده می‌مونن.
+    try:
+        _sm = update.message
+        _sc = update.effective_chat
+        if (_sm is not None and _sc is not None and _sc.type in ("group", "supergroup")
+                and getattr(_sm, "date", None) is not None
+                and time.time() - _sm.date.timestamp() > _STALE_GROUP_MSG_SECONDS):
+            raise ApplicationHandlerStop
+    except ApplicationHandlerStop:
+        raise
+    except Exception:
+        pass
     cm = getattr(update, "my_chat_member", None)
     if cm and cm.chat and cm.chat.type in ("group", "supergroup"):
         new_status = str(getattr(cm.new_chat_member, "status", ""))
@@ -24802,6 +24818,252 @@ async def boss_loop(app: Application):
             log.exception("boss loop failed")
 
 
+# ───────────────────────── کافه جینگو ─────────────────────────
+# فقط برای سطح ۳ به بالا (همون «سطح» پنل خودم). منو: «جینگو کافه» یا «کافه جینگو».
+# دعوت: ریپلای روی یه نفر + «جینگو دعوت به کافه» ← طرف قبول کنه ← دعوت‌کننده سفارش میده ← پولش از دعوت‌کننده کم میشه
+# و انرژیِ سفارش به هر دو نفر میرسه. آب رایگانه (هر ۵ دقیقه یه بار، ۱ انرژی)؛ بقیه‌ی آیتم‌ها گرون‌ان و ۲ تا ۱۵ انرژی میدن.
+CAFE_MIN_LEVEL = 3
+CAFE_IMG = BASE_DIR / "cafe.jpg"          # عکس کافه؛ کنار bot.py
+_CAFE_FID = None
+CAFE_WATER_COOLDOWN = 5 * 60              # آب رایگان: هر کاربر هر ۵ دقیقه یه بار
+CAFE_INVITE_TTL = 300                     # مهلت جواب به دعوت
+CAFE_ORDER_TTL = 600                      # مهلت سفارشِ دعوت‌کننده بعد از قبول شدن
+CAFE_EID = "5267453380506177056"
+CAFE_CE = f'<tg-emoji emoji-id="{CAFE_EID}">☕</tg-emoji>'
+# کلید: (اسم، ایموجی پرمیوم، ایموجی جایگزین، قیمت تومن، کمترین انرژی، بیشترین انرژی)  — به ترتیب قیمت
+CAFE_ITEMS = {
+    "water":    ("آب",         "6014834907564482606", "💧", 0,         1.0,  1.0),
+    "soda":     ("نوشابه",     "5359616893277721113", "🥤", 100_000,   2.0,  4.0),
+    "milk":     ("شیر بسکویت", None,                  "🥛", 150_000,   3.0,  6.0),
+    "coffee":   ("قهوه",       "5267453380506177056", "☕", 250_000,   4.0,  8.0),
+    "espresso": ("اسپرسو",     "5285492870214604805", "☕", 400_000,   6.0,  10.0),
+    "latte":    ("آیس لته",    "5368571264434717112", "🧋", 600_000,   8.0,  12.0),
+    "beer":     ("آبجو",       "6014787710168894973", "🍺", 900_000,   10.0, 14.0),
+    "energy":   ("انرژی‌زا",   "5413878590972372676", "⚡", 1_500_000, 12.0, 15.0),
+}
+CAFE_MENU_WORDS = {"جینگوکافه", "کافهجینگو"}
+CAFE_INVITE_WORDS = {"جینگودعوتبهکافه", "جینگودعوتکافه"}
+
+
+def _cafe_ce(key: str) -> str:
+    _n, eid, fb, *_ = CAFE_ITEMS[key]
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>' if eid else fb
+
+
+def _cafe_short(price: int) -> str:
+    if price <= 0:
+        return "رایگان"
+    return f"{price / 1_000_000:g}m" if price >= 1_000_000 else f"{price // 1000}k"
+
+
+def _cafe_menu_text() -> str:
+    lines = [f"{CAFE_CE} کافه جینگو",
+             "هرچی بخوری انرژی می‌گیری؛ با دعوت یه رفیق، هر دو نفر انرژی می‌گیرید 🥂", ""]
+    for k, (name, _e, _f, price, lo, hi) in CAFE_ITEMS.items():
+        cost = f"رایگان (هر {CAFE_WATER_COOLDOWN // 60} دقیقه)" if price == 0 else f"{price:,} تومن"
+        en = _fmt_en(lo) if lo == hi else f"{_fmt_en(lo)} تا {_fmt_en(hi)}"
+        lines.append(f"{_cafe_ce(k)} {name} — {cost} · ⚡ {en}")
+    lines += ["", "دعوت: ریپلای روی یه نفر + <code>جینگو دعوت به کافه</code>", f"ویژه‌ی لول {CAFE_MIN_LEVEL} به بالا"]
+    return B("\n".join(lines))
+
+
+def _cafe_kb(cb_fn) -> InlineKeyboardMarkup:
+    btns = [btn(f"{name} · {_cafe_short(price)}", "success" if price == 0 else "primary", icon=eid, callback_data=cb_fn(k))
+            for k, (name, eid, _f, price, _lo, _hi) in CAFE_ITEMS.items()]
+    return InlineKeyboardMarkup([btns[i:i + 2] for i in range(0, len(btns), 2)])
+
+
+async def _cafe_level(uid: int) -> int:
+    row = await get_user(uid)
+    return row_level(row) if row else 1
+
+
+async def send_cafe_menu(bot, chat_id: int, uid: int, reply_to: int | None = None):
+    """عکس کافه + منو + دکمه‌های سفارش برای خودِ کاربر. اگه عکس نبود/نشد، متنی می‌فرسته."""
+    global _CAFE_FID
+    text = _cafe_menu_text()
+    kb = _cafe_kb(lambda k: f"cf:b:{uid}:{k}")
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    for cap in (text, re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", text)):
+        try:
+            if _CAFE_FID:
+                return await bot.send_photo(chat_id, _CAFE_FID, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            if CAFE_IMG.exists():
+                with open(CAFE_IMG, "rb") as f:
+                    m = await bot.send_photo(chat_id, f, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+                try:
+                    _CAFE_FID = m.photo[-1].file_id
+                except Exception:
+                    pass
+                return m
+            break
+        except Exception:
+            log.warning("cafe photo send failed", exc_info=True)
+            _CAFE_FID = None
+    return await send_html(bot, chat_id, text, reply_markup=kb, reply_parameters=rp)
+
+
+async def _cafe_order(payer: int, guests: list, key: str):
+    """سفارش اتمیک: سطح همه، کولداون آبِ رایگان یا پولِ نقدِ payer، و انرژی برای payer + guests (همه یه مقدار).
+    برمی‌گردونه (خطا | None, اطلاعات | None)."""
+    _n, _e, _f, price, lo, hi = CAFE_ITEMS[key]
+    ids = [payer] + [g for g in guests if g != payer]
+    now = time.time()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            rows = await c.fetch("SELECT * FROM users WHERE user_id=ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", ids)
+            by = {int(r["user_id"]): r for r in rows}
+            if len(by) != len(ids):
+                return "کاربر پیدا نشد.", None
+            if any(row_level(by[u]) < CAFE_MIN_LEVEL for u in ids):
+                return f"کافه فقط برای لول {CAFE_MIN_LEVEL} به بالاست.", None
+            if price == 0:
+                last = await c.fetchval("SELECT last_ts FROM actor_cooldowns WHERE actor_id=$1 AND kind='cafe_water'", payer) or 0
+                left = CAFE_WATER_COOLDOWN - (now - float(last))
+                if left > 0:
+                    return f"آب رایگان هر {CAFE_WATER_COOLDOWN // 60} دقیقه یه بار؛ {_duration_fa(int(left) + 1)} دیگه.", None
+                await c.execute("INSERT INTO actor_cooldowns(actor_id,kind,last_ts) VALUES($1,'cafe_water',$2) "
+                                "ON CONFLICT(actor_id,kind) DO UPDATE SET last_ts=EXCLUDED.last_ts", payer, now)
+            else:
+                paid = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", price, payer)
+                if paid is None:
+                    return f"پول نقدت (جیب) کافی نیست؛ {CAFE_ITEMS[key][0]} {price:,} تومنه.", None
+            gain = round(random.uniform(lo, hi), 1)
+            ens = {}
+            for u in ids:
+                ens[u] = float(await c.fetchval("UPDATE users SET energy=LEAST(energy+$1,$2) WHERE user_id=$3 RETURNING energy", gain, ENERGY_MAX, u))
+    return None, {"gain": gain, "price": price, "energy": ens, "names": {u: by[u]["name"] for u in ids}}
+
+
+def _cafe_result_text(key: str, payer: int, guest, info: dict) -> str:
+    RLM = "\u200f"
+    name, _e, _f, price, _lo, _hi = CAFE_ITEMS[key]
+    pct = lambda u: f"{_fmt_en(info['energy'][u] / ENERGY_MAX * 100)}٪"
+    a = _ltr_name(payer, info["names"][payer])
+    cost = "رایگان 😎" if price == 0 else f"{price:,} تومن از {a} کم شد"
+    en_ce = ce("energy", 1, "⚡")
+    if guest is None:
+        return (f"{RLM}{CAFE_CE} {a} یه {_cafe_ce(key)} {name} سفارش داد و نوشید\n\n"
+                f"{RLM}{en_ce} +{_fmt_en(info['gain'])} انرژی (الان {pct(payer)})\n{RLM}{MONEY_CE} {cost}")
+    b = _ltr_name(guest, info["names"][guest])
+    return (f"{RLM}{CAFE_CE} {a} برای خودش و {b} {_cafe_ce(key)} {name} سفارش داد 🥂\n\n"
+            f"{RLM}{en_ce} هر دو نفر +{_fmt_en(info['gain'])} انرژی گرفتن\n"
+            f"{RLM}{a}: {pct(payer)} · {b}: {pct(guest)}\n{RLM}{MONEY_CE} {cost}")
+
+
+def _cafe_gc(d: dict, ttl: int):
+    if len(d) > 500:
+        now = time.time()
+        for k in [k for k, v in d.items() if now - v > ttl * 2]:
+            d.pop(k, None)
+
+
+async def cafe_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """«جینگو کافه» / «کافه جینگو» = منو؛ ریپلای + «جینگو دعوت به کافه» = دعوت."""
+    msg, user = update.effective_message, update.effective_user
+    key = _word_key(text)
+    if key not in CAFE_MENU_WORDS and key not in CAFE_INVITE_WORDS:
+        return False
+    await upsert_user(user.id, user.full_name)
+    lvl = await _cafe_level(user.id)
+    if lvl < CAFE_MIN_LEVEL:
+        await _eq_say(msg, f"{CAFE_CE} کافه جینگو از لول {CAFE_MIN_LEVEL} باز میشه؛ تو الان لول {lvl} هستی.")
+        return True
+    if key in CAFE_MENU_WORDS:
+        await send_cafe_menu(context.bot, msg.chat_id, user.id, reply_to=msg.message_id)
+        return True
+    rep = msg.reply_to_message
+    target = rep.from_user if rep else None
+    if target is None or target.is_bot:
+        await _eq_say(msg, "برای دعوت، روی پیام اون نفر ریپلای کن و بنویس: جینگو دعوت به کافه")
+        return True
+    if target.id == user.id:
+        await _eq_say(msg, "خودت رو که نمی‌تونی دعوت کنی 😅")
+        return True
+    await pool.execute("INSERT INTO users(user_id,name) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING", target.id, target.full_name)
+    if await _cafe_level(target.id) < CAFE_MIN_LEVEL:
+        await _eq_say(msg, f"{_ltr_name(target.id, target.full_name)} هنوز لول {CAFE_MIN_LEVEL} نشده؛ کافه فقط برای لول {CAFE_MIN_LEVEL} به بالاست.")
+        return True
+    a = _ltr_name(user.id, user.full_name)
+    b = _ltr_name(target.id, target.full_name)
+    kb = InlineKeyboardMarkup([[btn("قبول می‌کنم", "success", icon=CAFE_EID, callback_data=f"cf:y:{user.id}:{target.id}"),
+                                btn("نه ممنون", "danger", callback_data=f"cf:n:{user.id}:{target.id}")]])
+    m = await send_html(context.bot, msg.chat_id,
+                        B(f"{CAFE_CE} {a} {b} رو به کافه جینگو دعوت کرد ✨\n\n{b}، دعوت رو قبول می‌کنی؟ 👇"), reply_markup=kb)
+    inv = context.application.bot_data.setdefault("cafe_inv", {})
+    _cafe_gc(inv, CAFE_INVITE_TTL)
+    inv[(msg.chat_id, m.message_id)] = time.time()
+    return True
+
+
+async def cafe_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    p = q.data.split(":")
+    chat_id = q.message.chat_id
+    try:
+        act = p[1]
+        if act == "b":      # سفارش برای خودم از منوی عکس‌دار
+            uid, key = int(p[2]), p[3]
+            if key not in CAFE_ITEMS:
+                await q.answer(); return
+            if q.from_user.id != uid:
+                await q.answer("این منو مال تو نیست؛ خودت بنویس «جینگو کافه».", show_alert=True); return
+            await upsert_user(uid, q.from_user.full_name)
+            err, info = await _cafe_order(uid, [], key)
+            if err:
+                await q.answer(err[:190], show_alert=True); return
+            await q.answer("نوش جان ☕")
+            await send_html(context.bot, chat_id, B(_cafe_result_text(key, uid, None, info)))
+            return
+        a_id, b_id = int(p[2]), int(p[3])
+    except (IndexError, ValueError):
+        await q.answer("درخواست نامعتبره.", show_alert=True); return
+    inv = context.application.bot_data.setdefault("cafe_inv", {})
+    ordr = context.application.bot_data.setdefault("cafe_ord", {})
+    mk = (chat_id, q.message.message_id)
+    if act in ("y", "n"):
+        if q.from_user.id != b_id:
+            await q.answer("فقط کسی که دعوت شده می‌تونه جواب بده.", show_alert=True); return
+        ts = inv.pop(mk, None)
+        if ts is None or time.time() - ts > CAFE_INVITE_TTL:
+            await q.answer("این دعوت منقضی شده.", show_alert=True)
+            await edit_html(q, B("⌛ این دعوت منقضی شد.")); return
+        rows = await pool.fetch("SELECT user_id,name FROM users WHERE user_id=ANY($1::bigint[])", [a_id, b_id])
+        nm = {int(r["user_id"]): r["name"] for r in rows}
+        a = _ltr_name(a_id, nm.get(a_id)); b = _ltr_name(b_id, nm.get(b_id))
+        if act == "n":
+            await q.answer("رد شد.")
+            await edit_html(q, B(f"🚫 {b} دعوت {a} رو به کافه رد کرد 😅")); return
+        if await _cafe_level(a_id) < CAFE_MIN_LEVEL or await _cafe_level(b_id) < CAFE_MIN_LEVEL:
+            await q.answer(f"کافه فقط برای لول {CAFE_MIN_LEVEL} به بالاست.", show_alert=True)
+            await edit_html(q, B("❌ این دعوت دیگه معتبر نیست.")); return
+        _cafe_gc(ordr, CAFE_ORDER_TTL)
+        ordr[mk] = time.time()
+        await q.answer("قبول شد ☕")
+        await edit_html(q, B(f"{CAFE_CE} {b} دعوت {a} رو قبول کرد 🎉\n\n{a}، سفارش بده؛ حساب با خودته و انرژیش به هر دو نفرتون می‌رسه 👇"),
+                        reply_markup=_cafe_kb(lambda k: f"cf:o:{a_id}:{b_id}:{k}"))
+        return
+    if act == "o":
+        key = p[4] if len(p) > 4 else ""
+        if key not in CAFE_ITEMS:
+            await q.answer(); return
+        if q.from_user.id != a_id:
+            await q.answer("فقط کسی که دعوت کرده می‌تونه سفارش بده.", show_alert=True); return
+        ts = ordr.get(mk)
+        if ts is None or time.time() - ts > CAFE_ORDER_TTL:
+            ordr.pop(mk, None)
+            await q.answer("این سفارش منقضی شده.", show_alert=True)
+            await edit_html(q, B("⌛ مهلت سفارش تموم شد.")); return
+        err, info = await _cafe_order(a_id, [b_id], key)
+        if err:
+            await q.answer(err[:190], show_alert=True); return
+        ordr.pop(mk, None)
+        await q.answer("نوش جان ☕")
+        await edit_html(q, B(_cafe_result_text(key, a_id, b_id, info)))
+        return
+    await q.answer()
+
+
 def _make_update_processor():
     """آپدیت‌های کاربرهای مختلف همزمان پردازش میشن؛ آپدیت‌های یک کاربر به ترتیب (تا دو کلیک پشت‌هم با هم قاطی نشن)."""
     try:
@@ -24869,6 +25131,7 @@ def main():
     app.add_handler(CallbackQueryHandler(sports_cb, pattern=r"^sg:"))
     app.add_handler(CallbackQueryHandler(equip_cb, pattern=r"^eq:"))
     app.add_handler(CallbackQueryHandler(pet_cb, pattern=r"^pt:"))
+    app.add_handler(CallbackQueryHandler(cafe_cb, pattern=r"^cf:"))
     app.add_handler(CallbackQueryHandler(top_cb, pattern=r"^tp:"))
     app.add_handler(CallbackQueryHandler(sex_cb, pattern=r"^sx:"))
     app.add_handler(CallbackQueryHandler(shop_cb, pattern=r"^shp:"))
