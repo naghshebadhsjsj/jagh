@@ -300,6 +300,58 @@ async def start_support_userbot():
                 except Exception:
                     pass
 
+        # ── گرفتنِ خودکارِ کد هدیه از چنل و فرستادنش به پی‌وی یه ربات دیگه ──
+        # تنظیمات از Railway Variables: GIFT_CHANNELS (مثلا @chan1,-1001234567890)، GIFT_TARGET_BOT (مثلا @somebot)،
+        # GIFT_SEND_TEMPLATE (پیش‌فرض {code}؛ مثلا "/redeem {code}")، GIFT_CODE_REGEX (اختیاری؛ گروه اول = کد)
+        gift_chats = [(int(x) if x.lstrip("-").isdigit() else x) for x in
+                      (c.strip() for c in os.environ.get("GIFT_CHANNELS", "").split(",")) if x]
+        gift_target = os.environ.get("GIFT_TARGET_BOT", "").strip()
+        if gift_chats and gift_target:
+            gift_tpl = os.environ.get("GIFT_SEND_TEMPLATE", "{code}")
+            gift_rx = None
+            if os.environ.get("GIFT_CODE_REGEX", "").strip():
+                try:
+                    gift_rx = re.compile(os.environ["GIFT_CODE_REGEX"].strip())
+                except re.error:
+                    log.error("GIFT_CODE_REGEX is invalid; falling back to monospace detection")
+            # الگوی پیش‌فرض: کدِ ۱۰ حرفیِ انگلیسیِ بزرگ + عدد که هم حرف داره هم عدد (مثل 4WBB4E88EP)
+            gift_default_rx = re.compile(r"(?<![A-Za-z0-9])(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])([A-Z0-9]{10})(?![A-Za-z0-9])")
+            gift_seen: list = []
+            gift_peer = gift_target
+            try:   # قبلِ شروع آدرسِ ربات مقصد رو حل می‌کنیم تا موقع فرستادن یه رفت‌وبرگشت کمتر داشته باشیم
+                gift_peer = await client.get_input_entity(gift_target)
+            except Exception:
+                log.warning("could not pre-resolve %s; will resolve on first send", gift_target)
+
+            @client.on(events.NewMessage(chats=gift_chats, incoming=True))
+            async def _gift_code_handler(event):
+                try:
+                    raw = event.raw_text or ""
+                    code = None
+                    if gift_rx is not None:
+                        m = gift_rx.search(raw)
+                        if m:
+                            code = (m.group(1) if m.groups() else m.group(0)).strip()
+                    else:   # کدِ مونواسپیس (همونی که با یه تپ کپی میشه)
+                        from telethon.tl.types import MessageEntityCode, MessageEntityPre
+                        found = event.message.get_entities_text((MessageEntityCode, MessageEntityPre))
+                        if found:
+                            code = found[0][1].strip()
+                        if not code:
+                            m = gift_default_rx.search(raw)
+                            if m:
+                                code = m.group(1)
+                    if not code or code in gift_seen:
+                        return
+                    gift_seen.append(code)
+                    del gift_seen[:-200]
+                    await client.send_message(gift_peer, gift_tpl.replace("{code}", code), parse_mode=None)
+                    log.info("gift code %r sent to %s", code, gift_target)
+                except Exception:
+                    log.exception("gift code forward failed")
+
+            log.info("Gift-code forwarder active: %s -> %s", gift_chats, gift_target)
+
         USERBOT_CLIENT = client
         log.info("Support userbot connected as account %s", uid)
     except ImportError:
