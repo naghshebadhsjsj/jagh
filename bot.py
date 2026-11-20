@@ -16621,9 +16621,23 @@ async def _wf_create(q, context, user):
 async def wordfinder_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     p = q.data.split(":")
-    act = p[1]
+    act = p[1] if len(p) > 1 else ""
     user = q.from_user
     games = _wf_games(context)
+
+    # دکمه ساخت میز شناسه کاربر دارد، نه شناسه میز؛ باید قبل از جست‌وجوی میز پردازش شود.
+    if act == "create":
+        try:
+            owner_id = int(p[2])
+        except (ValueError, IndexError):
+            await q.answer("درخواست ساخت میز نامعتبره.", show_alert=True)
+            return
+        if user.id != owner_id:
+            await q.answer("این دکمه برای سازنده‌ی درخواست است.", show_alert=True)
+            return
+        await _wf_create(q, context, user)
+        return
+
     try:
         gid = int(p[2])
     except (ValueError, IndexError):
