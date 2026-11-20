@@ -185,6 +185,7 @@ def emoji_vars() -> dict:
 
 # ───────────────────────── تنظیمات ─────────────────────────
 BOT_TOKEN = os.environ["BOT_TOKEN"]
+POST_CHANNEL = "@JinGo_Game"  # مقصد ثابت انتشار پست‌های پنل پشتیبانی
 DATABASE_URL = os.environ["DATABASE_URL"]  # از Postgres ریلوی میاد
 
 # آیدی عددی پشتیبان‌ها (با کاما جدا کن). هر کس آیدی خودش رو با /myid تو پی‌وی ربات می‌گیره.
@@ -19943,6 +19944,9 @@ def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
         if r:
             rows.append(r)
 
+    if hp("panel"):
+        rows.append([btn("📮 پست گذاشتن", "success", callback_data="ad:post")])
+
     add(("money_sub", btn("💸 کم کردن پول", "primary", callback_data="ad:money")),
         ("money_add", btn("➕ افزودن پول", "success", callback_data="ad:money_add")))
     add(("jagh_sub", btn("📚 کم کردن واحد درسی", "primary", callback_data="ad:jagh")),
@@ -19983,7 +19987,7 @@ def _adm_state_perm(st: dict):
     if act == "task_add":
         return "task_daily" if st.get("period") == "daily" else "task_weekly"
     return {"money": "money_sub", "money_add": "money_add", "jagh": "jagh_sub", "jagh_add": "jagh_add",
-            "gmu": "group_msgs", "ban": "ban", "unban": "unban", "bc": "broadcast", "gw": "giveaway"}.get(act)
+            "gmu": "group_msgs", "ban": "ban", "unban": "unban", "bc": "broadcast", "gw": "giveaway", "channel_post": "panel"}.get(act)
 
 
 def admin_menu_text() -> str:
@@ -20268,7 +20272,39 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("این دسترسی برات فعال نیست.", show_alert=True)
         return
     await q.answer()
-    if act == "giftprices":
+    if act == "post":
+        context.user_data["adm"] = {"act": "channel_post", "step": "message"}
+        await q.edit_message_text(
+            "📮 <b>ساخت پست کانال</b>\n\nمتن پست یا عکس/ویدیو/فایل همراه کپشن رو بفرست.\nکد ایموجی پرمیوم رو به‌صورت عددی داخل متن یا کپشن قرار بده؛ شناسه‌های ۱۵ تا ۲۲ رقمی خودکار به ایموجی پرمیوم تبدیل می‌شن.\n\nبرای لغو بنویس «لغو». مقصد فقط @JinGo_Game هست.",
+            parse_mode="HTML", reply_markup=CANCEL_KB)
+    elif act == "postgo":
+        st = context.user_data.get("adm")
+        if not st or st.get("act") != "channel_post" or st.get("step") != "confirm" or (not st.get("html") and not st.get("media_type")):
+            await q.edit_message_text("پستی برای انتشار آماده نیست.", reply_markup=admin_menu_kb(q.from_user.id))
+            return
+        context.user_data.pop("adm", None)
+        try:
+            if st.get("media_type"):
+                media_type = st["media_type"]
+                if media_type not in ("photo", "video", "animation", "document", "audio"):
+                    raise ValueError("نوع رسانه پشتیبانی نمی‌شود")
+                send_method = getattr(context.bot, f"send_{media_type}")
+                kwargs = {media_type: st["media_file_id"], "chat_id": POST_CHANNEL}
+                if st.get("html"):
+                    kwargs.update(caption=st["html"], parse_mode="HTML")
+                sent = await send_method(**kwargs)
+            else:
+                sent = await context.bot.send_message(chat_id=POST_CHANNEL, text=st["html"], parse_mode="HTML",
+                                                      disable_web_page_preview=False)
+            link = f"https://t.me/JinGo_Game/{sent.message_id}"
+            await q.edit_message_text(f"✅ پست با موفقیت در کانال @JinGo_Game منتشر شد.\n\n🔗 {link}",
+                                      reply_markup=InlineKeyboardMarkup([[btn("🔙 پنل پشتیبانی", callback_data="ad:menu")]]))
+        except Exception as e:
+            log.exception("support channel post failed")
+            await q.edit_message_text(
+                "❌ انتشار پست انجام نشد. مطمئن شو ربات در کانال @JinGo_Game ادمین است و اجازه‌ی ارسال پیام دارد.\n\n" + html.escape(str(e)[:500]),
+                parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[btn("🔙 پنل پشتیبانی", callback_data="ad:menu")]]))
+    elif act == "giftprices":
         rows = []
         for tier in (15, 25, 50, 100):
             price = int(await pool.fetchval("SELECT price FROM gift_prices WHERE item_key=$1", f"tier_{tier}") or 0)
@@ -20560,6 +20596,54 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         await msg.reply_text("این دسترسی برات فعال نیست.", reply_markup=admin_menu_kb(user.id))
         return True
     act = st["act"]
+    if act == "channel_post" and st.get("step") == "message":
+        media_type = None
+        media_file_id = None
+        if msg.text:
+            raw_html = getattr(msg, "text_html", None) or html.escape(msg.text)
+            max_len = 4096
+        else:
+            media_candidates = (
+                ("photo", msg.photo[-1] if getattr(msg, "photo", None) else None),
+                ("video", getattr(msg, "video", None)),
+                ("animation", getattr(msg, "animation", None)),
+                ("document", getattr(msg, "document", None)),
+                ("audio", getattr(msg, "audio", None)),
+            )
+            selected = next(((kind, obj) for kind, obj in media_candidates if obj is not None), None)
+            if selected is None:
+                await msg.reply_text("متن یا عکس/ویدیو/فایل/صوت بفرست. برای لغو بنویس «لغو».", reply_markup=CANCEL_KB)
+                return True
+            media_type, media_obj = selected
+            media_file_id = media_obj.file_id
+            raw_html = getattr(msg, "caption_html", None) or html.escape(msg.caption or "")
+            max_len = 1024
+        # text_html/caption_html قالب‌بندی و ایموجی‌های پرمیوم واقعی تلگرام را نگه می‌دارند.
+        post_html = re.sub(r'(?<![\d"=])(\d{15,22})(?!\d)',
+                           lambda m: f'<tg-emoji emoji-id="{m.group(1)}">⭐</tg-emoji>', raw_html)
+        if not (post_html.strip() or media_type):
+            await msg.reply_text("متن پست خالیه؛ دوباره بفرست.", reply_markup=CANCEL_KB)
+            return True
+        if len(post_html) > max_len:
+            await msg.reply_text(f"متن یا کپشن بعد از قالب‌بندی بیشتر از {max_len} کاراکتره؛ کوتاه‌ترش کن.", reply_markup=CANCEL_KB)
+            return True
+        st.update(step="confirm", html=post_html, media_type=media_type, media_file_id=media_file_id)
+        kb = InlineKeyboardMarkup([[btn("🚀 انتشار در کانال", "success", callback_data="ad:postgo"),
+                                    btn("❌ لغو", "danger", callback_data="ad:cancel")]])
+        preview = "👁 <b>پیش‌نمایش پست</b>\n\n" + (post_html or "") + "\n\n📢 مقصد: @JinGo_Game\n\nبرای انتشار تأیید کن."
+        try:
+            if media_type:
+                reply_method = getattr(msg, f"reply_{media_type}")
+                kwargs = {media_type: media_file_id, "parse_mode": "HTML", "reply_markup": kb}
+                if post_html:
+                    kwargs["caption"] = post_html
+                await reply_method(**kwargs)
+            else:
+                await msg.reply_text(preview, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=False)
+        except Exception as e:
+            log.exception("channel post preview failed")
+            await msg.reply_text("قالب متن یا کد ایموجی معتبر نیست؛ اصلاحش کن و دوباره بفرست.\n" + str(e)[:300], reply_markup=CANCEL_KB)
+        return True
     if act == "gift_price":
         raw = (msg.text or "").strip().replace(",", "").replace("٬", "")
         if st.get("step") != "price" or not raw.isdigit() or int(raw) <= 0:
