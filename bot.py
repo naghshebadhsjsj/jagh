@@ -352,6 +352,50 @@ async def start_support_userbot():
 
             log.info("Gift-code forwarder active: %s -> %s", gift_chats, gift_target)
 
+        # ── بتِ خودکار (برای بازیِ پول‌مجازیِ یه ربات دیگه) ──
+        # Variables: AUTOBET_TARGET (مثلا @somebot)، AUTOBET_TEMPLATE (متنی که هر بار فرستاده میشه؛ مثلا "/bet 1000")،
+        # AUTOBET_INTERVAL (ثانیه؛ پیش‌فرض ۲۰، حداقل ۵)، AUTOBET_MAX (سقف تعداد؛ پیش‌فرض ۱۰۰).
+        # کنترل: تو «پیام‌های ذخیره‌شده»ی همین اکانت بنویس «شروع بت» یا «توقف بت». نتیجه‌ی بت دست اون رباته؛ برد تضمین نیست.
+        ab_target = os.environ.get("AUTOBET_TARGET", "").strip()
+        ab_tpl = os.environ.get("AUTOBET_TEMPLATE", "").strip()
+        if ab_target and ab_tpl:
+            ab_every = max(5.0, float(os.environ.get("AUTOBET_INTERVAL", "20")))
+            ab_max = max(1, int(os.environ.get("AUTOBET_MAX", "100")))
+            ab_state = {"task": None}
+
+            async def _autobet_loop():
+                n = 0
+                try:
+                    while n < ab_max:
+                        await client.send_message(ab_target, ab_tpl, parse_mode=None)
+                        n += 1
+                        await asyncio.sleep(ab_every)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("autobet loop failed")
+                finally:
+                    ab_state["task"] = None
+
+            @client.on(events.NewMessage(chats="me", outgoing=True))
+            async def _autobet_ctl(event):
+                t = (event.raw_text or "").strip()
+                tk = ab_state["task"]
+                if t in ("شروع بت", "بت شروع"):
+                    if tk is not None and not tk.done():
+                        await event.reply("بت خودکار از قبل روشنه.")
+                    else:
+                        ab_state["task"] = asyncio.create_task(_autobet_loop())
+                        await event.reply(f"بت خودکار روشن شد؛ هر {ab_every:g} ثانیه، حداکثر {ab_max} بار.")
+                elif t in ("توقف بت", "بت توقف"):
+                    if tk is not None and not tk.done():
+                        tk.cancel()
+                        await event.reply("بت خودکار متوقف شد.")
+                    else:
+                        await event.reply("بت خودکار روشن نبود.")
+
+            log.info("Autobet ready: %r -> %s every %ss (max %s)", ab_tpl, ab_target, ab_every, ab_max)
+
         USERBOT_CLIENT = client
         log.info("Support userbot connected as account %s", uid)
     except ImportError:
@@ -3309,7 +3353,8 @@ function GamesScreen(){
    [z=>svgIc('mine',z),'مین','۲۵ خانه و ۳ مین؛ خانه‌های امن را باز کن و در زمان مناسب برداشت بزن.','mines','red'],
    [z=>svgIc('skull',z),'سم یا خوراکی','میز دونفره با انتظار برای حریف؛ اگر تا ۱۲۰ ثانیه کسی نیاید، شرط برمی‌گردد.','poison','red'],
    [z=>svgIc('target',z),'خط و نشان','کاروم دونفره با مهره‌های فیزیکی و نوبت ۶۰ ثانیه‌ای.','carrom','green'],
-    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج گنج','برج گنج: ۸ طبقه؛ حالت آسان ۴ در و حالت سخت ۳ در؛ پشت یکی از درها نگهبانه. تا ×۵ در حالت آسان و تا ×۷ در حالت سخت برنده شو.','tower','gold']];
+    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4.5" rx="2"/><rect x="3" y="9.7" width="18" height="4.5" rx="2"/><rect x="3" y="16.4" width="18" height="4.5" rx="2"/></svg>';return d},'برج گنج','برج گنج: ۸ طبقه؛ حالت آسان ۴ در و حالت سخت ۳ در؛ پشت یکی از درها نگهبانه. تا ×۵ در حالت آسان و تا ×۷ در حالت سخت برنده شو.','tower','gold'],
+    [z=>{const d=h('span',{class:'svgic',style:'width:'+z+'px;height:'+z+'px'});d.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="4" r="1.7"/><circle cx="8" cy="9" r="1.7"/><circle cx="16" cy="9" r="1.7"/><circle cx="4.5" cy="14.5" r="1.7"/><circle cx="12" cy="14.5" r="1.7"/><circle cx="19.5" cy="14.5" r="1.7"/><circle cx="8" cy="20" r="1.7"/><circle cx="16" cy="20" r="1.7"/></svg>';return d},'پلینکو','توپ را رها کن تا از میخ‌ها رد شود و در یکی از خانه‌ها بیفتد؛ ضریب خانه در شرطت ضرب می‌شود. دو حالت آرام (تا ×۵) و وحشی (تا ×۲۰).','plinko','blue']];
   const grid=h('div',{class:'games-grid'},...G.map(([ic,t,d,key,cls])=>{
    const v=h('div',{class:'gvisual'},ic(64));
    if(key==='crash'){v.style.background='radial-gradient(circle,#073c42,#050b1e 72%)';v.replaceChildren(h('div',{class:'rocket-mark'},svgIc('rocket',76)))}
@@ -3318,7 +3363,7 @@ function GamesScreen(){
   box.replaceChildren(h('div',{class:'ghead'},'بازی‌ها'),grid);
  }
  function play(k){clearInterval(cdT);
-  if(k==='crash')crash(); else if(k==='mines')mines(); else if(k==='tower')tower();
+  if(k==='crash')crash(); else if(k==='mines')mines(); else if(k==='tower')tower(); else if(k==='plinko')plinko();
   else if(k==='poison'||k==='carrom'){
     const sc=SocialScreen({games:k});
     sc.style.cssText='position:relative;inset:auto;display:block;background:transparent;min-height:60vh';
@@ -3848,6 +3893,124 @@ function GamesScreen(){
     if(st.active){game=st;mode=st.mode||'easy'}
     draw();
   }catch(e){toast(e.message,1);rkCleanup();home()}
+ }
+
+ async function plinko(){
+  const COIN='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#f6b91a" stroke="#b9800b" stroke-width="1.6"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="#b9800b" stroke-width="1.4"/><path d="M12 8v8M9.6 10.2h3.4a1.5 1.5 0 0 1 0 3h-2a1.5 1.5 0 0 0 0 3h3.4" fill="none" stroke="#8a5a00" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  if(!document.getElementById('plcss')){const s=document.createElement('style');s.id='plcss';s.textContent='.pl .pl-risk{display:flex;gap:8px;margin:0 0 10px;direction:rtl}.pl .pl-risk button{flex:1;height:40px;border:0;border-radius:14px;background:#111a33;color:#9fb0d0;font-weight:800;font-size:14px;font-family:inherit;cursor:pointer}.pl .pl-risk button.on{background:#3095f3;color:#fff}.pl .pl-risk button:disabled{opacity:.6}.pl-cv{display:block;margin:0 auto 10px;border-radius:18px;background:radial-gradient(circle at 50% 0%,#14224a,#0a1226 70%)}.pl-chips{display:flex;justify-content:center;gap:6px;margin:0 0 12px;min-height:26px;flex-wrap:wrap;direction:ltr}.pl-chip{padding:3px 9px;border-radius:12px;font-size:12px;font-weight:800;color:#fff}.pl-again{width:100%;height:48px;margin-top:10px;border:0;border-radius:24px;background:#2e343b;color:#fff;font-weight:800;font-size:16px;cursor:pointer;font-family:inherit}.pl-note{text-align:center;color:#8ea0c4;font-size:12.5px;margin:0 0 12px;direction:rtl}';document.head.append(s)}
+  box.replaceChildren(h('div',{class:'gdesc',style:'padding:40px;text-align:center'},'در حال بارگذاری…'));
+  let st;try{st=await api('/api/game/plinko/state')}catch(e){toast(e.message,1);home();return}
+  const R=st.rows||10,TB=st.tables,RF=st.risk_fa||{calm:'آرام',wild:'وحشی'};
+  let busy=false,stopped=false,risk='calm',lastBet=0,raf=0,hist=[],flash={},trail=[],pop=null;
+  let W=0,H=0,dx=0,dy=0,top=26,c=0,pegR=3,ballR=6,slotY=0,slotH=26,ctx=null;
+  const svgEl=s=>{const d=h('span',{});d.innerHTML=s;return d.firstChild};
+  const balance=h('b',{},num(st.balance));
+  const plus=h('button',{class:'rk2-plus',onclick:()=>{leave();openTab('store')}},'+');
+  const balP=h('div',{class:'rk2-bal'},balance,svgEl(COIN),plus);
+  const back=h('button',{class:'rk2-back',onclick:leave},'→ بازگشت');
+  const riskBox=h('div',{class:'pl-risk'});
+  const cv=h('canvas',{class:'pl-cv'});
+  const chips=h('div',{class:'pl-chips'});
+  const resBox=h('div',{class:'rk2-res',style:'display:none'});
+  const main=h('button',{class:'tw-main'},'رها کردن توپ');
+  const again=h('button',{class:'pl-again',style:'display:none'});
+  box.replaceChildren(h('div',{class:'rk2 tw pl'},
+   h('div',{class:'rk2-top'},back,h('div',{class:'rk2-title'},'پلینکو'),h('span',{class:'rk2-sp'})),
+   h('div',{class:'rk2-bar'},h('span',{class:'rk2-grow'}),balP),
+   riskBox,cv,chips,h('div',{class:'pl-note'},'توپ از ۱۴ ردیف میخ رد می‌شود؛ ضریبِ خانه‌ی پایانی در شرطت ضرب می‌شود.'),resBox,main,again));
+  rkCleanup=()=>{stopped=true;cancelAnimationFrame(raf)};
+  const col=m=>m>=10?'#ef4444':m>=3?'#f97316':m>=1?'#eab308':'#475a85';
+  const fmx=v=>(+v).toString()+'x',fms=v=>(+v).toString();
+  const pegX=(i,k)=>c+(k-i/2)*dx,pegY=i=>top+i*dy;
+  function lay(){
+   W=Math.min(cv.parentNode.clientWidth||360,440);dx=(W-16)/(R+1);dy=dx*.86;c=W/2;
+   pegR=Math.max(1.8,dx*.09);ballR=Math.max(3.6,dx*.2);slotY=top+(R-1)*dy+dy*.9;slotH=Math.max(30,dx*1.7);H=Math.ceil(slotY+slotH+10);
+   const dpr=Math.min(window.devicePixelRatio||1,2);
+   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);cv.style.width=W+'px';cv.style.height=H+'px';
+   ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  function rr(x,y,w,hh,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+hh,r);ctx.arcTo(x+w,y+hh,x,y+hh,r);ctx.arcTo(x,y+hh,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+  function drawBase(now){
+   ctx.clearRect(0,0,W,H);
+   const tb=TB[risk];
+   for(let i=0;i<R;i++)for(let k=0;k<=i;k++){
+    const x=pegX(i,k),y=pegY(i),f=flash[i+'_'+k],a=f?Math.max(0,1-(now-f)/320):0;
+    if(a>0){ctx.fillStyle='rgba(255,255,255,'+(0.25*a)+')';ctx.beginPath();ctx.arc(x,y,pegR*3.2*a+pegR,0,6.2832);ctx.fill()}
+    ctx.fillStyle=a>0?'#ffffff':'#9db0d3';ctx.beginPath();ctx.arc(x,y,pegR*(1+.5*a),0,6.2832);ctx.fill();
+   }
+   const sw=dx*.9,popOn=pop&&(now-pop.t0<800);
+   for(let K=0;K<=R;K++){
+    const cx=c+(K-R/2)*dx;let sc=1,glow=0;
+    if(popOn&&pop.K===K){const p=(now-pop.t0)/800;sc=1+.22*Math.sin(Math.PI*Math.min(1,p*1.4));glow=1-p}
+    const w=sw*sc,hh=slotH*sc;
+    ctx.globalAlpha=popOn&&pop.K!==K?.55:1;ctx.fillStyle=col(tb[K]);
+    rr(cx-w/2,slotY+(slotH-hh)/2,w,hh,6);ctx.fill();ctx.globalAlpha=1;
+    if(glow>0){ctx.strokeStyle='rgba(255,255,255,'+glow+')';ctx.lineWidth=2;ctx.stroke()}
+    ctx.fillStyle=(tb[K]>=1&&tb[K]<3)?'#111827':'#ffffff';
+    let fs=Math.max(8,Math.floor(dx*.44));ctx.font='800 '+fs+'px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    const lb=fms(tb[K]);while(fs>6&&ctx.measureText(lb).width>w-2){fs--;ctx.font='800 '+fs+'px sans-serif'}
+    ctx.fillText(lb,cx,slotY+slotH/2+1);
+   }
+  }
+  function drawBall(x,y){
+   ctx.save();
+   for(let j=0;j<trail.length;j++){const p=trail[j];ctx.fillStyle='rgba(246,185,26,'+(0.05+0.04*j)+')';ctx.beginPath();ctx.arc(p[0],p[1],ballR*(0.4+0.07*j),0,6.2832);ctx.fill()}
+   const g=ctx.createRadialGradient(x-ballR*.3,y-ballR*.3,ballR*.1,x,y,ballR);
+   g.addColorStop(0,'#fff3b0');g.addColorStop(.5,'#f6b91a');g.addColorStop(1,'#b9800b');
+   ctx.fillStyle=g;ctx.shadowColor='rgba(246,185,26,.7)';ctx.shadowBlur=10;
+   ctx.beginPath();ctx.arc(x,y,ballR,0,6.2832);ctx.fill();ctx.restore();
+  }
+  function run(path,K,done){
+   cancelAnimationFrame(raf);flash={};trail=[];pop=null;
+   const pts=[{x:c,y:top-34}];let k=0;
+   for(let i=0;i<R;i++){pts.push({x:pegX(i,k),y:pegY(i)-pegR-ballR,peg:i+'_'+k});k+=path[i]}
+   pts.push({x:c+(K-R/2)*dx,y:slotY+slotH/2});
+   const D=[320];for(let i=0;i<R-1;i++)D.push(165);D.push(280);
+   const starts=[];let acc=0;D.forEach(d=>{starts.push(acc);acc+=d});const total=acc;
+   const t0=performance.now();let landed=false;
+   function frame(now){
+    if(stopped)return;
+    const el=now-t0;
+    let s=D.length-1;for(let j=0;j<D.length;j++){if(el<starts[j]+D[j]){s=j;break}}
+    const t=Math.min(1,Math.max(0,(el-starts[s])/D[s])),A=pts[s],B=pts[s+1];
+    let x,y;
+    if(s===0){x=A.x;y=A.y+(B.y-A.y)*t*t}
+    else{x=A.x+(B.x-A.x)*t;y=A.y+(B.y-A.y)*t*t-dy*.32*Math.sin(Math.PI*t)*(1-t)}
+    for(let j=1;j<=R;j++){const key=pts[j].peg;if(key&&el>=starts[j-1]+D[j-1]&&!flash[key])flash[key]=now}
+    if(el>=total&&!landed){landed=true;pop={K:K,t0:now};done()}
+    drawBase(now);
+    if(!landed){trail.push([x,y]);if(trail.length>7)trail.shift();drawBall(x,y)}
+    if(el<total+850)raf=requestAnimationFrame(frame);else drawBase(now+10000);
+   }
+   raf=requestAnimationFrame(frame);
+  }
+  function drawRisk(){
+   riskBox.replaceChildren(...['calm','wild'].map(k=>{const b=h('button',{class:k===risk?'on':''},RF[k]);b.disabled=busy;b.onclick=()=>{if(busy||k===risk)return;risk=k;drawRisk();drawBase(performance.now()+10000)};return b}));
+  }
+  function drawChips(){chips.replaceChildren(...hist.map(m=>{const e=h('span',{class:'pl-chip'},fmx(m));e.style.background=col(m);return e}))}
+  function setUI(){
+   main.disabled=busy;drawRisk();
+   const ok=!busy&&lastBet>0&&st.balance>=lastBet;
+   again.style.display=ok?'block':'none';if(ok)again.textContent='🔁 دوباره • '+num(lastBet);
+  }
+  function banner(win,t){resBox.style.display='block';resBox.className='rk2-res '+(win?'win':'lose');resBox.textContent=t;clearTimeout(banner.t);banner.t=setTimeout(()=>{resBox.style.display='none'},7000)}
+  async function drop(bet){
+   if(busy)return;busy=true;resBox.style.display='none';setUI();
+   try{
+    const r=await api('/api/game/plinko/drop',{bet,risk});
+    lastBet=bet;balance.textContent=num(r.balance-r.payout);
+    await new Promise(res=>run(r.path,r.slot,res));
+    st.balance=r.balance;balance.textContent=num(r.balance);
+    hist.unshift(r.mult);hist.length=Math.min(hist.length,8);drawChips();
+    if(r.profit>0)banner(true,'🎉 '+fmx(r.mult)+' • سود '+num(r.profit));
+    else if(r.payout>0)banner(false,fmx(r.mult)+' • '+num(r.payout)+' برگشت؛ '+num(-r.profit)+' ضرر');
+    else banner(false,'💥 '+fmx(r.mult)+' • شرط '+num(bet)+' سوخت.');
+   }catch(e){toast(e.message,1)}
+   finally{busy=false;setUI()}
+  }
+  main.onclick=()=>{if(busy)return;sheet('ثبت شرط • '+RF[risk],close=>h('div',{class:'rk2-sh'},betPicker(st,bet=>{close();drop(bet)},'⚪ رها کردن توپ')))};
+  again.onclick=()=>drop(lastBet);
+  lay();drawRisk();drawBase(performance.now()+10000);setUI();
  }
 
  async function mines(){
@@ -5897,7 +6060,8 @@ def _rp_busy_sql() -> str:
 
 # ───────── کولداون بازی‌های کازینو (مشترک بین ربات و مینی‌اپ) ─────────
 # slow (۳ دقیقه): اسلات، تاس، برج گنج، بازی‌های ورزشی (دارت/بولینگ/بسکتبال)، سم یا خوراکی
-# fast (۱۵ ثانیه): مین، موشک (و جینگو بت که کولداون جدا و هم‌اندازه‌ی همین رو داره)
+# fast (۱۵ ثانیه): مین، پلینکو (و جینگو بت که کولداون جدا و هم‌اندازه‌ی همین رو داره)
+# موشک: بدون کولداون
 CASINO_COOLDOWN_SLOW = 180
 CASINO_COOLDOWN_FAST = 15
 CD_SLOW_GAMES = frozenset({"slot", "dice", "tower", "darts", "bowl", "hoop", "poison"})
@@ -5909,6 +6073,8 @@ def _cd_kind(game) -> str:
 
 
 def _cd_left_uid(uid: int, game="mines") -> int:
+    if game == "crash":      # موشک کولداون نداره
+        return 0
     kind = _cd_kind(game)
     secs = CASINO_COOLDOWN_SLOW if kind == "slow" else CASINO_COOLDOWN_FAST
     left = secs - (time.time() - _CD_STAMPS[kind].get(uid, 0))
@@ -5916,6 +6082,8 @@ def _cd_left_uid(uid: int, game="mines") -> int:
 
 
 def _cd_set_uid(uid: int, game="mines"):
+    if game == "crash":      # موشک کولداون نداره
+        return
     st = _CD_STAMPS[_cd_kind(game)]
     if len(st) > 20000:
         cut = time.time() - CASINO_COOLDOWN_SLOW
@@ -7655,13 +7823,91 @@ async def _casino_tower_cancel(q, user):
     await edit_html(q, text, kb)
 
 
-_GAME_GET = {"/api/game/crash/state": _g_game_crash_state, "/api/game/mines/state": _g_game_mines_state, "/api/game/tower/state": _g_game_tower_state}
+# ───── پلینکو (تک‌دورِ فوری؛ ۱۴ ردیف میخ، ۱۵ خانه، دو حالت آرام/وحشی) ─────
+PLINKO_ROWS = 14
+PLINKO_TABLES = {
+    "calm": [5, 3.6, 2.6, 2.2, 1.6, 1.3, 1.25, 0, 1.25, 1.3, 1.6, 2.2, 2.6, 3.6, 5],
+    "wild": [20, 20, 20, 5, 2.05, 1.5, 0, 0, 0, 1.5, 2.05, 5, 20, 20, 20],
+}
+PLINKO_RISK_FA = {"calm": "آرام", "wild": "وحشی"}
+PLINKO_TARGET_RTP = 0.95
+
+
+def _plinko_weights(table) -> list:
+    """وزن (ppm) افتادنِ توپ تو هر خانه. با توپِ کاملاً دوجمله‌ای این ضریب‌ها حدود ۱۱۰٪ برمی‌گردونن (بازیکن سود می‌کنه)،
+    پس توزیع با ضریب e^(-λ·فاصله از وسط) به سمت وسط کشیده میشه تا بازده‌ی نظری ≈ ۹۵٪ بشه."""
+    import math
+    n = len(table) - 1
+    base = [math.comb(n, k) for k in range(n + 1)]
+
+    def dist(lam):
+        w = [base[k] * math.exp(-lam * abs(k - n / 2)) for k in range(n + 1)]
+        t = sum(w)
+        return [x / t for x in w]
+
+    def rtp(lam):
+        return sum(p * m for p, m in zip(dist(lam), table))
+
+    lam = 0.0
+    if rtp(0.0) > PLINKO_TARGET_RTP:
+        lo, hi = 0.0, 4.0
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if rtp(mid) > PLINKO_TARGET_RTP:
+                lo = mid
+            else:
+                hi = mid
+        lam = (lo + hi) / 2
+    return [max(1, round(x * 1_000_000)) for x in dist(lam)]
+
+
+PLINKO_WEIGHTS = {k: _plinko_weights(v) for k, v in PLINKO_TABLES.items()}
+
+
+@_cd_guard("plinko")
+async def _p_game_plinko_drop(b, user):
+    import secrets
+    uid, _bal = await _mini_ctx(user)
+    bet = _mini_bet(b)
+    risk = str(b.get("risk") or "calm")
+    if risk not in PLINKO_TABLES:
+        raise _ApiError("حالت بازی نامعتبره.")
+    async with _mini_lock(uid):
+        if await pool.fetchval("SELECT 1 FROM mini_games WHERE uid=$1", uid):
+            raise _ApiError("اول بازی قبلیت رو تموم کن.")
+        if await _take(uid, bet) is None:
+            raise _ApiError("موجودی کافی نیست.")
+        wts = PLINKO_WEIGHTS[risk]
+        r, acc, slot = secrets.randbelow(sum(wts)), 0, 0
+        for k, w in enumerate(wts):
+            acc += w
+            if r < acc:
+                slot = k
+                break
+        rights = set(secrets.SystemRandom().sample(range(PLINKO_ROWS), slot))   # مسیرِ تصادفی که دقیقاً به همین خونه می‌رسه
+        path = [1 if k in rights else 0 for k in range(PLINKO_ROWS)]            # هر ردیف: ۰ = چپ، ۱ = راست
+        mult = PLINKO_TABLES[risk][slot]
+        payout = int(bet * mult)
+        if payout > 0:
+            await _give(uid, payout)
+        return _j({"risk": risk, "path": path, "slot": slot, "mult": mult, "bet": bet,
+                   "payout": payout, "profit": payout - bet, "balance": await _mini_balance(uid)})
+
+
+async def _g_game_plinko_state(qs, user):
+    _uid, bal = await _mini_ctx(user)
+    return _j({**_mini_base(bal), "rows": PLINKO_ROWS, "tables": PLINKO_TABLES, "risk_fa": PLINKO_RISK_FA})
+
+
+_GAME_GET = {"/api/game/crash/state": _g_game_crash_state, "/api/game/mines/state": _g_game_mines_state, "/api/game/tower/state": _g_game_tower_state,
+             "/api/game/plinko/state": _g_game_plinko_state}
 _GAME_POST = {"/api/game/crash/start": _p_game_crash_start, "/api/game/crash/cashout": _p_game_crash_cashout,
               "/api/game/mines/start": _p_game_mines_start, "/api/game/mines/open": _p_game_mines_open,
               "/api/game/mines/cashout": _p_game_mines_cashout,
               "/api/game/tower/start": _p_game_tower_start, "/api/game/tower/open": _p_game_tower_open,
               "/api/game/tower/cashout": _p_game_tower_cashout,
-              "/api/game/tower/cancel": _p_game_tower_cancel}
+              "/api/game/tower/cancel": _p_game_tower_cancel,
+              "/api/game/plinko/drop": _p_game_plinko_drop}
 
 
 
@@ -15336,7 +15582,7 @@ async def _crash_lose(bot, context, st):
     if st["finished"]:
         return
     st["finished"] = True
-    _busy(context).discard(st["uid"]); _cd_set(context, st["uid"])
+    _busy(context).discard(st["uid"]); _cd_set(context, st["uid"], "crash")
     rec = await update_group_record(st["chat_id"], "crash", st["user"], 0)
     row = await get_user(st["uid"])
     tgt = f"\n🎯 هدفت {st['target']:.2f}× بود و بهش نرسید." if st.get("target") else ""
@@ -15360,7 +15606,7 @@ async def _crash_win(bot, context, st, m: float, user, auto: bool):
     if st["finished"]:
         return
     st["finished"] = True
-    _busy(context).discard(st["uid"]); _cd_set(context, st["uid"])
+    _busy(context).discard(st["uid"]); _cd_set(context, st["uid"], "crash")
     payout = int(st["bet"] * m)
     await _give(st["uid"], payout)
     rec = await update_group_record(st["chat_id"], "crash", user, payout)
@@ -15438,7 +15684,7 @@ async def start_crash(bot, context, chat_id, user, bet, q=None, reply_to=None, t
     busy = _busy(context)
     if user.id in busy:
         await out(BP("اول بازی قبلیت رو تموم کن.")); return
-    if (left := _cd_left(context, user.id)) > 0:
+    if (left := _cd_left(context, user.id, "crash")) > 0:
         await out(_cd_html(left), back); return
     await upsert_user(user.id, user.full_name)
     if await _take(user.id, bet) is None:
