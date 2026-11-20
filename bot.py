@@ -494,7 +494,7 @@ ME_WORD = "کاراکتر"  # این کلمه کاراکتر رو نشون می�
 CHAR_PHOTOS: dict[tuple[str, int], str] = {}
 
 
-BOT_VERSION = "تحصیل و دوئل درسی ۱۰ سؤالی + بازی‌ها + پشتیبانی v8"
+BOT_VERSION = "کلمه‌یاب + بازی‌ها + پشتیبانی v9"
 
 
 def norm_word(text: str) -> str:
@@ -652,6 +652,7 @@ pool: asyncpg.Pool | None = None
 async def init_db(app: Application):
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=20)   # قبلاً max=5 بود و با کار همزمان صف می‌خورد
+    await pool.execute("CREATE TABLE IF NOT EXISTS wordfinder_used_words (word TEXT PRIMARY KEY, used_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
     async with pool.acquire() as c:
         await c.execute(
             """CREATE TABLE IF NOT EXISTS users (
@@ -15240,7 +15241,8 @@ def panel_main(uid: int):
        + [btn("سم یا خوراکی", "danger", callback_data=f"cz:g:{uid}:poison")],
        [btn("جینگو بت", "success", icon=JINGO_BET_EID, callback_data=f"cz:g:{uid}:jingo")],
        [btn("🏰 برج گنج", "success", callback_data=f"cz:g:{uid}:tower")],
-       [btn("🏅 بازی‌های ورزشی", "success", callback_data=f"sg:m:{uid}")]])
+       [btn("🏅 بازی‌های ورزشی", "success", callback_data=f"sg:m:{uid}")],
+       [btn("🔤 کلمه‌یاب", "success", callback_data=f"wf:create:{uid}")]])
     return text, kb
 
 
@@ -16528,6 +16530,186 @@ async def table_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: li
     await task_event(bot, chat_id, user.id, "casino", name=user.full_name)
 
 
+
+# ───────────────────────── کلمه‌یاب (بازی رایگان دونفره) ─────────────────────────
+# برای ایمنی، این بازی ورودی/شرط و پرداخت پول ندارد. واژه‌های مصرف‌شده در PostgreSQL ثبت می‌شوند.
+WF_WORDS = [
+    "کتابچه", "بارانی", "گلستان", "دریاچه", "خوشحال", "دانایی",
+    "پاییزی", "زمستان", "قهرمان", "فرهنگی", "پروانه", "آرزوها",
+    "سرزمین", "پادشاه", "بازیگر", "مهربان", "دانشجو", "آفتابی",
+    "درختان", "کارگاه", "شیرینی", "دوچرخه", "پروازه", "رنگینک",
+    "آموزشی", "نارنجی", "کتابها", "باغبان", "گلخانه", "بارشها",
+]
+WF_ALPHABET = list("اآبپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی")
+WF_IMAGE = BASE_DIR / "wordfinder.jpg"
+
+
+def _wf_games(context):
+    return context.application.bot_data.setdefault("wordfinder_games", {})
+
+
+def _wf_keyboard(g):
+    rows, row = [], []
+    for ch in WF_ALPHABET:
+        if ch in g["used"]:
+            continue
+        row.append(btn(ch, "primary", callback_data=f"wf:letter:{g['id']}:{ord(ch)}"))
+        if len(row) == 7:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
+def _wf_caption(g, finished=False):
+    slots = "  ".join(ch if ch in g["used"] and ch in g["word"] else "□" for ch in g["word"])
+    names = f'{html.escape(g["players"][0][1])}  مقابل  {html.escape(g["players"][1][1])}'
+    if finished:
+        result = f'\n\n🏆 برنده: {html.escape(g["winner_name"])}'
+    elif g["turns"] >= 6:
+        result = "\n\n⌛ شش نوبت تمام شد؛ این دور بدون برنده پایان یافت."
+    else:
+        turn_name = html.escape(g["players"][g["turn"]][1])
+        result = f'\n\n🎯 نوبت: {turn_name}\nدور {g["turns"] + 1} از ۶'
+    return (f"<b>🔤 کلمه‌یاب\n\n{names}\n\n{slots}\n\n"
+            f"حروف انتخاب‌شده: {', '.join(sorted(g['used'])) or '—'}"
+            f"{result}</b>")
+
+
+async def _wf_new_word():
+    # هر کلمه فقط یک‌بار در کل عمر دیتابیس قابل استفاده است.
+    pool_words = list(WF_WORDS)
+    random.shuffle(pool_words)
+    for word in pool_words:
+        row = await pool.fetchval(
+            "INSERT INTO wordfinder_used_words(word,used_at) VALUES($1,$2) "
+            "ON CONFLICT(word) DO NOTHING RETURNING word", word, time.time())
+        if row:
+            return word
+    return None
+
+
+async def _wf_create(q, context, user):
+    games = _wf_games(context)
+    if any(g["status"] in ("waiting", "playing") and any(p[0] == user.id for p in g["players"]) for g in games.values()):
+        await q.answer("اول بازی فعلی‌ات رو تموم کن.", show_alert=True)
+        return
+    gid = random.randint(100000, 999999999)
+    g = {"id": gid, "chat": q.message.chat_id, "msg": None, "owner": user.id,
+         "players": [(user.id, user.full_name)], "status": "waiting", "used": set(),
+         "turn": 0, "turns": 0, "word": None, "winner": None, "winner_name": ""}
+    games[gid] = g
+    kb = InlineKeyboardMarkup([[btn("✅ ورود به میز", "success", callback_data=f"wf:join:{gid}")],
+                               [btn("❌ بستن میز", "danger", callback_data=f"wf:close:{gid}")]])
+    caption = (f"<b>🔤 کلمه‌یاب\n\n{html.escape(user.full_name)} یک میز ساخته!\n"
+               "بازیکن دوم برای ورود دکمه را بزند.\n\n"
+               "بازی رایگان است؛ دو بازیکن به نوبت حروف را انتخاب می‌کنند.</b>")
+    try:
+        if WF_IMAGE.exists():
+            with open(WF_IMAGE, "rb") as f:
+                m = await context.bot.send_photo(q.message.chat_id, f, caption=caption, parse_mode="HTML", reply_markup=kb)
+        else:
+            m = await context.bot.send_message(q.message.chat_id, caption, parse_mode="HTML", reply_markup=kb)
+        g["msg"] = m.message_id
+        await q.answer("میز ساخته شد!")
+    except Exception as e:
+        games.pop(gid, None)
+        await q.answer(f"ساخت میز ناموفق بود: {str(e)[:100]}", show_alert=True)
+
+
+async def wordfinder_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    p = q.data.split(":")
+    act = p[1]
+    user = q.from_user
+    games = _wf_games(context)
+    try:
+        gid = int(p[2])
+    except (ValueError, IndexError):
+        await q.answer()
+        return
+    g = games.get(gid)
+    if not g or g["msg"] != q.message.message_id:
+        await q.answer("این میز دیگر فعال نیست.", show_alert=True)
+        return
+    if act == "close":
+        if user.id != g["owner"]:
+            await q.answer("فقط سازنده می‌تواند میز را ببندد.", show_alert=True)
+            return
+        games.pop(gid, None)
+        await q.answer("میز بسته شد.")
+        try:
+            await q.message.edit_caption(caption="❌ میز کلمه‌یاب بسته شد.", reply_markup=None)
+        except Exception:
+            try: await q.message.edit_text("❌ میز کلمه‌یاب بسته شد.", reply_markup=None)
+            except Exception: pass
+        return
+    if act == "join":
+        if g["status"] != "waiting":
+            await q.answer("این میز دیگر منتظر بازیکن نیست.", show_alert=True)
+            return
+        if user.id == g["owner"]:
+            await q.answer("برای شروع باید بازیکن دوم وارد شود.", show_alert=True)
+            return
+        if any(p0[0] == user.id for p0 in g["players"]):
+            await q.answer("خودت قبلاً وارد شدی.", show_alert=True)
+            return
+        word = await _wf_new_word()
+        if not word:
+            await q.answer("فهرست کلمه‌های استفاده‌نشده تمام شده؛ بعداً کلمه‌های جدید اضافه می‌کنیم.", show_alert=True)
+            games.pop(gid, None)
+            return
+        g["players"].append((user.id, user.full_name))
+        g["word"] = word
+        g["status"] = "playing"
+        g["turn"] = 0
+        await q.answer("بازی شروع شد!")
+        try:
+            await q.message.edit_caption(caption=_wf_caption(g), parse_mode="HTML", reply_markup=_wf_keyboard(g))
+        except Exception:
+            await q.message.edit_text(_wf_caption(g), parse_mode="HTML", reply_markup=_wf_keyboard(g))
+        return
+    if act == "letter":
+        if g["status"] != "playing":
+            await q.answer("این دور تمام شده.", show_alert=True)
+            return
+        if user.id != g["players"][g["turn"]][0]:
+            await q.answer("الان نوبت بازیکن دیگر است.", show_alert=True)
+            return
+        try:
+            ch = chr(int(p[3]))
+        except Exception:
+            await q.answer()
+            return
+        if ch in g["used"]:
+            await q.answer("این حرف قبلاً انتخاب شده.", show_alert=True)
+            return
+        g["used"].add(ch)
+        g["turns"] += 1
+        if g["turns"] >= 6:
+            g["status"] = "done"
+        else:
+            g["turn"] = 1 - g["turn"]
+        await q.answer("حرف در کلمه بود و در خانه‌ها نشست!" if ch in g["word"] else "این حرف نبود؛ از پنل حذف شد.")
+        kb = _wf_keyboard(g) if g["status"] == "playing" else None
+        caption = _wf_caption(g, finished=(g["winner"] is not None))
+        try:
+            await q.message.edit_caption(caption=caption, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await q.message.edit_text(caption, parse_mode="HTML", reply_markup=kb)
+        if g["status"] == "done":
+            # کلمه فقط پس از پایان دور نمایش داده می‌شود.
+            final = caption + f'\n\n🔎 کلمه: <b>{html.escape(g["word"])}</b>'
+            try:
+                await q.message.edit_caption(caption=final, parse_mode="HTML", reply_markup=None)
+            except Exception:
+                try: await q.message.edit_text(final, parse_mode="HTML", reply_markup=None)
+                except Exception: pass
+        return
+    await q.answer()
+
+
 # ───────────────────────── بازی‌های ورزشی: دارت، بولینگ، بسکتبال (میز ۲ یا ۳ نفره) ─────────────────────────
 # کازینو ← «بازی‌های ورزشی» ← بازی ← ۲ یا ۳ نفره ← مبلغ ← ساخت میز ← بقیه می‌شینن ← با پر شدن میز ربات خودش ایموجی رو می‌ندازه
 # و نتیجه تو همون پنل اعلام میشه. بالاترین امتیاز کل پول رو می‌بره؛ تساوی بین نفرهای اول → دور اضافه (تا ۳ دور)، بعدش تقسیم مساوی.
@@ -16861,6 +17043,25 @@ async def casino_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
     """متن‌های کازینو رو تشخیص میده. True = مصرف شد."""
     msg, user = update.effective_message, update.effective_user
     t = norm_word(text).translate(_DIG)
+    # حدس کامل کلمه در همان گروه؛ پاسخ تا پایان دور در پنل مخفی می‌ماند.
+    for _gid, _g in list(_wf_games(context).items()):
+        if _g["chat"] == msg.chat_id and _g["status"] == "playing" and any(p0[0] == user.id for p0 in _g["players"]):
+            _guess = t.replace(" ", "").replace("\u200c", "")
+            if len(_guess) == 6:
+                if _guess == _g["word"]:
+                    _g["winner"] = user.id
+                    _g["winner_name"] = user.full_name
+                    _g["status"] = "done"
+                    _caption = _wf_caption(_g, finished=True) + f'\\n\\n🔎 کلمه: <b>{html.escape(_g["word"])}</b>'
+                    try:
+                        await context.bot.edit_message_caption(chat_id=_g["chat"], message_id=_g["msg"], caption=_caption, parse_mode="HTML", reply_markup=None)
+                    except Exception:
+                        try: await context.bot.edit_message_text(_caption, chat_id=_g["chat"], message_id=_g["msg"], parse_mode="HTML", reply_markup=None)
+                        except Exception: pass
+                    await msg.reply_text(f"🏆 {user.full_name} کلمه را درست حدس زد!")
+                else:
+                    await msg.reply_text("❌ حدست درست نبود؛ نوبت‌ها ادامه دارد.")
+                return True
     if not CASINO_OPEN:
         if re.fullmatch(r"کازینو|casino|جینگو\s*(?:بت|قمار|شرط\s*بندی)(?:\s+.+)?|(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I):
             await send_html(
@@ -25771,6 +25972,7 @@ def main():
     app.add_handler(CallbackQueryHandler(heist_cb, pattern=r"^hs:"))
     app.add_handler(CallbackQueryHandler(casino_cb, pattern=r"^cz:"))
     app.add_handler(CallbackQueryHandler(sports_cb, pattern=r"^sg:"))
+    app.add_handler(CallbackQueryHandler(wordfinder_cb, pattern=r"^wf:"))
     app.add_handler(CallbackQueryHandler(equip_cb, pattern=r"^eq:"))
     app.add_handler(CallbackQueryHandler(pet_cb, pattern=r"^pt:"))
     app.add_handler(CallbackQueryHandler(cafe_cb, pattern=r"^cf:"))
