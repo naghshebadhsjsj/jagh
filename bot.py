@@ -2009,44 +2009,89 @@ function PanelScreen(){
 
 
 function PremiumEmojiScreen(){
-  let mediaDataUrl='',mediaKind='',mediaUrl='',busy=false;
+  let mediaDataUrl='',mediaKind='',mediaUrl='',busy=false,sourceImage=null,imageReady=false;
+  let shape='circle',zoom=1,rotation=0,brightness=100,contrast=100,offsetX=0,offsetY=0,drag=null;
   const file=h('input',{class:'inp',type:'file',accept:'image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime'});
   const fallback=h('input',{class:'inp',type:'text',maxlength:'8',value:'✨',placeholder:'ایموجی جایگزین مثل ✨'});
   const title=h('input',{class:'inp',type:'text',maxlength:'64',value:'ایموجی‌های پشتیبانی',placeholder:'نام مجموعه ایموجی'});
-  const preview=h('div',{style:'width:116px;height:116px;border:1px dashed var(--line);border-radius:22px;background:var(--sec);display:grid;place-items:center;overflow:hidden;margin:12px auto;font-size:13px;color:var(--hint)'},'پیش‌نمایش');
-  const status=h('div',{class:'sub',style:'text-align:center;margin-top:8px;line-height:1.8'},'عکس با کیفیت اصلی دریافت می‌شود؛ ویدیو به ایموجی متحرک تبدیل می‌شود.');
+  const canvas=h('canvas',{width:'512',height:'512',style:'display:block;width:min( min(72vw,260px),260px);height:auto;aspect-ratio:1;touch-action:none;border:1px solid var(--line);background:repeating-conic-gradient(#d5d9e2 0% 25%,#f5f6f8 0% 50%) 50%/18px 18px;border-radius:18px;margin:12px auto;max-width:100%'});
+  const ctx=canvas.getContext('2d');
+  const preview=h('div',{style:'width:100%;display:grid;place-items:center'},canvas);
+  const status=h('div',{class:'sub',style:'text-align:center;margin-top:8px;line-height:1.8'},'عکس را انتخاب کن، برش بده و نتیجه را قبل از ساخت ببین.');
+  const editor=h('div',{class:'card hid',style:'margin-top:10px'});
   const go=h('button',{class:'btn',onclick:create},'✨ ساخت ایموجی پرمیوم');
-  function clearPreview(){if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=''}preview.replaceChildren('پیش‌نمایش')}
+  const mkRange=(label,min,max,val,step,fn)=>{
+    const out=h('b',{},String(val));
+    const inp=h('input',{type:'range',min:String(min),max:String(max),value:String(val),step:String(step),style:'width:100%;accent-color:var(--link)'});
+    inp.oninput=()=>{const n=Number(inp.value);out.textContent=String(n);fn(n);drawEditor()};
+    return h('div',{style:'margin-top:10px'},h('div',{class:'row2'},h('span',{class:'sub'},label),out),inp);
+  };
+  const shapeBtns=h('div',{class:'grid',style:'grid-template-columns:repeat(3,minmax(0,1fr));gap:7px'});
+  const bgBtns=h('div',{class:'grid',style:'grid-template-columns:repeat(4,minmax(0,1fr));gap:7px'});
+  let bg='transparent';
+  function button(label,fn,active=false){return h('button',{class:'act'+(active?' ok':''),style:'min-width:0;padding:10px 5px',onclick:fn},label)}
+  function refreshButtons(){
+    shapeBtns.replaceChildren(...[['circle','◯ دایره'],['square','□ مربع'],['rounded','▢ گوشه‌گرد']].map(([k,l])=>button(l,()=>{shape=k;refreshButtons();drawEditor()},shape===k)));
+    bgBtns.replaceChildren(...[['transparent','شفاف'],['#ffffff','سفید'],['#111827','تیره'],['#ffb6d9','صورتی']].map(([k,l])=>button(l,()=>{bg=k;refreshButtons();drawEditor()},bg===k)));
+  }
+  function clearPreview(){if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=''}sourceImage=null;imageReady=false;ctx.clearRect(0,0,512,512);preview.replaceChildren(canvas);preview.style.display='grid';editor.classList.add('hid')}
+  function roundedPath(c,x,y,w,hh,r){c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);c.lineTo(x+w,y+hh-r);c.quadraticCurveTo(x+w,y+hh,x+w-r,y+hh);c.lineTo(x+r,y+hh);c.quadraticCurveTo(x,y+hh,x,y+hh-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath()}
+  function drawEditor(){
+    if(!sourceImage)return;
+    const W=512,H=512,c=ctx;c.clearRect(0,0,W,H);
+    if(bg!=='transparent'){c.fillStyle=bg;c.fillRect(0,0,W,H)}
+    c.save();
+    if(shape==='circle'){c.beginPath();c.arc(W/2,H/2,255,0,Math.PI*2);c.clip()}
+    else if(shape==='rounded'){roundedPath(c,0,0,W,H,82);c.clip()}
+    const iw=sourceImage.naturalWidth||sourceImage.width,ih=sourceImage.naturalHeight||sourceImage.height;
+    const sc=Math.max(W/iw,H/ih)*zoom,dw=iw*sc,dh=ih*sc;
+    c.translate(W/2+offsetX,H/2+offsetY);c.rotate(rotation*Math.PI/180);c.filter=`brightness(${brightness}%) contrast(${contrast}%)`;
+    c.drawImage(sourceImage,-dw/2,-dh/2,dw,dh);c.filter='none';c.restore();
+  }
+  const rangeWrap=h('div',{},
+    mkRange('بزرگ‌نمایی',100,300,100,5,n=>zoom=n/100),
+    mkRange('چرخش',-180,180,0,5,n=>rotation=n),
+    mkRange('روشنایی',50,160,100,5,n=>brightness=n),
+    mkRange('کنتراست',50,160,100,5,n=>contrast=n)
+  );
+  refreshButtons();
+  editor.replaceChildren(h('h3',{},'🎨 ویرایش و برش عکس'),h('div',{class:'sub'},'برای جابه‌جایی عکس، آن را داخل پیش‌نمایش با انگشت بکش. پس‌زمینه شفاف هم قابل انتخاب است.'),
+    h('div',{class:'sub',style:'margin:10px 0 6px'},'شکل برش'),shapeBtns,
+    h('div',{class:'sub',style:'margin:12px 0 6px'},'پس‌زمینه'),bgBtns,
+    rangeWrap,
+    h('div',{class:'row2',style:'gap:8px;margin-top:12px'},button('↺ بازنشانی',()=>{zoom=1;rotation=0;brightness=100;contrast=100;offsetX=0;offsetY=0;for(const r of rangeWrap.querySelectorAll('input[type=range]'))r.value=r.min==='100'&&r.max==='300'?'100':r.min==='-180'?'0':'100';for(const b of rangeWrap.querySelectorAll('b'))b.textContent=b.parentElement.firstChild.textContent==='بزرگ‌نمایی'?'100':b.parentElement.firstChild.textContent==='چرخش'?'0':'100';drawEditor()}),button('مرکز کردن عکس',()=>{offsetX=0;offsetY=0;drawEditor()}))
+  );
+  canvas.onpointerdown=e=>{if(!sourceImage)return;drag={x:e.clientX,y:e.clientY,ox:offsetX,oy:offsetY};try{canvas.setPointerCapture(e.pointerId)}catch(_){}e.preventDefault()};
+  canvas.onpointermove=e=>{if(!drag)return;const r=canvas.getBoundingClientRect(),scale=512/r.width;offsetX=drag.ox+(e.clientX-drag.x)*scale;offsetY=drag.oy+(e.clientY-drag.y)*scale;drawEditor();e.preventDefault()};
+  canvas.onpointerup=canvas.onpointercancel=()=>{drag=null};
   file.onchange=async()=>{
-    mediaDataUrl='';mediaKind='';clearPreview();const f=file.files&&file.files[0];
-    if(!f)return;
-    const isVideo=f.type.startsWith('video/');
-    const allowedImage=['image/png','image/jpeg','image/webp'].includes(f.type);
-    const allowedVideo=['video/mp4','video/webm','video/quicktime'].includes(f.type);
+    mediaDataUrl='';mediaKind='';clearPreview();const f=file.files&&file.files[0];if(!f)return;
+    const isVideo=f.type.startsWith('video/'),allowedImage=['image/png','image/jpeg','image/webp'].includes(f.type),allowedVideo=['video/mp4','video/webm','video/quicktime'].includes(f.type);
     if(!allowedImage&&!allowedVideo){file.value='';return toast('فرمت عکس یا ویدیو پشتیبانی نمی‌شود.',1)}
-    if(f.size>(isVideo?3500000:3500000)){file.value='';return toast('حجم فایل باید کمتر از ۳.۵ مگابایت باشد.',1)}
+    if(f.size>3500000){file.value='';return toast('حجم فایل باید کمتر از ۳.۵ مگابایت باشد.',1)}
     try{
       const src=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('خواندن فایل ناموفق بود'));r.readAsDataURL(f)});
-      mediaDataUrl=src;mediaKind=isVideo?'video':'static';mediaUrl=URL.createObjectURL(f);
-      if(isVideo){
-        const v=h('video',{src:mediaUrl,muted:true,loop:true,autoplay:true,playsInline:true,style:'width:100px;height:100px;object-fit:contain'});preview.replaceChildren(v);v.play().catch(()=>{});
-        status.textContent='ویدیوی انتخاب‌شده • خروجی ۱۰۰×۱۰۰ • حداکثر ۳ ثانیه • بدون صدا';
-      }else{
-        const im=h('img',{src:mediaUrl,style:'width:100px;height:100px;object-fit:contain'});preview.replaceChildren(im);
-        status.textContent='عکس اصلی بدون کوچک‌سازی در مرورگر ارسال می‌شود؛ تبدیل نهایی با کیفیت بالا روی سرور انجام می‌شود.';
+      mediaKind=isVideo?'video':'static';mediaUrl=URL.createObjectURL(f);
+      if(isVideo){mediaDataUrl=src;const v=h('video',{src:mediaUrl,muted:true,loop:true,autoplay:true,playsInline:true,style:'width:180px;height:180px;object-fit:contain'});preview.replaceChildren(v);editor.classList.add('hid');v.play().catch(()=>{});status.textContent='ویدیوی انتخاب‌شده • خروجی ۱۰۰×۱۰۰ • حداکثر ۳ ثانیه • بدون صدا'}
+      else{
+        sourceImage=new Image();sourceImage.onload=()=>{imageReady=true;preview.replaceChildren(canvas);zoom=1;rotation=0;brightness=100;contrast=100;offsetX=0;offsetY=0;bg='transparent';refreshButtons();drawEditor();editor.classList.remove('hid');status.textContent='عکس آماده ویرایش است؛ برش دایره‌ای، مربعی، گوشه‌گرد و تنظیمات تصویر فعال شد.'};
+        sourceImage.onerror=()=>{throw new Error('باز کردن تصویر ناموفق بود')};sourceImage.src=mediaUrl;
       }
     }catch(e){file.value='';mediaDataUrl='';mediaKind='';clearPreview();toast(e.message||'پردازش فایل ناموفق بود.',1)}
   };
   async function create(){
-    if(busy)return;
-    if(!mediaDataUrl)return toast('اول عکس یا ویدیوی ایموجی رو انتخاب کن.',1);
+    if(busy)return;if(!mediaKind)return toast('اول عکس یا ویدیوی ایموجی رو انتخاب کن.',1);
     const alt=fallback.value.trim(),name=title.value.trim();
     if(!alt||alt.length>8)return toast('یک ایموجی معمولی برای جایگزین وارد کن.',1);
     if(!name||name.length>64)return toast('نام مجموعه باید بین ۱ تا ۶۴ کاراکتر باشه.',1);
+    if(mediaKind==='static'){
+      if(!sourceImage||!imageReady)return toast('صبر کن تا عکس آماده ویرایش بشه.',1);
+      drawEditor();mediaDataUrl=canvas.toDataURL('image/png');
+    }
     busy=true;go.disabled=true;go.textContent='⏳ در حال ساخت در تلگرام…';
     try{
       const r=await api('/api/emoji/create',{media:mediaDataUrl,kind:mediaKind,emoji:alt,title:name});
-      status.replaceChildren(h('b',{},'✅ '+(mediaKind==='video'?'ایموجی متحرک':'ایموجی')+' ساخته شد'),h('div',{style:'margin-top:5px'},'کد: '+r.custom_emoji_id),h('div',{style:'margin-top:5px'},'مجموعه: '+r.pack_name));
+      status.replaceChildren(h('b',{},'✅ '+(mediaKind==='video'?'ایموجی متحرک':'ایموجی پرمیوم')+' ساخته شد'),h('div',{style:'margin-top:5px'},'کد: '+r.custom_emoji_id),h('div',{style:'margin-top:5px'},'مجموعه: '+r.pack_name));
       toast('ایموجی ساخته شد و کدش به پی‌وی ربات ارسال شد.');
       if(r.pack_url)status.append(h('div',{style:'margin-top:7px'},h('a',{href:r.pack_url,target:'_blank',style:'color:var(--link)'},'باز کردن مجموعه ایموجی')));
     }catch(e){toast(e.message||'ساخت ایموجی ناموفق بود.',1);status.textContent=e.message||'ساخت ایموجی ناموفق بود.'}
@@ -2054,12 +2099,12 @@ function PremiumEmojiScreen(){
   }
   return h('div',{class:'scr'},h('div',{class:'top row'},backBtn(),h('b',{class:'grow'},'✨ سازنده ایموجی پرمیوم')),
     h('div',{class:'scroll',style:'padding:12px'},
-      h('div',{class:'card'},h('h3',{},'ساخت ایموجی اختصاصی تلگرام'),h('div',{class:'sub'},'فقط برای پشتیبان‌های دارای دسترسی مینی‌اپ. عکس یا ویدیو انتخاب کن؛ فایل ویدیویی به ایموجی متحرک WEBM تبدیل می‌شود.'),preview,
-        h('label',{class:'sub'},'عکس یا ویدیو'),file,
+      h('div',{class:'card'},h('h3',{},'ساخت ایموجی اختصاصی تلگرام'),h('div',{class:'sub'},'عکس را انتخاب کن و با ابزار برش و زیباسازی آماده‌اش کن؛ ویدیو هم مثل قبل به ایموجی متحرک WEBM تبدیل می‌شود.'),preview,
+        h('label',{class:'sub'},'عکس یا ویدیو'),file,editor,
         h('label',{class:'sub',style:'display:block;margin-top:12px'},'ایموجی جایگزین'),fallback,
         h('label',{class:'sub',style:'display:block;margin-top:12px'},'نام مجموعه'),title,
         go,status,
-        h('div',{class:'sub',style:'margin-top:10px;line-height:1.8'},'قوانین ویدیو: حداکثر ۳ ثانیه، ۳۰ فریم، بدون صدا و خروجی ۱۰۰×۱۰۰. عکس‌ها هم بدون کاهش کیفیت در مرورگر به سرور فرستاده می‌شوند.')
+        h('div',{class:'sub',style:'margin-top:10px;line-height:1.8'},'عکس خروجی با برش انتخابی و وضوح بالا آماده می‌شود. ویدیو: حداکثر ۳ ثانیه، ۳۰ فریم، بدون صدا و خروجی ۱۰۰×۱۰۰.')
       )
     )
   );
@@ -20291,10 +20336,10 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 send_method = getattr(context.bot, f"send_{media_type}")
                 kwargs = {media_type: st["media_file_id"], "chat_id": POST_CHANNEL}
                 if st.get("html"):
-                    kwargs.update(caption=st["html"], parse_mode="HTML")
+                    kwargs.update(caption=st["html"], parse_mode=None)
                 sent = await send_method(**kwargs)
             else:
-                sent = await context.bot.send_message(chat_id=POST_CHANNEL, text=st["html"], parse_mode="HTML",
+                sent = await context.bot.send_message(chat_id=POST_CHANNEL, text=st["html"], parse_mode=None,
                                                       disable_web_page_preview=False)
             link = f"https://t.me/JinGo_Game/{sent.message_id}"
             await q.edit_message_text(f"✅ پست با موفقیت در کانال @JinGo_Game منتشر شد.\n\n🔗 {link}",
@@ -20600,7 +20645,9 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         media_type = None
         media_file_id = None
         if msg.text:
-            raw_html = getattr(msg, "text_html", None) or html.escape(msg.text)
+            # متن پست عیناً حفظ می‌شود؛ شناسه‌هایی مثل [5346195820557393682]
+            # نباید به تگ ایموجی پرمیوم تبدیل شوند.
+            raw_html = msg.text
             max_len = 4096
         else:
             media_candidates = (
@@ -20616,11 +20663,10 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
                 return True
             media_type, media_obj = selected
             media_file_id = media_obj.file_id
-            raw_html = getattr(msg, "caption_html", None) or html.escape(msg.caption or "")
+            raw_html = msg.caption or ""
             max_len = 1024
-        # text_html/caption_html قالب‌بندی و ایموجی‌های پرمیوم واقعی تلگرام را نگه می‌دارند.
-        post_html = re.sub(r'(?<![\d"=])(\d{15,22})(?!\d)',
-                           lambda m: f'<tg-emoji emoji-id="{m.group(1)}">⭐</tg-emoji>', raw_html)
+        # انتشار متن خام: هیچ شناسه عددی به ایموجی پرمیوم تبدیل نمی‌شود.
+        post_html = raw_html
         if not (post_html.strip() or media_type):
             await msg.reply_text("متن پست خالیه؛ دوباره بفرست.", reply_markup=CANCEL_KB)
             return True
@@ -20634,12 +20680,12 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         try:
             if media_type:
                 reply_method = getattr(msg, f"reply_{media_type}")
-                kwargs = {media_type: media_file_id, "parse_mode": "HTML", "reply_markup": kb}
+                kwargs = {media_type: media_file_id, "parse_mode": None, "reply_markup": kb}
                 if post_html:
                     kwargs["caption"] = post_html
                 await reply_method(**kwargs)
             else:
-                await msg.reply_text(preview, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=False)
+                await msg.reply_text(preview, parse_mode=None, reply_markup=kb, disable_web_page_preview=False)
         except Exception as e:
             log.exception("channel post preview failed")
             await msg.reply_text("قالب متن یا کد ایموجی معتبر نیست؛ اصلاحش کن و دوباره بفرست.\n" + str(e)[:300], reply_markup=CANCEL_KB)
