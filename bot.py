@@ -886,6 +886,8 @@ async def init_db(app: Application):
         await c.execute("CREATE INDEX IF NOT EXISTS arena_waiting_idx ON arena_matches(status, created_at)")
         await c.execute("ALTER TABLE arena_matches ADD COLUMN IF NOT EXISTS p1_guard_until DOUBLE PRECISION NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS p2_guard_until DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("CREATE TABLE IF NOT EXISTS arena_stats (uid BIGINT PRIMARY KEY, wins INT NOT NULL DEFAULT 0, losses INT NOT NULL DEFAULT 0, matches INT NOT NULL DEFAULT 0)")
+        await c.execute("CREATE TABLE IF NOT EXISTS arena_profiles (uid BIGINT PRIMARY KEY, gender TEXT NOT NULL DEFAULT 'male', display_name TEXT NOT NULL DEFAULT '', updated_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("ALTER TABLE arena_matches ADD COLUMN IF NOT EXISTS p1_gender TEXT NOT NULL DEFAULT 'male', ADD COLUMN IF NOT EXISTS p2_gender TEXT NOT NULL DEFAULT 'female'")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_subscription_receipts (receipt_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_subscriptions (user_id BIGINT PRIMARY KEY, expires_at DOUBLE PRECISION NOT NULL, activated_by BIGINT, updated_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS special_chars (user_id BIGINT NOT NULL, key TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, bought_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(user_id, key))")
@@ -1569,6 +1571,14 @@ textarea.inp{min-height:130px;resize:vertical}
 .arena-maprow{display:flex;gap:7px;overflow:auto;padding:10px 12px;background:#172238}.arena-map{flex:1;min-width:66px;border:1px solid #ffffff2b;border-radius:9px;padding:7px 4px;color:#fff;background:#ffffff10;font-size:11px}.arena-map.on{border-color:#7dd3fc;background:#0e749044}
 .arena-note{text-align:center;color:#cbd5e1;font-size:12px;padding:8px}.arena-queue{margin:auto;text-align:center;padding:28px 18px;max-width:340px}.arena-queue button{border:0;border-radius:13px;padding:13px 20px;background:linear-gradient(120deg,#2563eb,#7c3aed);color:#fff;font-weight:900;font-size:15px;width:100%;margin-top:12px}
 .arena-close{border:1px solid #ffffff30;background:#ffffff12;color:#fff;border-radius:10px;padding:7px 10px}
+.arena-profile{margin:8px auto 14px;max-width:340px;padding:14px;border:1px solid #ffffff24;border-radius:18px;background:linear-gradient(145deg,#1d2c4a,#111a2d);box-shadow:0 12px 28px #0005;text-align:center}
+.arena-profile-head{display:flex;align-items:center;justify-content:center;gap:12px}
+.arena-profile-portrait{width:82px;height:100px;object-fit:contain;filter:drop-shadow(0 5px 10px #0008)}
+.arena-genders{display:flex;gap:8px;margin:12px 0}.arena-gender{flex:1;border:1px solid #ffffff30;border-radius:12px;padding:9px 6px;background:#ffffff0c;color:#fff;font-weight:900}.arena-gender.on{border-color:#fbbf24;background:linear-gradient(130deg,#7c3aed66,#db277766);box-shadow:0 0 0 1px #fbbf2444}
+.arena-prof-name{width:100%;box-sizing:border-box;margin-top:10px;border:1px solid #ffffff2a;border-radius:10px;padding:10px;background:#0b1222;color:#fff;text-align:center;font:inherit}
+.arena-stats{display:flex;justify-content:space-around;margin-top:10px;color:#cbd5e1;font-size:11px}.arena-stats b{display:block;color:#fff;font-size:15px}
+.arena-queue .arena-start:disabled{opacity:.45;filter:grayscale(.5)}
+
 </style></head><body>
 <div id="app">
   <div id="views"></div>
@@ -4743,36 +4753,54 @@ function FarmScreen(){
  return root;
 }
 function FarmTab(){
- const root=h('div',{class:'arena-screen'});let match=null,side=0,chosenMap=0,poll=null,raf=null,dead=false,move={x:0,y:0},lastSend=0,sendBusy=false,shield=false;
+ const root=h('div',{class:'arena-screen'});let match=null,side=0,chosenMap=0,poll=null,raf=null,dead=false,move={x:0,y:0},lastSend=0,sendBusy=false,shield=false,profile=null,stats={wins:0,losses:0,matches:0},attackFx=[0,0];
  const top=h('div',{class:'arena-top'},h('b',{},'⚔️ آرنای قهرمانان'),h('span',{class:'arena-pill'},'نبرد ۱ به ۱'),h('button',{class:'arena-close',onclick:leave},'خروج'));
  const stage=h('div',{class:'arena-stage'}),canvas=h('canvas',{}),ctx=canvas.getContext('2d');stage.append(canvas);
  const hud=h('div',{class:'arena-hud'}),maprow=h('div',{class:'arena-maprow'}),bottom=h('div',{class:'arena-bottom'});
  const maps=['آسمانی','جنگلی','یخی','آتشفشانی'];maps.forEach((n,i)=>maprow.append(h('button',{class:'arena-map'+(i===chosenMap?' on':''),onclick:()=>{chosenMap=i;maprow.querySelectorAll('button').forEach((b,j)=>b.classList.toggle('on',j===i));if(match)toast('نقشه در مسابقه بعدی انتخاب می‌شود')}} ,n)));
- const note=h('div',{class:'arena-note'},'برای شروع، وارد صف مبارزه شو. حریف باید آنلاین باشد.');
+ const note=h('div',{class:'arena-note'},'برای شروع، پروفایل آرنا را تکمیل کن.');
  const pad=h('div',{class:'arena-pad'});[['up','▲',0,-1],['left','◀',-1,0],['down','▼',0,1],['right','▶',1,0]].forEach(([cl,t,x,y])=>{const b=h('button',{class:cl},t);const on=()=>{move.x=x;move.y=y},off=()=>{if(move.x===x&&move.y===y)move={x:0,y:0}};b.addEventListener('pointerdown',e=>{e.preventDefault();on()});['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,off));pad.append(b)});
- const attack=h('button',{class:'arena-action',onclick:()=>sendAction('attack')},'⚔️ حمله');const defend=h('button',{class:'arena-action def',onpointerdown:()=>{shield=true;sendAction('defend')},onpointerup:()=>shield=false,onpointerleave:()=>shield=false},'🛡 دفاع');
- bottom.append(h('div',{class:'arena-controls'},pad,h('div',{class:'arena-actions'},defend,attack)));
+ const attack=h('button',{class:'arena-action',onclick:()=>sendAction('attack')},'⚔️ حمله');const defend=h('button',{class:'arena-action def',onpointerdown:()=>{shield=true;sendAction('defend')},onpointerup:()=>shield=false,onpointerleave:()=>shield=false},'🛡 دفاع');bottom.append(h('div',{class:'arena-controls'},pad,h('div',{class:'arena-actions'},defend,attack)));
  root.append(top,stage,maprow,note,bottom);
- const queue=h('div',{class:'arena-queue'},h('div',{style:'font-size:54px'},'🏟️'),h('h2',{},'آماده‌ی مبارزه‌ای؟'),h('p',{},'با یک بازیکن واقعی وارد نبرد شو. حرکت کن، دفاع کن و حریفت را شکست بده.'),h('button',{onclick:joinQueue},'⚔️ پیدا کردن حریف'));
- stage.append(queue);canvas.style.display='none';maprow.style.display='none';bottom.style.display='none';
- const imgBg=new Image(),heroes=[new Image(),new Image()];
- [imgBg,...heroes].forEach(im=>{im.decoding='async';im.onload=()=>{if(!dead&&match)paint()};im.onerror=()=>console.warn('Arena asset failed to load:',im.src)});
- heroes[0].src='/arena-assets/hero0.png';heroes[1].src='/arena-assets/hero1.png';
- function resize(){const r=stage.getBoundingClientRect(),d=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));ctx.setTransform(d,0,0,d,0,0)}
- function paint(){if(dead||!match||!canvas.isConnected)return;const w=canvas.clientWidth,hg=canvas.clientHeight; if(canvas.width===0)resize();const map=Number(match.map||chosenMap);if(imgBg.dataset.map!==String(map)){imgBg.src='/arena-assets/map'+map+'.jpg';imgBg.dataset.map=String(map)}
- ctx.clearRect(0,0,w,hg);if(imgBg.complete&&imgBg.naturalWidth)ctx.drawImage(imgBg,0,0,w,hg);else{ctx.fillStyle='#263d55';ctx.fillRect(0,0,w,hg)}
- const players=match.players||[];players.forEach((p,i)=>{if(!p)return;const x=(Number(p.x)||.2)*w,y=(Number(p.y)||.6)*hg;const im=heroes[i];if(im.complete&&im.naturalWidth){ctx.save();ctx.translate(x,y);if((i===0&&p.face===-1)||(i===1&&p.face===1))ctx.scale(-1,1);ctx.drawImage(im,-78,-112,156,104);ctx.restore()}else{ctx.save();ctx.fillStyle='#e2e8f0';ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.fillText('در حال بارگذاری…',x,y-24);ctx.restore()}if(p.hit_until>Date.now()/1000){ctx.strokeStyle='#fff';ctx.lineWidth=4;ctx.beginPath();ctx.arc(x,y-35,35,0,7);ctx.stroke()}});
- if(match.status==='done'){ctx.fillStyle='#07111dcc';ctx.fillRect(0,0,w,hg);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 26px sans-serif';ctx.fillText(match.winner===Number(me.id)?'🏆 تو برنده شدی!':'مسابقه تمام شد',w/2,hg/2)}
- }
+ const queue=h('div',{class:'arena-queue'}),profileCard=h('div',{class:'arena-profile'}),portrait=h('img',{class:'arena-profile-portrait',alt:'کاراکتر آرنا'}),nameInput=h('input',{class:'arena-prof-name',maxlength:'24',placeholder:'نام نمایشی در آرنا'}),genderRow=h('div',{class:'arena-genders'}),statsEl=h('div',{class:'arena-stats'});
+ let selectedGender='';
+ function paintProfile(){const chosen=selectedGender||profile?.gender||'';genderRow.replaceChildren(...[['male','⚔️ قهرمان مرد'],['female','🗡️ قهرمان زن']].map(([g,label])=>h('button',{class:'arena-gender'+(chosen===g?' on':''),onclick:()=>{selectedGender=g;paintProfile();saveProfile(false)}},label)));portrait.src=chosen==='female'?'/arena-assets/hero_female.png':'/arena-assets/hero_male.png';portrait.style.opacity=chosen?1:.35;statsEl.innerHTML='';[['برد',stats.wins],['باخت',stats.losses],['مسابقه',stats.matches]].forEach(([k,v])=>{const d=h('div',{},h('b',{},String(v)),k);statsEl.append(d)})}
+ profileCard.append(h('div',{class:'arena-profile-head'},portrait,h('div',{},h('b',{},'پروفایل مبارز'),h('div',{style:'font-size:11px;color:#aebbd2;margin-top:5px'},'قهرمانت را انتخاب کن'))),genderRow,nameInput,statsEl);
+ const startBtn=h('button',{class:'arena-start',disabled:true,onclick:joinQueue},'⚔️ پیدا کردن حریف');queue.append(h('div',{style:'font-size:48px'},'🏟️'),h('h2',{},'آماده‌ی مبارزه‌ای؟'),profileCard,startBtn);stage.append(queue);canvas.style.display='none';maprow.style.display='none';bottom.style.display='none';
+ async function saveProfile(showToast=true){if(!selectedGender)return;try{const r=await api('/api/arena/profile',{gender:selectedGender,name:nameInput.value});profile=r.profile;stats=r.stats;startBtn.disabled=false;paintProfile();if(showToast)toast('پروفایل آرنات ذخیره شد ✨')}catch(e){toast(e.message,1)}}
+ async function loadProfile(){try{const r=await api('/api/arena/profile');profile=r.profile;stats=r.stats;selectedGender=profile.gender||'';nameInput.value=profile.name||'';paintProfile();startBtn.disabled=!selectedGender;note.textContent=selectedGender?'پروفایلت آماده است؛ وارد نبرد شو.':'اول جنسیت کاراکترت را انتخاب کن.'}catch(e){note.textContent=e.message}}
+ nameInput.addEventListener('change',()=>saveProfile(false));
+ const heroes={male:new Image(),female:new Image()};heroes.male.src='/arena-assets/hero_male.png';heroes.female.src='/arena-assets/hero_female.png';const imgBg=new Image();[imgBg,...Object.values(heroes)].forEach(im=>{im.decoding='async';im.onload=()=>{if(!dead&&match)paint()};im.onerror=()=>console.warn('Arena asset failed:',im.src)});
+ function resize(){const r=stage.getBoundingClientRect(),d=Math.min(1.5,window.devicePixelRatio||1);canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));ctx.setTransform(d,0,0,d,0,0)}
+ function paint(){if(dead||!match||!canvas.isConnected)return;const w=canvas.clientWidth,hg=canvas.clientHeight;if(!w||!hg)return;if(canvas.width===0)resize();const now=performance.now()/1000,serverNow=Date.now()/1000,map=Number(match.map||chosenMap);if(imgBg.dataset.map!==String(map)){imgBg.src='/arena-assets/map'+map+'.jpg';imgBg.dataset.map=String(map)}ctx.clearRect(0,0,w,hg);if(imgBg.complete&&imgBg.naturalWidth)ctx.drawImage(imgBg,0,0,w,hg);else{ctx.fillStyle='#263d55';ctx.fillRect(0,0,w,hg)}
+  // ذرات سبک و محدود برای زنده‌کردن نقشه، بدون ساخت آبجکت در هر فریم
+  for(let k=0;k<14;k++){const x=((k*83+now*(9+k%4)*((k%2)?1:-1))%(w+30)+w+30)%(w+30)-15,y=(k*47+Math.sin(now*1.1+k)*18+hg*.16)%(hg*.78);ctx.globalAlpha=.18+.22*(.5+.5*Math.sin(now*2+k));ctx.fillStyle=k%3?'#dbeafe':'#fbbf24';ctx.beginPath();ctx.arc(x,y,1.2+(k%3)*.45,0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;
+  const players=match.players||[];players.forEach((p,i)=>{if(!p)return;const x=(Number(p.x)||.2)*w,y=(Number(p.y)||.6)*hg,im=heroes[p.gender==='female'?'female':'male'];if(im.complete&&im.naturalWidth){const elapsed=Math.max(0,serverNow-(Number(p.attack_at)||0)),attacking=elapsed<.42,guarding=(Number(p.guard_until)||0)>serverNow;const swing=attacking?Math.sin(Math.min(1,elapsed/.42)*Math.PI)*.48:0,bob=attacking?0:Math.sin(now*5+i)*2.2;ctx.save();ctx.translate(x,y+bob);if((i===0&&p.face===-1)||(i===1&&p.face===1))ctx.scale(-1,1);ctx.rotate(swing*(i===0?1:-1));ctx.shadowColor=guarding?'#60d8ff':attacking?'#ffd166':'#000';ctx.shadowBlur=guarding?22:attacking?18:4;ctx.drawImage(im,-76,-202,152,202);ctx.restore();if(attacking){ctx.save();ctx.globalAlpha=Math.max(0,1-elapsed/.42);ctx.strokeStyle='#ffe28a';ctx.lineWidth=5;ctx.shadowColor='#ff9d35';ctx.shadowBlur=18;ctx.beginPath();ctx.arc(x+(p.face||1)*20,y-105,68,-.9,.9);ctx.stroke();ctx.restore()}if(guarding){ctx.save();ctx.strokeStyle='#7dd3fc';ctx.lineWidth=3;ctx.shadowColor='#38bdf8';ctx.shadowBlur=16;ctx.beginPath();ctx.ellipse(x,y-95,61,105,0,0,Math.PI*2);ctx.stroke();ctx.restore()}}else{ctx.fillStyle='#e2e8f0';ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.fillText('در حال بارگذاری…',x,y-24)}});
+  if(match.status==='done'){ctx.fillStyle='#07111dcc';ctx.fillRect(0,0,w,hg);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 26px sans-serif';ctx.fillText(match.winner===Number(me.id)?'🏆 تو برنده شدی!':'مسابقه تمام شد',w/2,hg/2)}}
  function hudPaint(){hud.replaceChildren();(match.players||[]).forEach((p,i)=>{if(!p)return;const box=h('div',{class:'arena-player'+(i===1?' right':'')},h('div',{class:'arena-name'},(p.name||('بازیکن '+(i+1)))+(i===side?' · تو':'')),h('div',{class:'arena-hp'},h('i',{style:'width:'+Math.max(0,Math.min(100,p.hp))+'%'})),h('div',{style:'font-size:10px;margin-top:4px;color:#dbeafe'},'HP '+Math.max(0,p.hp)+'/100'));hud.append(box)});if(!hud.parentNode)stage.append(hud)}
- async function joinQueue(){try{queue.querySelector('button').disabled=true;queue.querySelector('button').textContent='در حال پیدا کردن حریف…';const r=await api('/api/arena/join',{map:chosenMap});match=r.match;side=r.side;queue.style.display='none';canvas.style.display='block';maprow.style.display='flex';bottom.style.display='block';note.textContent=match.status==='waiting'?'منتظر ورود حریف هستیم…':'حریف پیدا شد! مبارزه شروع شد.';resize();hudPaint();startPoll()}catch(e){toast(e.message,1);queue.querySelector('button').disabled=false;queue.querySelector('button').textContent='⚔️ پیدا کردن حریف'}}
+ async function joinQueue(){try{startBtn.disabled=true;startBtn.textContent='در حال پیدا کردن حریف…';await saveProfile(false);const r=await api('/api/arena/join',{map:chosenMap});match=r.match;side=r.side;queue.style.display='none';canvas.style.display='block';maprow.style.display='flex';bottom.style.display='block';note.textContent=match.status==='waiting'?'منتظر ورود حریف هستیم…':'حریف پیدا شد! مبارزه شروع شد.';resize();hudPaint();startPoll()}catch(e){toast(e.message,1);startBtn.disabled=false;startBtn.textContent='⚔️ پیدا کردن حریف'}}
  async function sendAction(kind){if(!match||match.status!=='playing'||sendBusy)return;sendBusy=true;try{const p=match.players[side]||{};const nx=Math.max(.06,Math.min(.94,(Number(p.x)||.2)+move.x*.035)),ny=Math.max(.2,Math.min(.88,(Number(p.y)||.6)+move.y*.025));const r=await api('/api/arena/action',{match_id:match.id,kind,x:nx,y:ny,face:move.x?move.x:undefined});match=r.match;hudPaint()}catch(e){if(!/سریع|محدود/.test(e.message))toast(e.message,1)}finally{sendBusy=false}}
- function startPoll(){clearInterval(poll);poll=setInterval(async()=>{if(!match||dead)return;try{const r=await api('/api/arena/state?match_id='+match.id);match=r.match;note.textContent=match.status==='waiting'?'منتظر حریف آنلاین…':match.status==='playing'?'مبارزه در جریانه؛ حریف را هدف بگیر!':'مسابقه تمام شد.';hudPaint();paint();if(match.status==='done'){clearInterval(poll);setTimeout(()=>{const again=h('button',{class:'arena-queue',onclick:()=>{match=null;hud.remove();stage.append(queue);queue.style.display='block';canvas.style.display='none';maprow.style.display='none';bottom.style.display='none'}},'مبارزه‌ی دوباره');stage.append(again)},1400)}}catch(e){}},350);}
- function loop(){if(dead)return;if(match){paint();if(move.x||move.y){const now=Date.now();if(now-lastSend>120){lastSend=now;sendAction('move')}}}raf=requestAnimationFrame(loop)}
+ function startPoll(){
+  clearInterval(poll);
+  poll=setInterval(async()=>{
+   if(!match||dead)return;
+   try{
+    const r=await api('/api/arena/state?match_id='+match.id);match=r.match;
+    note.textContent=match.status==='waiting'?'منتظر حریف آنلاین…':match.status==='playing'?'مبارزه در جریانه؛ حریف را هدف بگیر!':'مسابقه تمام شد.';
+    hudPaint();
+    if(match.status==='done'){
+     clearInterval(poll);
+     setTimeout(()=>{
+      const again=h('button',{class:'arena-queue',onclick:()=>{match=null;hud.remove();stage.append(queue);queue.style.display='block';canvas.style.display='none';maprow.style.display='none';bottom.style.display='none';startBtn.disabled=false;startBtn.textContent='⚔️ مبارزه‌ی دوباره';loadProfile()}},'مبارزه‌ی دوباره');
+      stage.append(again);
+     },1400);
+    }
+   }catch(e){}
+  },350);
+ }
+ function loop(){if(dead)return;if(match){paint();if(move.x||move.y){const now=Date.now();if(now-lastSend>140){lastSend=now;sendAction('move')}}}raf=requestAnimationFrame(loop)}
  async function leave(){dead=true;clearInterval(poll);cancelAnimationFrame(raf);try{if(match)await api('/api/arena/leave',{match_id:match.id})}catch(e){};openTab('home')}
- root._destroy=()=>{dead=true;clearInterval(poll);cancelAnimationFrame(raf);if(match&&match.status!=='done')api('/api/arena/leave',{match_id:match.id}).catch(()=>{});document.querySelector('#app')?.classList.remove('arenaon');delete tabEls.farm};
- root._show=()=>{document.querySelector('#app')?.classList.add('arenaon');resize();loop()};
- window.addEventListener('resize',resize);return root;
+ root._destroy=()=>{dead=true;clearInterval(poll);cancelAnimationFrame(raf);if(match&&match.status!=='done')api('/api/arena/leave',{match_id:match.id}).catch(()=>{});document.querySelector('#app')?.classList.remove('arenaon');delete tabEls.farm};root._show=()=>{document.querySelector('#app')?.classList.add('arenaon');resize();loop()};window.addEventListener('resize',resize);loadProfile();return root;
 }
 
 /* ───── شروع ───── */
@@ -8980,12 +9008,31 @@ except Exception:
 # ───────────── Arena 1v1 (server-authoritative combat) ─────────────
 def _arena_out(r, uid):
     d=dict(r); uid=int(uid)
-    players=[{"uid":int(d["p1"]),"name":d["p1_name"],"x":float(d["p1_x"]),"y":float(d["p1_y"]),"hp":int(d["p1_hp"]),"face":int(d["p1_face"]),"hit_until":0},
-             ({"uid":int(d["p2"]),"name":d["p2_name"],"x":float(d["p2_x"]),"y":float(d["p2_y"]),"hp":int(d["p2_hp"]),"face":int(d["p2_face"]),"hit_until":0} if d.get("p2") else None)]
+    players=[{"uid":int(d["p1"]),"name":d["p1_name"],"gender":d.get("p1_gender") or "male","x":float(d["p1_x"]),"y":float(d["p1_y"]),"hp":int(d["p1_hp"]),"face":int(d["p1_face"]),"attack_at":float(d["p1_attack"] or 0),"guard_until":float(d.get("p1_guard_until") or 0),"hit_until":0},
+             ({"uid":int(d["p2"]),"name":d["p2_name"],"gender":d.get("p2_gender") or "female","x":float(d["p2_x"]),"y":float(d["p2_y"]),"hp":int(d["p2_hp"]),"face":int(d["p2_face"]),"attack_at":float(d["p2_attack"] or 0),"guard_until":float(d.get("p2_guard_until") or 0),"hit_until":0} if d.get("p2") else None)]
     return {"id":int(d["id"]),"status":d["status"],"map":int(d["map"]),"players":players,"winner":int(d["winner"]) if d.get("winner") else None,"side":0 if uid==int(d["p1"]) else 1}
 
+async def _arena_profile_get(qs,user):
+    uid=int(user["id"])
+    row=await pool.fetchrow("SELECT gender,display_name FROM arena_profiles WHERE uid=$1",uid)
+    stats=await pool.fetchrow("SELECT wins,losses,matches FROM arena_stats WHERE uid=$1",uid)
+    return _j({"ok":True,"profile":{"gender":(row["gender"] if row else None),"name":((row["display_name"] or "") if row else "")},"stats":{"wins":int(stats["wins"]) if stats else 0,"losses":int(stats["losses"]) if stats else 0,"matches":int(stats["matches"]) if stats else 0}})
+
+async def _arena_profile_save(data,user):
+    uid=int(user["id"]); gender=str(data.get("gender") or "").lower()
+    if gender not in ("male","female"): raise _ApiError("لطفاً یکی از دو جنسیت کاراکتر را انتخاب کن")
+    name=" ".join(str(data.get("name") or user.get("first_name") or "بازیکن").split())[:24]
+    if not name: name="بازیکن"
+    await pool.execute("INSERT INTO arena_profiles(uid,gender,display_name,updated_at) VALUES($1,$2,$3,$4) ON CONFLICT(uid) DO UPDATE SET gender=EXCLUDED.gender,display_name=EXCLUDED.display_name,updated_at=EXCLUDED.updated_at",uid,gender,name,time.time())
+    stats=await pool.fetchrow("SELECT wins,losses,matches FROM arena_stats WHERE uid=$1",uid)
+    return _j({"ok":True,"profile":{"gender":gender,"name":name},"stats":{"wins":int(stats["wins"]) if stats else 0,"losses":int(stats["losses"]) if stats else 0,"matches":int(stats["matches"]) if stats else 0}})
+
 async def _arena_join(data,user):
-    uid=int(user["id"]); name=(str(user.get("first_name") or "بازیکن")[:32])
+    uid=int(user["id"])
+    profile=await pool.fetchrow("SELECT gender,display_name FROM arena_profiles WHERE uid=$1",uid)
+    if not profile: raise _ApiError("اول پروفایل آرنا و جنسیت کاراکترت رو انتخاب کن")
+    gender=profile["gender"] if profile["gender"] in ("male","female") else "male"
+    name=(profile["display_name"] or str(user.get("first_name") or "بازیکن"))[:32]
     async with pool.acquire() as c:
       async with c.transaction():
         await c.execute("SELECT pg_advisory_xact_lock(714202611)")
@@ -8993,11 +9040,11 @@ async def _arena_join(data,user):
         if old: return _j({"ok":True,"match":_arena_out(old,uid),"side":0 if uid==old['p1'] else 1})
         waiting=await c.fetchrow("SELECT * FROM arena_matches WHERE status='waiting' AND p1<>$1 AND created_at>$2 ORDER BY id LIMIT 1 FOR UPDATE",uid,time.time()-90)
         if waiting:
-          await c.execute("UPDATE arena_matches SET p2=$2,p2_name=$3,status='playing',updated_at=$4 WHERE id=$1",waiting['id'],uid,name,time.time())
+          await c.execute("UPDATE arena_matches SET p2=$2,p2_name=$3,p2_gender=$4,status='playing',updated_at=$5 WHERE id=$1",waiting['id'],uid,name,gender,time.time())
           row=await c.fetchrow("SELECT * FROM arena_matches WHERE id=$1",waiting['id'])
         else:
           m=max(0,min(3,int(data.get('map',0))))
-          row=await c.fetchrow("INSERT INTO arena_matches(map,p1,p1_name,created_at,updated_at) VALUES($1,$2,$3,$4,$4) RETURNING *",m,uid,name,time.time())
+          row=await c.fetchrow("INSERT INTO arena_matches(map,p1,p1_name,p1_gender,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$5) RETURNING *",m,uid,name,gender,time.time())
     return _j({"ok":True,"match":_arena_out(row,uid),"side":0 if uid==row['p1'] else 1})
 
 async def _arena_state(qs,user):
@@ -9054,8 +9101,8 @@ async def _arena_leave(data,user):
           await c.execute("UPDATE arena_matches SET status='done',winner=$2,updated_at=$3 WHERE id=$1",mid,winner,time.time())
     return _j({"ok":True})
 
-_ARENA_GET={'/api/arena/state':_arena_state}
-_ARENA_POST={'/api/arena/join':_arena_join,'/api/arena/action':_arena_action,'/api/arena/leave':_arena_leave}
+_ARENA_GET={'/api/arena/state':_arena_state,'/api/arena/profile':_arena_profile_get}
+_ARENA_POST={'/api/arena/profile':_arena_profile_save,'/api/arena/join':_arena_join,'/api/arena/action':_arena_action,'/api/arena/leave':_arena_leave}
 
 _JOIN_OK: dict = {}   # آیدی کاربر → تا کی عضویتش تایید شده (کش ۲ دقیقه‌ای؛ نتیجه‌ی منفی کش نمیشه)
 
@@ -9077,9 +9124,9 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     if path.startswith("/arena-assets/"):
         import base64 as _b64
         _name = path.rsplit("/", 1)[-1]
-        if _name not in _ARENA_ASSET_B64:
-            return 404, "text/plain", b"not found", {}
         _f = Path(__file__).resolve().parent / "arena_assets" / _name
+        if not _f.is_file() and _name not in _ARENA_ASSET_B64:
+            return 404, "text/plain", b"not found", {}
         if _f.is_file():
             _data = _f.read_bytes()
         else:
