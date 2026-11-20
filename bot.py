@@ -882,6 +882,10 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS farm_state (uid BIGINT PRIMARY KEY, coins BIGINT NOT NULL DEFAULT 0, wheat BIGINT NOT NULL DEFAULT 0, soy BIGINT NOT NULL DEFAULT 0, milk BIGINT NOT NULL DEFAULT 0, barn_lvl INT NOT NULL DEFAULT 1, field_lvl INT NOT NULL DEFAULT 1, cow_lvl INT NOT NULL DEFAULT 1, crop TEXT, crop_at DOUBLE PRECISION NOT NULL DEFAULT 0, crop_ready DOUBLE PRECISION NOT NULL DEFAULT 0, cow_ready DOUBLE PRECISION NOT NULL DEFAULT 0, created_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("ALTER TABLE farm_state ADD COLUMN IF NOT EXISTS corn BIGINT NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS xp BIGINT NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS ext TEXT NOT NULL DEFAULT '{}'")
         await c.execute("CREATE TABLE IF NOT EXISTS farm_map (uid BIGINT PRIMARY KEY, coins BIGINT NOT NULL DEFAULT 0, t TEXT NOT NULL DEFAULT '{}', created_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("CREATE TABLE IF NOT EXISTS arena_matches (id BIGSERIAL PRIMARY KEY, status TEXT NOT NULL DEFAULT 'waiting', map INT NOT NULL DEFAULT 0, p1 BIGINT NOT NULL, p2 BIGINT, p1_name TEXT NOT NULL DEFAULT 'بازیکن', p2_name TEXT NOT NULL DEFAULT 'بازیکن', p1_x DOUBLE PRECISION NOT NULL DEFAULT 0.22, p1_y DOUBLE PRECISION NOT NULL DEFAULT 0.62, p2_x DOUBLE PRECISION NOT NULL DEFAULT 0.78, p2_y DOUBLE PRECISION NOT NULL DEFAULT 0.62, p1_hp INT NOT NULL DEFAULT 100, p2_hp INT NOT NULL DEFAULT 100, p1_attack DOUBLE PRECISION NOT NULL DEFAULT 0, p2_attack DOUBLE PRECISION NOT NULL DEFAULT 0, p1_face INT NOT NULL DEFAULT 1, p2_face INT NOT NULL DEFAULT -1, winner BIGINT, created_at DOUBLE PRECISION NOT NULL, updated_at DOUBLE PRECISION NOT NULL)")
+        await c.execute("CREATE INDEX IF NOT EXISTS arena_waiting_idx ON arena_matches(status, created_at)")
+        await c.execute("ALTER TABLE arena_matches ADD COLUMN IF NOT EXISTS p1_guard_until DOUBLE PRECISION NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS p2_guard_until DOUBLE PRECISION NOT NULL DEFAULT 0")
+        await c.execute("CREATE TABLE IF NOT EXISTS arena_stats (uid BIGINT PRIMARY KEY, wins INT NOT NULL DEFAULT 0, losses INT NOT NULL DEFAULT 0, matches INT NOT NULL DEFAULT 0)")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_subscription_receipts (receipt_id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS mini_subscriptions (user_id BIGINT PRIMARY KEY, expires_at DOUBLE PRECISION NOT NULL, activated_by BIGINT, updated_at DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE TABLE IF NOT EXISTS special_chars (user_id BIGINT NOT NULL, key TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, bought_at DOUBLE PRECISION NOT NULL, PRIMARY KEY(user_id, key))")
@@ -1545,13 +1549,33 @@ textarea.inp{min-height:130px;resize:vertical}
 .fw-signs .fw-sg{height:72px;border-radius:16px;background:linear-gradient(#b87a35,#80501f);border:4px solid #5a3414;box-shadow:inset 0 2px 0 #e6b06a88,0 4px 0 #2e1906,0 8px 14px #0007;font-size:12px}
 .fw-signs .fw-sg i{font-size:26px}
 .fw-tip{left:10px;right:10px;bottom:calc(92px + env(safe-area-inset-bottom));background:linear-gradient(#fbf0cf,#f0dca5);border:3px solid #8a5a24;border-radius:16px;box-shadow:0 5px 14px #0007}
+
+/* ───── Arena 1v1 ───── */
+#app.arenaon #tabs{display:none}.arena-screen{position:relative;display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;background:#10182a;color:#fff}
+.arena-top{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:linear-gradient(110deg,#17243e,#27375a);z-index:3;gap:8px}
+.arena-top b{font-size:17px}.arena-pill{border:1px solid #ffffff30;border-radius:20px;padding:5px 10px;font-size:12px;background:#ffffff12}
+.arena-stage{position:relative;flex:1;min-height:280px;overflow:hidden;background:#1a2a40;touch-action:none}
+.arena-stage canvas{width:100%;height:100%;display:block;touch-action:none}
+.arena-hud{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;gap:12px;pointer-events:none}
+.arena-player{width:44%;max-width:220px;background:#111827c9;border:1px solid #ffffff35;border-radius:12px;padding:7px 9px;backdrop-filter:blur(5px)}
+.arena-player.right{margin-right:auto;text-align:left}.arena-name{font-size:12px;font-weight:900;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.arena-hp{height:9px;border-radius:8px;background:#ffffff30;overflow:hidden}.arena-hp i{display:block;height:100%;background:linear-gradient(90deg,#16a34a,#a3e635);transition:width .18s}.arena-player.right .arena-hp i{margin-left:auto;background:linear-gradient(90deg,#ef4444,#fb923c)}
+.arena-bottom{padding:10px 12px calc(12px + env(safe-area-inset-bottom));background:#111a2b;border-top:1px solid #ffffff18}
+.arena-controls{display:flex;align-items:center;justify-content:space-between;gap:10px}.arena-pad{display:grid;grid-template-columns:repeat(3,42px);grid-template-rows:repeat(2,38px);gap:4px;direction:ltr}
+.arena-pad button,.arena-action{border:1px solid #ffffff2b;border-radius:11px;background:linear-gradient(#344767,#1e2b43);color:#fff;font-weight:900;touch-action:none}
+.arena-pad button{font-size:18px}.arena-pad .up{grid-column:2}.arena-pad .left{grid-column:1;grid-row:2}.arena-pad .down{grid-column:2;grid-row:2}.arena-pad .right{grid-column:3;grid-row:2}
+.arena-action{height:76px;min-width:76px;padding:8px;background:linear-gradient(145deg,#8b2d46,#4b1832);box-shadow:0 4px 0 #2a1020;font-size:14px}
+.arena-action.def{background:linear-gradient(145deg,#27658a,#18364f);box-shadow:0 4px 0 #102638}.arena-actions{display:flex;gap:8px}
+.arena-maprow{display:flex;gap:7px;overflow:auto;padding:10px 12px;background:#172238}.arena-map{flex:1;min-width:66px;border:1px solid #ffffff2b;border-radius:9px;padding:7px 4px;color:#fff;background:#ffffff10;font-size:11px}.arena-map.on{border-color:#7dd3fc;background:#0e749044}
+.arena-note{text-align:center;color:#cbd5e1;font-size:12px;padding:8px}.arena-queue{margin:auto;text-align:center;padding:28px 18px;max-width:340px}.arena-queue button{border:0;border-radius:13px;padding:13px 20px;background:linear-gradient(120deg,#2563eb,#7c3aed);color:#fff;font-weight:900;font-size:15px;width:100%;margin-top:12px}
+.arena-close{border:1px solid #ffffff30;background:#ffffff12;color:#fff;border-radius:10px;padding:7px 10px}
 </style></head><body>
 <div id="app">
   <div id="views"></div>
   <nav id="tabs">
     <button data-k="games"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="11" rx="5.5"/><path d="M8 10.5v4M6 12.5h4"/><circle cx="15.5" cy="11.5" r=".8" fill="currentColor"/><circle cx="17.8" cy="13.6" r=".8" fill="currentColor"/></svg><span>بازی</span></button>
     <button data-k="store"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg><span>فروشگاه</span></button>
-    <button data-k="farm"><i>🌾</i><span>مزرعه</span></button>
+    <button data-k="farm"><i>⚔️</i><span>آرنا</span></button>
     <button data-k="home" class="tb-home"><img id="mascotImg" alt=""><span>خانه</span></button>
     <button data-k="board"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 6H4v1.5A3 3 0 0 0 7 10.5M17 6h3v1.5a3 3 0 0 1-3 3"/><path d="M12 14v3.5M8.5 20h7"/></svg><span>لیدربرد</span></button>
     <button data-k="myself"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg><span>پروفایل</span></button>
@@ -4719,12 +4743,34 @@ function FarmScreen(){
  return root;
 }
 function FarmTab(){
- /* نقشه‌ی تصویری مزرعه از farm.html؛ زمان برداشت و پاداش‌ها از API سمت سرور می‌آیند. */
- const root=h('div',{class:'scr fwfull fw-embed'}),frame=h('iframe',{title:'مزرعه‌ی سه‌بعدی',allow:'fullscreen',src:'/farm?tgWebAppData='+encodeURIComponent(tg&&tg.initData||''),style:'width:100%;height:100%;border:0;display:block;background:#8fd3e8'}),x=h('button',{class:'fw-x',onclick:()=>openTab('home')},'✕');
- root.append(frame,x);
- root._show=()=>{$('#app').classList.add('fwon');try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes()}catch(e){};frame.src='/farm?tgWebAppData='+encodeURIComponent(tg&&tg.initData||'')};
- root._destroy=()=>{$('#app').classList.remove('fwon');try{tg.enableVerticalSwipes&&tg.enableVerticalSwipes()}catch(e){}};
- return root;
+ const root=h('div',{class:'arena-screen'});let match=null,side=0,chosenMap=0,poll=null,raf=null,dead=false,move={x:0,y:0},lastSend=0,sendBusy=false,shield=false;
+ const top=h('div',{class:'arena-top'},h('b',{},'⚔️ آرنای قهرمانان'),h('span',{class:'arena-pill'},'نبرد ۱ به ۱'),h('button',{class:'arena-close',onclick:leave},'خروج'));
+ const stage=h('div',{class:'arena-stage'}),canvas=h('canvas',{}),ctx=canvas.getContext('2d');stage.append(canvas);
+ const hud=h('div',{class:'arena-hud'}),maprow=h('div',{class:'arena-maprow'}),bottom=h('div',{class:'arena-bottom'});
+ const maps=['آسمانی','جنگلی','یخی','آتشفشانی'];maps.forEach((n,i)=>maprow.append(h('button',{class:'arena-map'+(i===chosenMap?' on':''),onclick:()=>{chosenMap=i;maprow.querySelectorAll('button').forEach((b,j)=>b.classList.toggle('on',j===i));if(match)toast('نقشه در مسابقه بعدی انتخاب می‌شود')}} ,n)));
+ const note=h('div',{class:'arena-note'},'برای شروع، وارد صف مبارزه شو. حریف باید آنلاین باشد.');
+ const pad=h('div',{class:'arena-pad'});[['up','▲',0,-1],['left','◀',-1,0],['down','▼',0,1],['right','▶',1,0]].forEach(([cl,t,x,y])=>{const b=h('button',{class:cl},t);const on=()=>{move.x=x;move.y=y},off=()=>{if(move.x===x&&move.y===y)move={x:0,y:0}};b.addEventListener('pointerdown',e=>{e.preventDefault();on()});['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,off));pad.append(b)});
+ const attack=h('button',{class:'arena-action',onclick:()=>sendAction('attack')},'⚔️ حمله');const defend=h('button',{class:'arena-action def',onpointerdown:()=>{shield=true;sendAction('defend')},onpointerup:()=>shield=false,onpointerleave:()=>shield=false},'🛡 دفاع');
+ bottom.append(h('div',{class:'arena-controls'},pad,h('div',{class:'arena-actions'},defend,attack)));
+ root.append(top,stage,maprow,note,bottom);
+ const queue=h('div',{class:'arena-queue'},h('div',{style:'font-size:54px'},'🏟️'),h('h2',{},'آماده‌ی مبارزه‌ای؟'),h('p',{},'با یک بازیکن واقعی وارد نبرد شو. حرکت کن، دفاع کن و حریفت را شکست بده.'),h('button',{onclick:joinQueue},'⚔️ پیدا کردن حریف'));
+ stage.append(queue);canvas.style.display='none';maprow.style.display='none';bottom.style.display='none';
+ const imgBg=new Image(),heroes=[new Image(),new Image()];heroes[0].src='/arena-assets/hero0.png';heroes[1].src='/arena-assets/hero1.png';
+ function resize(){const r=stage.getBoundingClientRect(),d=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));ctx.setTransform(d,0,0,d,0,0)}
+ function paint(){if(dead||!match||!canvas.isConnected)return;const w=canvas.clientWidth,hg=canvas.clientHeight; if(canvas.width===0)resize();const map=Number(match.map||chosenMap);if(imgBg.dataset.map!==String(map)){imgBg.src='/arena-assets/map'+map+'.jpg';imgBg.dataset.map=String(map)}
+ ctx.clearRect(0,0,w,hg);if(imgBg.complete&&imgBg.naturalWidth)ctx.drawImage(imgBg,0,0,w,hg);else{ctx.fillStyle='#263d55';ctx.fillRect(0,0,w,hg)}
+ const players=match.players||[];players.forEach((p,i)=>{if(!p)return;const x=(Number(p.x)||.2)*w,y=(Number(p.y)||.6)*hg;const im=heroes[i];if(im.complete&&im.naturalWidth){ctx.save();ctx.translate(x,y);if((i===0&&p.face===-1)||(i===1&&p.face===1))ctx.scale(-1,1);ctx.drawImage(im,-43,-76,86,86);ctx.restore()}else{ctx.fillStyle=i?'#161827':'#dbeafe';ctx.beginPath();ctx.arc(x,y-30,22,0,7);ctx.fill()}if(p.hit_until>Date.now()/1000){ctx.strokeStyle='#fff';ctx.lineWidth=4;ctx.beginPath();ctx.arc(x,y-35,35,0,7);ctx.stroke()}});
+ if(match.status==='done'){ctx.fillStyle='#07111dcc';ctx.fillRect(0,0,w,hg);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 26px sans-serif';ctx.fillText(match.winner===Number(me.id)?'🏆 تو برنده شدی!':'مسابقه تمام شد',w/2,hg/2)}
+ }
+ function hudPaint(){hud.replaceChildren();(match.players||[]).forEach((p,i)=>{if(!p)return;const box=h('div',{class:'arena-player'+(i===1?' right':'')},h('div',{class:'arena-name'},(p.name||('بازیکن '+(i+1)))+(i===side?' · تو':'')),h('div',{class:'arena-hp'},h('i',{style:'width:'+Math.max(0,Math.min(100,p.hp))+'%'})),h('div',{style:'font-size:10px;margin-top:4px;color:#dbeafe'},'HP '+Math.max(0,p.hp)+'/100'));hud.append(box)});if(!hud.parentNode)stage.append(hud)}
+ async function joinQueue(){try{queue.querySelector('button').disabled=true;queue.querySelector('button').textContent='در حال پیدا کردن حریف…';const r=await api('/api/arena/join',{map:chosenMap});match=r.match;side=r.side;queue.style.display='none';canvas.style.display='block';maprow.style.display='flex';bottom.style.display='block';note.textContent=match.status==='waiting'?'منتظر ورود حریف هستیم…':'حریف پیدا شد! مبارزه شروع شد.';resize();hudPaint();startPoll()}catch(e){toast(e.message,1);queue.querySelector('button').disabled=false;queue.querySelector('button').textContent='⚔️ پیدا کردن حریف'}}
+ async function sendAction(kind){if(!match||match.status!=='playing'||sendBusy)return;sendBusy=true;try{const p=match.players[side]||{};const nx=Math.max(.06,Math.min(.94,(Number(p.x)||.2)+move.x*.035)),ny=Math.max(.2,Math.min(.88,(Number(p.y)||.6)+move.y*.025));const r=await api('/api/arena/action',{match_id:match.id,kind,x:nx,y:ny,face:move.x?move.x:undefined});match=r.match;hudPaint()}catch(e){if(!/سریع|محدود/.test(e.message))toast(e.message,1)}finally{sendBusy=false}}
+ function startPoll(){clearInterval(poll);poll=setInterval(async()=>{if(!match||dead)return;try{const r=await api('/api/arena/state?match_id='+match.id);match=r.match;note.textContent=match.status==='waiting'?'منتظر حریف آنلاین…':match.status==='playing'?'مبارزه در جریانه؛ حریف را هدف بگیر!':'مسابقه تمام شد.';hudPaint();paint();if(match.status==='done'){clearInterval(poll);setTimeout(()=>{const again=h('button',{class:'arena-queue',onclick:()=>{match=null;hud.remove();stage.append(queue);queue.style.display='block';canvas.style.display='none';maprow.style.display='none';bottom.style.display='none'}},'مبارزه‌ی دوباره');stage.append(again)},1400)}}catch(e){}},350);}
+ function loop(){if(dead)return;if(match){paint();if(move.x||move.y){const now=Date.now();if(now-lastSend>120){lastSend=now;sendAction('move')}}}raf=requestAnimationFrame(loop)}
+ async function leave(){dead=true;clearInterval(poll);cancelAnimationFrame(raf);try{if(match)await api('/api/arena/leave',{match_id:match.id})}catch(e){};openTab('home')}
+ root._destroy=()=>{dead=true;clearInterval(poll);cancelAnimationFrame(raf);if(match&&match.status!=='done')api('/api/arena/leave',{match_id:match.id}).catch(()=>{});document.querySelector('#app')?.classList.remove('arenaon');delete tabEls.farm};
+ root._show=()=>{document.querySelector('#app')?.classList.add('arenaon');resize();loop()};
+ window.addEventListener('resize',resize);return root;
 }
 
 /* ───── شروع ───── */
@@ -4746,8 +4792,8 @@ async function bootTabs(){
  try{m=await api('/api/social/me')}catch(e){}
  window.IS_STAFF=!!(m&&m.is_support);
  if(!m||!m.is_support){
-  /* کاربر عادی فقط: چت‌روم، فروشگاه، بازی‌ها و خودم */
-  ['chats','users','panel','farm'].forEach(rm);
+  /* آرنا فعلاً فقط برای پشتیبانی؛ کاربران عادی تب آن را نمی‌بینند. */
+  ['farm','chats','users','panel'].forEach(rm);
  }else{
   if(!(m.perms||[]).includes('group_msgs'))rm('chats');
   if(!(m.perms||[]).includes('panel'))rm('panel');
@@ -8928,6 +8974,87 @@ except Exception:
     FARM_MAP_HTML = b""
 
 
+
+# ───────────── Arena 1v1 (server-authoritative combat) ─────────────
+def _arena_out(r, uid):
+    d=dict(r); uid=int(uid)
+    players=[{"uid":int(d["p1"]),"name":d["p1_name"],"x":float(d["p1_x"]),"y":float(d["p1_y"]),"hp":int(d["p1_hp"]),"face":int(d["p1_face"]),"hit_until":0},
+             ({"uid":int(d["p2"]),"name":d["p2_name"],"x":float(d["p2_x"]),"y":float(d["p2_y"]),"hp":int(d["p2_hp"]),"face":int(d["p2_face"]),"hit_until":0} if d.get("p2") else None)]
+    return {"id":int(d["id"]),"status":d["status"],"map":int(d["map"]),"players":players,"winner":int(d["winner"]) if d.get("winner") else None,"side":0 if uid==int(d["p1"]) else 1}
+
+async def _arena_join(data,user):
+    uid=int(user["id"]); name=(str(user.get("first_name") or "بازیکن")[:32])
+    async with pool.acquire() as c:
+      async with c.transaction():
+        await c.execute("SELECT pg_advisory_xact_lock(714202611)")
+        old=await c.fetchrow("SELECT * FROM arena_matches WHERE status IN ('waiting','playing') AND (p1=$1 OR p2=$1) ORDER BY id DESC LIMIT 1 FOR UPDATE",uid)
+        if old: return _j({"ok":True,"match":_arena_out(old,uid),"side":0 if uid==old['p1'] else 1})
+        waiting=await c.fetchrow("SELECT * FROM arena_matches WHERE status='waiting' AND p1<>$1 AND created_at>$2 ORDER BY id LIMIT 1 FOR UPDATE",uid,time.time()-90)
+        if waiting:
+          await c.execute("UPDATE arena_matches SET p2=$2,p2_name=$3,status='playing',updated_at=$4 WHERE id=$1",waiting['id'],uid,name,time.time())
+          row=await c.fetchrow("SELECT * FROM arena_matches WHERE id=$1",waiting['id'])
+        else:
+          m=max(0,min(3,int(data.get('map',0))))
+          row=await c.fetchrow("INSERT INTO arena_matches(map,p1,p1_name,created_at,updated_at) VALUES($1,$2,$3,$4,$4) RETURNING *",m,uid,name,time.time())
+    return _j({"ok":True,"match":_arena_out(row,uid),"side":0 if uid==row['p1'] else 1})
+
+async def _arena_state(qs,user):
+    uid=int(user['id']); mid=int(qs.get('match_id') or 0)
+    row=await pool.fetchrow("SELECT * FROM arena_matches WHERE id=$1 AND (p1=$2 OR p2=$2)",mid,uid)
+    if not row: raise _ApiError("مسابقه پیدا نشد",404)
+    if row['status']=='waiting' and time.time()-float(row['created_at'])>120:
+      await pool.execute("UPDATE arena_matches SET status='done',updated_at=$2 WHERE id=$1 AND status='waiting'",mid,time.time())
+      row=await pool.fetchrow("SELECT * FROM arena_matches WHERE id=$1",mid)
+    return _j({"ok":True,"match":_arena_out(row,uid)})
+
+async def _arena_action(data,user):
+    uid=int(user['id']); mid=int(data.get('match_id') or 0); kind=str(data.get('kind') or 'move')
+    if kind not in ('move','attack','defend'): raise _ApiError('حرکت نامعتبره')
+    now=time.time()
+    async with pool.acquire() as c:
+      async with c.transaction():
+        row=await c.fetchrow("SELECT * FROM arena_matches WHERE id=$1 FOR UPDATE",mid)
+        if not row or row['status']!='playing' or uid not in (row['p1'],row['p2']): raise _ApiError('مسابقه فعال نیست')
+        a=uid==row['p1']; ix='p1' if a else 'p2'; ox='p2' if a else 'p1'
+        raw_x=max(.06,min(.94,float(data.get('x',row[ix+'_x'])))); raw_y=max(.2,min(.88,float(data.get('y',row[ix+'_y']))))
+        # حرکت سمت سرور محدود می‌شود تا کلاینت نتواند تلپورت کند.
+        old_x=float(row[ix+'_x']); old_y=float(row[ix+'_y'])
+        x=old_x+max(-.045,min(.045,raw_x-old_x)); y=old_y+max(-.035,min(.035,raw_y-old_y))
+        face=max(-1,min(1,int(data.get('face') or row[ix+'_face'])))
+        updates={ix+'_x':x,ix+'_y':y,ix+'_face':face,'updated_at':now}
+        if kind=='attack':
+          if now-float(row[ix+'_attack'])<.55: raise _ApiError('کمی صبر کن و دوباره حمله کن')
+          dist=((x-float(row[ox+'_x']))**2+(y-float(row[ox+'_y']))**2)**.5
+          facing=(float(row[ox+'_x'])-x)*face>=-.03
+          if dist<=.19 and facing:
+            damage=4 if float(row.get(ox+'_guard_until') or 0)>now else 12
+            hp=max(0,int(row[ox+'_hp'])-damage);updates[ox+'_hp']=hp
+            if hp<=0: updates['status']='done';updates['winner']=uid
+          updates[ix+'_attack']=now
+        if kind=='defend': updates[ix+'_guard_until']=now+.65
+        sets=[];vals=[mid]
+        for k,v in updates.items(): vals.append(v);sets.append(f"{k}=${len(vals)}")
+        await c.execute("UPDATE arena_matches SET "+','.join(sets)+" WHERE id=$1",*vals)
+        row=await c.fetchrow("SELECT * FROM arena_matches WHERE id=$1",mid)
+        if row['status']=='done' and row.get('winner'):
+          win=int(row['winner']);lose=int(row['p2'] if win==row['p1'] else row['p1'])
+          await c.execute("INSERT INTO arena_stats(uid,wins,losses,matches) VALUES($1,1,0,1) ON CONFLICT(uid) DO UPDATE SET wins=arena_stats.wins+1,matches=arena_stats.matches+1",win)
+          await c.execute("INSERT INTO arena_stats(uid,wins,losses,matches) VALUES($1,0,1,1) ON CONFLICT(uid) DO UPDATE SET losses=arena_stats.losses+1,matches=arena_stats.matches+1",lose)
+    return _j({"ok":True,"match":_arena_out(row,uid)})
+
+async def _arena_leave(data,user):
+    uid=int(user['id']);mid=int(data.get('match_id') or 0)
+    async with pool.acquire() as c:
+      async with c.transaction():
+        r=await c.fetchrow("SELECT * FROM arena_matches WHERE id=$1 FOR UPDATE",mid)
+        if r and r['status'] in ('waiting','playing') and uid in (r['p1'],r['p2']):
+          winner=int(r['p2'] if uid==r['p1'] else r['p1']) if r['p2'] else None
+          await c.execute("UPDATE arena_matches SET status='done',winner=$2,updated_at=$3 WHERE id=$1",mid,winner,time.time())
+    return _j({"ok":True})
+
+_ARENA_GET={'/api/arena/state':_arena_state}
+_ARENA_POST={'/api/arena/join':_arena_join,'/api/arena/action':_arena_action,'/api/arena/leave':_arena_leave}
+
 _JOIN_OK: dict = {}   # آیدی کاربر → تا کی عضویتش تایید شده (کش ۲ دقیقه‌ای؛ نتیجه‌ی منفی کش نمیشه)
 
 
@@ -8935,6 +9062,12 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     """(status, content-type, body bytes, extra headers)"""
     if path in ("/", "/index.html"):
         return 200, "text/html; charset=utf-8", WEBAPP_HTML.encode(), {}
+    if path.startswith("/arena-assets/"):
+        from pathlib import Path as _P
+        _f = Path(__file__).with_name("arena_assets") / Path(path).name
+        if _f.is_file() and _f.parent.name == "arena_assets":
+            return 200, ("image/png" if _f.suffix==".png" else "image/jpeg"), _f.read_bytes(), {"Cache-Control":"public, max-age=86400"}
+        return 404, "text/plain", b"not found", {}
     if path == "/health":
         return 200, "text/plain", b"ok", {}
     if path == "/farm" and FARM_MAP_HTML:
@@ -8961,14 +9094,20 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
             _JOIN_OK[_gid] = time.time() + 120
     social = path.startswith("/api/social/")
     game = path.startswith("/api/game/")
-    farm = path.startswith("/api/farm/")   # مزرعه: چک دسترسی پشتیبان داخل خودِ هندلرها
+    farm = path.startswith("/api/farm/")
+    arena = path.startswith("/api/arena/")
+    # آرنا فعلاً دقیقاً مانند بخش‌های پشتیبانی، فقط برای صاحب ربات/پشتیبان دارای مجوز miniapp باز است.
+    if arena:
+        _arena_uid = int(user["id"])
+        if not (_social_staff(user) and has_perm(_arena_uid, "miniapp")):
+            return _j({"error": "آرنا فعلاً فقط برای حساب‌های پشتیبانی فعال است."}, 403)
     if path.startswith("/api/game/crash/") and not crash_allowed(int(user["id"])):
         return _j({"error": "این بخش غیرفعال شده"}, 403)   # همون کلید موشکِ ربات (CRASH_PUBLIC)   # بازی‌های مینی‌اپ: برای همه‌ی کاربرای ثبت‌نام‌شده
     # پنل پشتیبانی: صاحب ربات و فقط پشتیبان‌های دارای مجوز panel.
     # API اجتماعی جداست و طبق قواعد خودش برای کاربران واردشده بررسی می‌شود.
     # عکس پروفایل کاربرها (نه گروه‌ها) برای همه‌ی کاربرهای مینی‌اپ بازه؛ بدونش آواتارِ بقیه هیچ‌وقت نمی‌اومد
     public_avatar = path == "/api/avatar" and not qs.get("chat")
-    if not social and not game and not farm and not public_avatar and not path.startswith("/api/myself") :
+    if not social and not game and not farm and not arena and not public_avatar and not path.startswith("/api/myself") :
         _uid = int(user["id"])
         if not (has_perm(_uid, "panel") and has_perm(_uid, "miniapp")):
             return _j({"error": "برای پنل پشتیبانی دسترسی نداری"}, 403)
@@ -8979,11 +9118,11 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
         return _j({"error": "دیتابیس هنوز آماده نیست"}, 503)
     try:
         if method in ("GET", "HEAD"):
-            fn = (_SOCIAL_GET if social else _FARM_GET if farm else _GAME_GET if game else _GET).get(path)
+            fn = (_SOCIAL_GET if social else _ARENA_GET if arena else _FARM_GET if farm else _GAME_GET if game else _GET).get(path)
             if fn:
                 return await fn(qs, user)
         elif method == "POST":
-            fn = (_SOCIAL_POST if social else _FARM_POST if farm else _GAME_POST if game else _POST).get(path)
+            fn = (_SOCIAL_POST if social else _ARENA_POST if arena else _FARM_POST if farm else _GAME_POST if game else _POST).get(path)
             if fn:
                 try:
                     data = json.loads(body.decode("utf-8") or "{}")
