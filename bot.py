@@ -901,6 +901,12 @@ async def init_db(app: Application):
         await c.execute("CREATE INDEX IF NOT EXISTS giveaway_entries_inv_idx ON giveaway_entries (gid, inviter_id)")
         await c.execute("CREATE TABLE IF NOT EXISTS giveaway_posts (gid BIGINT NOT NULL, chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, PRIMARY KEY(gid, chat_id, message_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS giveaway_sent (gid BIGINT NOT NULL, chat_id BIGINT NOT NULL, PRIMARY KEY(gid, chat_id))")
+        await c.execute("ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS gift_id TEXT NOT NULL DEFAULT ''")
+        await c.execute("ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS gift_stars INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS gift_label TEXT NOT NULL DEFAULT ''")
+        await c.execute("ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS gift_text TEXT NOT NULL DEFAULT ''")
+        await c.execute("CREATE TABLE IF NOT EXISTS giveaway_gift_log (gid BIGINT NOT NULL, user_id BIGINT NOT NULL, gift_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'sending', error TEXT NOT NULL DEFAULT '', sent_at DOUBLE PRECISION NOT NULL DEFAULT 0, PRIMARY KEY(gid, user_id))")
+        await c.execute("CREATE TABLE IF NOT EXISTS stars_topups (charge_id TEXT PRIMARY KEY, user_id BIGINT NOT NULL, amount INT NOT NULL, created_at DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE TABLE IF NOT EXISTS purchases (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, amount BIGINT NOT NULL, price BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, file_id TEXT, reviewer BIGINT, reviewed_at DOUBLE PRECISION)")
         await c.execute("""CREATE TABLE IF NOT EXISTS gift_prices (
             item_key TEXT PRIMARY KEY, price BIGINT NOT NULL CHECK(price >= 0), updated_by BIGINT NOT NULL DEFAULT 0,
@@ -18508,6 +18514,291 @@ async def gw_draw(bot, g) -> list[int]:
     return winners
 
 
+# ───────────────────────── گیفت استارزی خودکار برای برنده‌های قرعه‌کشی ─────────────────────────
+# پشتیبان برای هر قرعه‌کشی یه گیفت از لیست گیفت‌های تلگرام (getAvailableGifts) انتخاب می‌کنه؛ وقتی قرعه‌کشی تموم شد
+# ربات با sendGift برای هر برنده همون گیفت رو می‌فرسته. هزینه‌ش از موجودی استارز خودِ ربات کم میشه.
+GW_GIFT_TEXT_MAX = 128     # سقف متن همراه گیفت تو Bot API
+GW_GIFT_PER_PAGE = 12      # تعداد گیفت تو هر صفحه‌ی انتخاب
+_GW_GIFT_CACHE: dict = {"t": 0.0, "gifts": []}
+
+
+class TgApiError(Exception):
+    def __init__(self, desc: str, code: int = 0, retry_after: int = 0):
+        super().__init__(desc)
+        self.desc = desc
+        self.code = code
+        self.retry_after = retry_after
+
+
+async def tg_api(method: str, **params):
+    """تماس مستقیم با Bot API (مستقل از نسخه‌ی python-telegram-bot). توکن هیچ‌وقت تو خطا نمیاد."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=30) as cl:
+            r = await cl.post(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", json=params)
+        data = r.json()
+    except Exception as e:
+        raise TgApiError(f"network: {type(e).__name__}") from None
+    if not data.get("ok"):
+        raise TgApiError(str(data.get("description") or "unknown error"), int(data.get("error_code") or 0),
+                         int((data.get("parameters") or {}).get("retry_after") or 0))
+    return data.get("result")
+
+
+async def gw_gift_catalog(force: bool = False) -> list[dict]:
+    """گیفت‌هایی که ربات می‌تونه بفرسته؛ از کم‌قیمت به گرون. گیفت‌های تموم‌شده و مخصوص پرمیوم حذف میشن."""
+    if not force and _GW_GIFT_CACHE["gifts"] and time.time() - _GW_GIFT_CACHE["t"] < 120:
+        return _GW_GIFT_CACHE["gifts"]
+    res = await tg_api("getAvailableGifts")
+    out = []
+    for x in (res or {}).get("gifts", []):
+        if not x.get("id") or x.get("is_premium"):
+            continue
+        rems = [v for v in (x.get("remaining_count"), x.get("personal_remaining_count")) if v is not None]
+        rem = min(rems) if rems else None
+        if rem == 0:
+            continue
+        out.append({"id": str(x["id"]), "stars": int(x.get("star_count") or 0),
+                    "emoji": (x.get("sticker") or {}).get("emoji") or "🎁", "rem": rem})
+    out.sort(key=lambda z: (z["stars"], z["id"]))
+    _GW_GIFT_CACHE.update(t=time.time(), gifts=out)
+    return out
+
+
+async def gw_star_balance() -> int | None:
+    """موجودی استارز ربات؛ اگه تلگرام نتونست بگه None."""
+    try:
+        r = await tg_api("getMyStarBalance")
+        return int((r or {}).get("amount", 0))
+    except Exception:
+        return None
+
+
+def gw_gift_label(z: dict) -> str:
+    return f"{z['emoji']} {z['stars']:,}⭐"
+
+
+def gw_gift_err_fa(desc: str) -> tuple[str, str]:
+    """(کد، توضیح فارسی). کدِ balance/soldout یعنی مشکل از سمت ربات/گیفته و ارسال بقیه‌ی برنده‌ها هم بی‌فایده‌ست."""
+    d = (desc or "").lower()
+    if any(k in d for k in ("balance", "not enough", "insufficient")):
+        return "balance", "موجودی استارز ربات کافی نیست"
+    if any(k in d for k in ("sold out", "sold_out", "usage_limited", "usage limit")):
+        return "soldout", "این گیفت تموم شده (محدود بوده)"
+    if any(k in d for k in ("disallow", "not allowed", "privacy", "can't receive", "cannot receive")):
+        return "privacy", "کاربر دریافت گیفت رو تو حریم خصوصی بسته"
+    if any(k in d for k in ("blocked", "deactivated", "user not found", "chat not found", "forbidden")):
+        return "blocked", "کاربر ربات رو بلاک کرده یا پیدا نشد"
+    return "other", (desc or "خطای نامشخص")[:120]
+
+
+async def gw_gift_picker(target: str, page: int):
+    """(متن، کیبورد) صفحه‌ی انتخاب گیفت. target: 'd' = پیش‌نویسِ در حال ساخت، وگرنه آیدی قرعه‌کشی."""
+    gifts = await gw_gift_catalog()
+    bal = await gw_star_balance()
+    pages = max(1, math.ceil(len(gifts) / GW_GIFT_PER_PAGE))
+    page = min(max(page, 0), pages - 1)
+    chunk = gifts[page * GW_GIFT_PER_PAGE:(page + 1) * GW_GIFT_PER_PAGE]
+    rows = []
+    for i in range(0, len(chunk), 3):
+        rows.append([btn(gw_gift_label(z), "primary", callback_data=f"ad:gw:gs:{target}:{z['id']}") for z in chunk[i:i + 3]])
+    nav = []
+    if page > 0:
+        nav.append(btn("◀️", callback_data=f"ad:gw:gp:{target}:{page - 1}"))
+    nav.append(btn(f"{page + 1}/{pages}", callback_data=f"ad:gw:gp:{target}:{page}"))
+    if page < pages - 1:
+        nav.append(btn("▶️", callback_data=f"ad:gw:gp:{target}:{page + 1}"))
+    rows.append(nav)
+    rows.append([btn("💳 شارژ استارز ربات", "success", callback_data=f"ad:gw:topup:{target}")])
+    rows.append([btn("🚫 بدون گیفت خودکار (جایزه دستی)", "danger", callback_data=f"ad:gw:gx:{target}")])
+    rows.append([btn("🔙 برگشت", callback_data=f"ad:gw:gb:{target}")])
+    text = ("⭐ انتخاب گیفت خودکار\n\n"
+            "وقتی قرعه‌کشی تموم شد، ربات همین گیفت رو برای هر برنده می‌فرسته و هزینه‌ش از موجودی استارز ربات کم میشه.\n"
+            + (f"موجودی استارز ربات: {bal:,} ⭐\n" if bal is not None else "")
+            + ("\nگیفتی برای ارسال پیدا نشد." if not gifts else "\nیکی رو انتخاب کن:"))
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def gw_gift_stats(gid: int) -> dict:
+    return {r["status"]: r["n"] for r in await pool.fetch(
+        "SELECT status, count(*) AS n FROM giveaway_gift_log WHERE gid=$1 GROUP BY status", gid)}
+
+
+async def gw_gift_view_text(g) -> str:
+    """بخش گیفت خودکار تو صفحه‌ی مدیریت قرعه‌کشی (HTML)."""
+    if not g["gift_id"]:
+        return "\n⭐ گیفت خودکار: ❌ تنظیم نشده (جایزه دستی)"
+    s = f"\n⭐ گیفت خودکار: {html.escape(g['gift_label'] or (str(g['gift_stars']) + '⭐'))}"
+    if g["gift_text"]:
+        s += f"\n📝 متن گیفت: {html.escape(g['gift_text'])}"
+    if g["status"] == "ended":
+        st = await gw_gift_stats(g["id"])
+        s += f"\n📦 ارسال گیفت: ✅ {st.get('sent', 0)} • ❌ {st.get('failed', 0)}"
+    return s
+
+
+async def gw_gift_view_rows(g) -> list:
+    rows = []
+    if g["status"] == "active":
+        rows.append([btn("⭐ تنظیم گیفت خودکار", "primary", callback_data=f"ad:gw:gp:{g['id']}:0"),
+                     btn("✏️ متن گیفت", "primary", callback_data=f"ad:gw:gtx:{g['id']}")])
+    elif g["status"] == "ended" and g["gift_id"]:
+        st = await gw_gift_stats(g["id"])
+        n_win = len([x for x in (g["winner_ids"] or "").split(",") if x.strip()])
+        done = st.get("sent", 0) + st.get("sending", 0)
+        if st.get("failed", 0) or done < n_win:
+            rows.append([btn("🔁 ارسال مجدد گیفت‌های ارسال‌نشده", "success", callback_data=f"ad:gw:rg:{g['id']}")])
+    return rows
+
+
+async def gw_pay_gifts(bot, g, winners: list[int], notify: int | None = None):
+    """برای هر برنده گیفتِ تنظیم‌شده رو می‌فرسته. هر برنده فقط یک‌بار (جدول giveaway_gift_log)؛ ناموفق‌ها با «ارسال مجدد» دوباره امتحان میشن."""
+    gift_id = (g["gift_id"] or "").strip()
+    if not gift_id or not winners:
+        return
+    gid = g["id"]
+    name = html.escape(g["name"])
+    text = ((g["gift_text"] or "").strip() or f"🎁 برنده‌ی قرعه‌کشی «{g['name']}»")[:GW_GIFT_TEXT_MAX]
+    label = g["gift_label"] or f"{g['gift_stars']}⭐"
+    names = {r["user_id"]: r["name"] for r in await pool.fetch(
+        "SELECT user_id, name FROM users WHERE user_id = ANY($1::bigint[])", winners)}
+    sent: list[int] = []
+    failed: list[tuple[int, str]] = []
+    stop: tuple[str, str] | None = None     # مشکلی که همه‌ی برنده‌های بعدی رو هم خراب می‌کنه (موجودی/تموم‌شدن گیفت)
+    for uid in winners:
+        claimed = await pool.fetchval(
+            "INSERT INTO giveaway_gift_log (gid, user_id, gift_id, status) VALUES ($1,$2,$3,'sending') "
+            "ON CONFLICT (gid, user_id) DO UPDATE SET status='sending', gift_id=EXCLUDED.gift_id, error='' "
+            "WHERE giveaway_gift_log.status='failed' RETURNING 1", gid, uid, gift_id)
+        if not claimed:
+            continue   # قبلاً فرستاده شده یا تو حال ارسال بوده
+        err: tuple[str, str] | None = stop
+        if not err:
+            for _ in range(3):
+                try:
+                    await tg_api("sendGift", user_id=uid, gift_id=gift_id, text=text)
+                    break
+                except TgApiError as e:
+                    if e.retry_after:
+                        await asyncio.sleep(min(e.retry_after, 60) + 1)
+                        continue
+                    err = gw_gift_err_fa(e.desc)
+                    log.warning("giveaway gift to %s failed: %s", uid, e.desc)
+                    if err[0] in ("balance", "soldout"):
+                        stop = err
+                    break
+            else:
+                err = ("other", "تلگرام بیش‌ازحد درخواست رو محدود کرد")
+        if err:
+            await pool.execute("UPDATE giveaway_gift_log SET status='failed', error=$3 WHERE gid=$1 AND user_id=$2", gid, uid, err[1])
+            failed.append((uid, err[1]))
+            if err[0] == "privacy":
+                dm = (f"⚠️ نتونستم گیفت قرعه‌کشی «{name}» رو برات بفرستم چون دریافت گیفت تو تنظیمات حریم خصوصیت بسته‌ست. "
+                      "بخش Gifts تو تنظیمات حریم خصوصی رو باز کن و بعدش به پشتیبانی پیام بده.")
+            elif err[0] in ("balance", "soldout"):
+                dm = f"⏳ گیفت قرعه‌کشی «{name}» به‌زودی توسط پشتیبانی برات ارسال میشه."
+            else:
+                dm = f"⚠️ ارسال خودکار گیفت قرعه‌کشی «{name}» انجام نشد؛ لطفاً به پشتیبانی پیام بده."
+        else:
+            await pool.execute("UPDATE giveaway_gift_log SET status='sent', sent_at=$3 WHERE gid=$1 AND user_id=$2", gid, uid, time.time())
+            sent.append(uid)
+            dm = f"🎁 گیفت قرعه‌کشی «{name}» ({html.escape(label)}) برات ارسال شد! تو چتت با ربات یا بخش گیفت‌های پروفایلت ببینش."
+        try:
+            await bot.send_message(uid, dm, parse_mode="HTML")
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    if not sent and not failed:
+        return
+    rep = [f"⭐ <b>گزارش گیفت قرعه‌کشی «{name}»</b>", f"گیفت: {html.escape(label)}", f"✅ ارسال‌شده: {len(sent)}"]
+    if failed:
+        rep.append(f"❌ ناموفق: {len(failed)}")
+        rep += [f"• {_ulink(u, names.get(u) or 'کاربر')} ({u}) — {html.escape(e)}" for u, e in failed[:25]]
+        rep.append("\nبعد از رفع مشکل، تو صفحه‌ی همین قرعه‌کشی «ارسال مجدد گیفت‌های ارسال‌نشده» رو بزن.")
+    bal = await gw_star_balance()
+    if bal is not None:
+        rep.append(f"\nموجودی استارز ربات: {bal:,} ⭐")
+    rcpt = {x for x in (g["created_by"], notify) if x}
+    if stop and stop[0] == "balance":
+        rcpt |= set(OWNER_IDS)
+        rep.append("برای شارژ: /admin ← 🎁 قرعه‌کشی ← 💳 شارژ استارز ربات")
+    for r in rcpt:
+        try:
+            await bot.send_message(r, "\n".join(rep), parse_mode="HTML")
+        except Exception:
+            pass
+
+
+# ───── شارژ موجودی استارز ربات (پرداخت استارز به خودِ ربات) ─────
+# پشتیبان مبلغ رو انتخاب می‌کنه ← ربات فاکتور استارز (XTR) می‌فرسته ← بعد از پرداخت، استارز به موجودی ربات اضافه میشه
+# و sendGift از همین موجودی برای برنده‌ها خرج می‌کنه.
+GW_TOPUP_PRESETS = (15, 25, 50, 100, 250, 500)
+GW_TOPUP_MAX = 10000
+
+
+async def gw_send_topup_invoice(chat_id: int, amount: int):
+    await tg_api("sendInvoice", chat_id=chat_id, title="شارژ استارز ربات",
+                 description=f"افزودن {amount:,} استارز به موجودی ربات برای ارسال گیفت قرعه‌کشی",
+                 payload=f"gwtopup:{amount}", currency="XTR",
+                 prices=[{"label": "شارژ استارز ربات", "amount": amount}])
+
+
+async def gw_topup_menu(context, target: str):
+    """(متن، کیبورد) منوی شارژ. target: m = منوی قرعه‌کشی، d = پیش‌نویس، عدد = آیدی قرعه‌کشی."""
+    bal = await gw_star_balance()
+    need = per = n = 0
+    if target == "d":
+        st = context.user_data.get("adm")
+        d = (st or {}).get("d") or {}
+        per, n = int(d.get("gift_stars") or 0), int(d.get("winners") or 0)
+    elif target.isdigit():
+        g = await pool.fetchrow("SELECT gift_id, gift_stars, winners FROM giveaways WHERE id=$1", int(target))
+        if g and g["gift_id"]:
+            per, n = int(g["gift_stars"]), int(g["winners"])
+    need = per * n
+    short = max(0, need - bal) if (need and bal is not None) else 0
+    lines = ["💳 شارژ استارز ربات", "", f"موجودی فعلی: {bal:,} ⭐" if bal is not None else "موجودی فعلی: نامشخص"]
+    if need:
+        lines.append(f"نیازِ این قرعه‌کشی: {need:,} ⭐ ({n} برنده × {per:,}⭐)" + (f" • کسری: {short:,} ⭐" if short else " ✅"))
+    lines += ["", "مبلغ رو انتخاب کن؛ فاکتور پرداخت با استارز برات میاد و بعد از پرداخت به موجودی ربات اضافه میشه."]
+    rows = []
+    if short:
+        rows.append([btn(f"شارژ کسری: {min(short, GW_TOPUP_MAX):,} ⭐", "success", callback_data=f"ad:gw:tp:{target}:{min(short, GW_TOPUP_MAX)}")])
+    for i in range(0, len(GW_TOPUP_PRESETS), 3):
+        rows.append([btn(f"{x:,} ⭐", "primary", callback_data=f"ad:gw:tp:{target}:{x}") for x in GW_TOPUP_PRESETS[i:i + 3]])
+    rows.append([btn("✍️ مبلغ دلخواه", "primary", callback_data=f"ad:gw:tpc:{target}")])
+    rows.append([btn("🔙 برگشت", callback_data="ad:gw" if target == "m" else f"ad:gw:gp:{target}:0")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+async def gw_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تایید پرداخت استارزِ شارژ (باید تو ۱۰ ثانیه جواب داده بشه)."""
+    q = update.pre_checkout_query
+    ok = q.currency == "XTR" and (q.invoice_payload or "").startswith("gwtopup:") and has_perm(q.from_user.id, "giveaway")
+    try:
+        await q.answer(ok=ok, error_message=None if ok else "این پرداخت معتبر نیست.")
+    except Exception:
+        log.warning("pre_checkout answer failed", exc_info=True)
+
+
+async def gw_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    p = msg.successful_payment
+    if not p or not (p.invoice_payload or "").startswith("gwtopup:"):
+        return
+    amount = int(p.total_amount)
+    fresh = await pool.fetchval(
+        "INSERT INTO stars_topups (charge_id, user_id, amount, created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (charge_id) DO NOTHING RETURNING 1",
+        p.telegram_payment_charge_id, msg.from_user.id, amount, time.time())
+    if not fresh:
+        return
+    log.info("bot stars top-up: %s by %s", amount, msg.from_user.id)
+    bal = await gw_star_balance()
+    await msg.reply_text(f"✅ {amount:,} ⭐ به موجودی ربات اضافه شد."
+                         + (f"\nموجودی فعلی: {bal:,} ⭐" if bal is not None else "")
+                         + "\n(اگه موجودی عوض نشده بود چند ثانیه بعد دوباره چک کن.)")
+
+
 async def gw_finish(bot, gid: int, by_staff: int | None = None):
     won = await pool.fetchval("UPDATE giveaways SET status='ended' WHERE id=$1 AND status='active' RETURNING 1", gid)
     if not won:
@@ -18525,7 +18816,7 @@ async def gw_finish(bot, gid: int, by_staff: int | None = None):
         tk = {w: (await gw_tickets(gid, w))[0] for w in winners}
         lines = "\n".join(f"{GW_WIN_CE} {i + 1}. {_ulink(w, names.get(w) or 'کاربر')} — {tk[w]} {GW_TICKET_CE}" for i, w in enumerate(winners))
         result = (f"🏁 <b>قرعه‌کشی «{html.escape(g['name'])}» تموم شد!</b>\n\n{gw_prize_ce(g['prize'])} جایزه: <b>{html.escape(g['prize'])}</b>\n\n"
-                  f"{GW_WIN_CE} برنده‌ها (بیشترین تیکت):\n{lines}\n\nمبارک باشه! برای دریافت جایزه با پشتیبانی هماهنگ کنید.")
+                  f"{GW_WIN_CE} برنده‌ها (بیشترین تیکت):\n{lines}\n\nمبارک باشه! " + ("گیفت استارزی جایزه به‌صورت خودکار برای برنده‌ها ارسال میشه 🎁" if g["gift_id"] else "برای دریافت جایزه با پشتیبانی هماهنگ کنید."))
     else:
         result = f"🏁 <b>قرعه‌کشی «{html.escape(g['name'])}» تموم شد!</b>\n\nمتأسفانه شرکت‌کننده‌ی معتبری نبود و برنده‌ای انتخاب نشد."
     # پست‌های قبلی: دکمه‌ها برداشته میشه و نتیجه پایینشون میاد
@@ -18547,9 +18838,14 @@ async def gw_finish(bot, gid: int, by_staff: int | None = None):
         await asyncio.sleep(0.06)
     for w in winners:
         try:
-            await bot.send_message(w, f"{GW_WIN_CE} تبریک! تو برنده‌ی قرعه‌کشی «{html.escape(g['name'])}» شدی!\n{gw_prize_ce(g['prize'])} جایزه: <b>{html.escape(g['prize'])}</b>\nبرای دریافت جایزه به پشتیبانی پیام بده.", parse_mode="HTML")
+            await bot.send_message(w, f"{GW_WIN_CE} تبریک! تو برنده‌ی قرعه‌کشی «{html.escape(g['name'])}» شدی!\n{gw_prize_ce(g['prize'])} جایزه: <b>{html.escape(g['prize'])}</b>\n" + ("گیفت استارزی‌ات به‌زودی خودکار برات ارسال میشه 🎁" if g["gift_id"] else "برای دریافت جایزه به پشتیبانی پیام بده."), parse_mode="HTML")
         except Exception:
             pass
+    if g["gift_id"] and winners:   # گیفت استارزی خودکار؛ قبل از پیام به بقیه، تا برنده‌ها سریع بگیرن
+        try:
+            await gw_pay_gifts(bot, g, winners)
+        except Exception:
+            log.exception("giveaway gifts failed")
     others = [r["user_id"] for r in await pool.fetch("SELECT user_id FROM giveaway_entries WHERE gid=$1 AND status='active'", gid) if r["user_id"] not in winners]
     for uid in others:
         try:
@@ -18687,6 +18983,7 @@ async def gw_publish(bot, gid: int, admin_chat: int):
 def gw_menu_kb():
     return InlineKeyboardMarkup([
         [btn("➕ قرعه‌کشی جدید", "success", callback_data="ad:gw:new"), btn("📋 قرعه‌کشی‌ها", "primary", callback_data="ad:gw:list")],
+        [btn("💳 شارژ استارز ربات", "success", callback_data="ad:gw:topup")],
         [btn("🔙 پنل", callback_data="ad:menu")],
     ])
 
@@ -18695,7 +18992,8 @@ def gw_draft_text(d: dict) -> str:
     yn = lambda v: "✅" if v else "❌"
     return ("🎁 پیش‌نمایش قرعه‌کشی\n\n"
             f"نام: {d['name']}\nمدت: {_gw_fmt_dur(d['duration'])}\nکانال‌ها: {', '.join(d['channels']) or '—'}\nجایزه: {d['prize']}\n"
-            f"ظرفیت: {d['max_users'] or 'نامحدود'} • برنده: {d['winners']} • دایره‌های کپچا: {d['circles']}\n\n"
+            f"ظرفیت: {d['max_users'] or 'نامحدود'} • برنده: {d['winners']} • دایره‌های کپچا: {d['circles']}\n"
+            f"گیفت استارزی خودکار: {d.get('gift_label') or '❌ (جایزه دستی)'}" + (f" • متن: {d['gift_text']}" if d.get('gift_text') else "") + "\n\n"
             f"ارسال به: گروه‌ها {yn(d['send_groups'])} • پیوی کاربرها {yn(d['send_users'])} • کانال‌ها {yn(d['send_channels'])}\n"
             f"لیست برترین‌ها برای همه: {yn(d['top_public'])} (خاموش = فقط پشتیبان‌ها)\nبرنده‌ها: کسایی که بیشترین تیکت رو دارن • تو گپ‌هایی که ربات ادمینه پین میشه\n\nتنظیمات رو عوض کن و «انتشار» رو بزن.")
 
@@ -18707,6 +19005,8 @@ def gw_draft_kb(d: dict):
          btn(f"{yn(d['send_users'])} ارسال به پیوی کاربرها", "primary", callback_data="ad:gw:t:send_users")],
         [btn(f"{yn(d['send_channels'])} ارسال به کانال‌ها", "primary", callback_data="ad:gw:t:send_channels"),
          btn(f"{yn(d['top_public'])} لیست برترین‌ها برای همه", "primary", callback_data="ad:gw:t:top_public")],
+        [btn("⭐ گیفت خودکار: " + (d.get("gift_label") or "بدون گیفت"), "primary", callback_data="ad:gw:gp:d:0"),
+         btn("✏️ متن گیفت", "primary", callback_data="ad:gw:gtx:d")],
         [btn("🚀 انتشار", "success", callback_data="ad:gw:pub"), btn("❌ لغو", "danger", callback_data="ad:cancel")],
     ])
 
@@ -18726,6 +19026,7 @@ async def gw_view(g, bot=None):
     text = (f"🎁 {e(g['name'])} (#{g['id']})\nوضعیت: {st}\nجایزه: {e(g['prize'])}\nبرنده: {g['winners']} • ظرفیت: {g['max_users'] or 'نامحدود'}\n"
             f"ثبت‌نامی فعال: {n:,} • لفت‌داده: {left:,}\nپایان: {_gw_fmt_time(g['ends_at'])} (تهران)\n"
             f"کانال‌ها: {e(', '.join(_gw_channels(g)) or '—')}\nلیست برترین‌ها برای همه: {'✅' if g['top_public'] else '❌'}")
+    text += await gw_gift_view_text(g)
     if link:
         text += f"\n\n🔗 لینک قرعه‌کشی:\n<code>{link}</code>"
     rows = []
@@ -18739,6 +19040,7 @@ async def gw_view(g, bot=None):
         rows.append([btn("📢 ارسال به کانال‌های اجباری", "primary", callback_data=f"ad:gw:snd:{g['id']}:c")])
         rows.append([btn("🎲 پایان و قرعه‌کشی همین الان", "success", callback_data=f"ad:gw:end:{g['id']}"),
                      btn("🗑 لغو قرعه‌کشی", "danger", callback_data=f"ad:gw:cx:{g['id']}")])
+    rows += await gw_gift_view_rows(g)
     rows.append([btn("🔙 قرعه‌کشی‌ها", callback_data="ad:gw:list")])
     return text, InlineKeyboardMarkup(rows)
 
@@ -18752,7 +19054,8 @@ async def gw_admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
         await q.edit_message_text("🎁 قرعه‌کشی\n\nاز اینجا قرعه‌کشی جدید بساز یا قبلی‌ها رو مدیریت کن.", reply_markup=gw_menu_kb())
     elif sub == "new":
         context.user_data["adm"] = {"act": "gw", "step": "name", "d": {
-            "send_groups": True, "send_users": False, "send_channels": True, "top_public": False}}
+            "send_groups": True, "send_users": False, "send_channels": True, "top_public": False,
+            "gift_id": "", "gift_stars": 0, "gift_label": "", "gift_text": ""}}
         await q.edit_message_text("🎁 قرعه‌کشی جدید — مرحله‌ی ۱ از ۷\n\nاسم قرعه‌کشی رو بفرست.\n(لغو: «لغو»)", reply_markup=CANCEL_KB)
     elif sub == "list":
         rows = await pool.fetch("SELECT * FROM giveaways WHERE status <> 'draft' ORDER BY id DESC LIMIT 20")
@@ -18812,6 +19115,121 @@ async def gw_admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
         task = asyncio.create_task(_run())
         context.application.bot_data.setdefault("tasks", set()).add(task)
         task.add_done_callback(lambda t: context.application.bot_data["tasks"].discard(t))
+    elif sub in ("gp", "gs", "gx", "gb", "gtx", "rg"):
+        target = parts[3] if len(parts) > 3 else ""
+        is_draft = target == "d"
+        st = context.user_data.get("adm")
+        gid = 0
+        if is_draft:
+            if not st or st.get("act") != "gw" or st.get("step") not in ("confirm", "gift_text", "topup"):
+                await q.edit_message_text("چیزی برای تنظیم نیست.", reply_markup=gw_menu_kb()); return
+        else:
+            if not target.isdigit():
+                return
+            gid = int(target)
+            g = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", gid)
+            if not g:
+                await q.edit_message_text("پیدا نشد.", reply_markup=gw_menu_kb()); return
+            if sub != "rg" and sub != "gb" and g["status"] != "active":
+                await q.edit_message_text("فقط برای قرعه‌کشیِ فعال می‌تونی گیفت رو عوض کنی.", reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:v:{gid}")]])); return
+
+        async def _back():
+            if is_draft:
+                st["step"] = "confirm"
+                await q.edit_message_text(gw_draft_text(st["d"]), reply_markup=gw_draft_kb(st["d"]))
+            else:
+                if st and st.get("act") == "gw" and st.get("gid") == gid:
+                    context.user_data.pop("adm", None)
+                g2 = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", gid)
+                text2, kb2 = await gw_view(g2, context.bot)
+                try:
+                    await q.edit_message_text(text2, parse_mode="HTML", reply_markup=kb2)
+                except BadRequest as e:
+                    if "not modified" not in str(e).lower():
+                        raise
+
+        if sub == "gb":
+            await _back()
+        elif sub == "gp":
+            if is_draft:
+                st["step"] = "confirm"
+            page = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0
+            try:
+                text2, kb2 = await gw_gift_picker(target, page)
+            except TgApiError as e:
+                await q.edit_message_text(f"❌ نتونستم لیست گیفت‌ها رو از تلگرام بگیرم: {e.desc}",
+                                          reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:gb:{target}")]]))
+                return
+            try:
+                await q.edit_message_text(text2, reply_markup=kb2)
+            except BadRequest as e:
+                if "not modified" not in str(e).lower():
+                    raise
+        elif sub == "gs":
+            gift_id = parts[4] if len(parts) > 4 else ""
+            try:
+                z = next((x for x in await gw_gift_catalog() if x["id"] == gift_id), None)
+            except TgApiError:
+                z = None
+            if not z:
+                await q.edit_message_text("این گیفت دیگه موجود نیست؛ یکی دیگه انتخاب کن.",
+                                          reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:gp:{target}:0")]])); return
+            if is_draft:
+                st["d"].update(gift_id=z["id"], gift_stars=z["stars"], gift_label=gw_gift_label(z))
+            else:
+                await pool.execute("UPDATE giveaways SET gift_id=$2, gift_stars=$3, gift_label=$4 WHERE id=$1 AND status='active'",
+                                   gid, z["id"], z["stars"], gw_gift_label(z))
+            await _back()
+        elif sub == "gx":
+            if is_draft:
+                st["d"].update(gift_id="", gift_stars=0, gift_label="")
+            else:
+                await pool.execute("UPDATE giveaways SET gift_id='', gift_stars=0, gift_label='' WHERE id=$1 AND status='active'", gid)
+            await _back()
+        elif sub == "gtx":
+            if is_draft:
+                st["step"] = "gift_text"
+            else:
+                context.user_data["adm"] = {"act": "gw", "step": "gift_text", "d": {}, "gid": gid}
+            await q.edit_message_text(f"✏️ متن پیامِ همراه گیفت رو بفرست (حداکثر {GW_GIFT_TEXT_MAX} حرف).\nبرای برگشت به متن پیش‌فرض «حذف» بنویس.",
+                                      reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:gb:{target}")]]))
+        elif sub == "rg":
+            if is_draft:
+                return
+            if g["status"] != "ended" or not g["gift_id"]:
+                await _back(); return
+            winners = [int(x) for x in (g["winner_ids"] or "").split(",") if x.strip().isdigit()]
+            await q.edit_message_text("🔁 در حال ارسال مجدد گیفت‌ها...")
+            try:
+                await gw_pay_gifts(context.bot, g, winners, notify=q.from_user.id)
+            except Exception:
+                log.exception("giveaway gift retry failed")
+            await _back()
+    elif sub in ("topup", "tp", "tpc"):
+        target = parts[3] if len(parts) > 3 else "m"
+        if sub == "topup":
+            text2, kb2 = await gw_topup_menu(context, target)
+            try:
+                await q.edit_message_text(text2, reply_markup=kb2)
+            except BadRequest as e:
+                if "not modified" not in str(e).lower():
+                    raise
+        elif sub == "tp":
+            amount = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0
+            if not (1 <= amount <= GW_TOPUP_MAX):
+                return
+            try:
+                await gw_send_topup_invoice(q.message.chat_id, amount)
+            except TgApiError as e:
+                await context.bot.send_message(q.message.chat_id, f"❌ نتونستم فاکتور بسازم: {e.desc}")
+        elif sub == "tpc":
+            st = context.user_data.get("adm")
+            if target == "d" and st and st.get("act") == "gw" and st.get("step") in ("confirm", "gift_text", "topup"):
+                st["step"] = "topup"; st["tgt"] = "d"
+            else:
+                context.user_data["adm"] = {"act": "gw", "step": "topup", "d": {}, "tgt": target}
+            await q.edit_message_text(f"✍️ مقدار استارز رو بفرست (عدد بین ۱ تا {GW_TOPUP_MAX:,}).",
+                                      reply_markup=InlineKeyboardMarkup([[btn("🔙 برگشت", callback_data=f"ad:gw:topup:{target}")]]))
     elif sub == "t":
         st = context.user_data.get("adm")
         if not st or st.get("act") != "gw" or st.get("step") != "confirm":
@@ -18828,14 +19246,20 @@ async def gw_admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
         context.user_data.pop("adm", None)
         now = time.time()
         gid = await pool.fetchval(
-            "INSERT INTO giveaways (name, prize, channels, ends_at, duration, max_users, winners, circles, top_public, send_groups, send_users, send_channels, status, created_by, created_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13,$14) RETURNING id",
+            "INSERT INTO giveaways (name, prize, channels, ends_at, duration, max_users, winners, circles, top_public, send_groups, send_users, send_channels, status, created_by, created_at, gift_id, gift_stars, gift_label, gift_text) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13,$14,$15,$16,$17,$18) RETURNING id",
             d["name"], d["prize"], ",".join(d["channels"]), now + d["duration"], float(d["duration"]), d["max_users"], d["winners"], d["circles"],
-            d["top_public"], d["send_groups"], d["send_users"], d["send_channels"], q.from_user.id, now)
+            d["top_public"], d["send_groups"], d["send_users"], d["send_channels"], q.from_user.id, now,
+            d.get("gift_id") or "", int(d.get("gift_stars") or 0), d.get("gift_label") or "", d.get("gift_text") or "")
         await q.edit_message_text(f"{HG_CE} قرعه‌کشی #{gid} ساخته شد و ارسال شروع شد؛ وقتی تموم شد خبرت می‌کنم.", parse_mode="HTML")
         task = asyncio.create_task(gw_publish(context.bot, gid, q.message.chat_id))
         context.application.bot_data.setdefault("tasks", set()).add(task)
         task.add_done_callback(lambda t: context.application.bot_data["tasks"].discard(t))
+        if d.get("gift_id"):   # هشدار اگه موجودی استارز ربات برای همه‌ی برنده‌ها کافی نباشه
+            bal = await gw_star_balance()
+            need = int(d["gift_stars"]) * int(d["winners"])
+            if bal is not None and bal < need:
+                await context.bot.send_message(q.message.chat_id, f"⚠️ موجودی استارز ربات {bal:,} ⭐ ـه ولی برای {d['winners']} برنده حدود {need:,} ⭐ لازمه. قبل از پایان قرعه‌کشی از منوی قرعه‌کشی ← 💳 شارژ استارز ربات، شارژش کن.")
 
 
 async def gw_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE, st: dict) -> bool:
@@ -18843,6 +19267,38 @@ async def gw_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE, st:
     text = (msg.text or "").strip()
     d = st["d"]
     step = st["step"]
+    if step == "topup":
+        n = text.translate(_DIG).replace(",", "")
+        if not n.isdigit() or not (1 <= int(n) <= GW_TOPUP_MAX):
+            await msg.reply_text(f"یه عدد بین ۱ تا {GW_TOPUP_MAX:,} بفرست.", reply_markup=CANCEL_KB); return True
+        try:
+            await gw_send_topup_invoice(msg.chat_id, int(n))
+        except TgApiError as e:
+            await msg.reply_text(f"❌ نتونستم فاکتور بسازم: {e.desc}", reply_markup=CANCEL_KB); return True
+        if st.get("tgt") == "d":
+            st["step"] = "confirm"
+            await msg.reply_text(gw_draft_text(d), reply_markup=gw_draft_kb(d))
+        else:
+            context.user_data.pop("adm", None)
+            await msg.reply_text("💳 فاکتور بالا رو پرداخت کن تا موجودی ربات شارژ بشه.", reply_markup=gw_menu_kb())
+        return True
+    if step == "gift_text":
+        if not text:
+            await msg.reply_text("متن بفرست.", reply_markup=CANCEL_KB); return True
+        t = "" if text in ("حذف", "هیچ", "هیچی") else text
+        if len(t) > GW_GIFT_TEXT_MAX:
+            await msg.reply_text(f"متن خیلی بلنده ({len(t)} حرف). حداکثر {GW_GIFT_TEXT_MAX} حرف.", reply_markup=CANCEL_KB); return True
+        if st.get("gid"):
+            await pool.execute("UPDATE giveaways SET gift_text=$2 WHERE id=$1", st["gid"], t)
+            context.user_data.pop("adm", None)
+            g2 = await pool.fetchrow("SELECT * FROM giveaways WHERE id=$1", st["gid"])
+            text2, kb2 = await gw_view(g2, context.bot)
+            await msg.reply_text(text2, parse_mode="HTML", reply_markup=kb2)
+        else:
+            d["gift_text"] = t
+            st["step"] = "confirm"
+            await msg.reply_text(gw_draft_text(d), reply_markup=gw_draft_kb(d))
+        return True
     if step == "confirm":
         await msg.reply_text("از دکمه‌های بالا استفاده کن.", reply_markup=gw_draft_kb(d))
         return True
@@ -26407,6 +26863,9 @@ def main():
     app.add_handler(CommandHandler("addsupport", add_support_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(support_cb, pattern=r"^sup:"))
     app.add_handler(CallbackQueryHandler(admin_cb, pattern=r"^ad:"))
+    from telegram.ext import PreCheckoutQueryHandler
+    app.add_handler(PreCheckoutQueryHandler(gw_precheckout))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, gw_paid))
     app.add_handler(CallbackQueryHandler(task_cb, pattern=r"^tk:"))
     app.add_handler(CallbackQueryHandler(car_cb, pattern=r"^car:"))
     app.add_handler(CallbackQueryHandler(edu_cb, pattern=r"^ed:"))
