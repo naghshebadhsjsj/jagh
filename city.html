@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101a2c"><title>شهر جینگو</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{color-scheme:dark;--glass:rgba(13,22,38,.78);--line:rgba(255,255,255,.15);--gold:#e9bd70}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101a2c;color:#f5f7fb;font-family:Tahoma,Arial,sans-serif}
+#scene{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.top{position:absolute;top:env(safe-area-inset-top,8px);left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
+.panel{background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(16px);border-radius:16px;padding:10px 13px;box-shadow:0 10px 30px #0005}
+.brand{font-weight:900;font-size:16px;letter-spacing:.3px}.sub{font-size:11px;color:#b9c5d8;margin-top:4px}
+.stats{display:flex;gap:8px;font-size:11px;align-items:center}.stat b{display:block;color:var(--gold);font-size:13px;margin-top:3px}
+#hint{position:absolute;top:82px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;padding:9px 14px;max-width:90vw}
+#buildings{position:absolute;right:12px;top:140px;display:flex;flex-direction:column;gap:7px}
+.build{border:1px solid var(--line);background:var(--glass);color:#fff;border-radius:12px;padding:9px 12px;font:12px Tahoma;min-width:90px;text-align:center}
+.build.near{border-color:var(--gold);box-shadow:0 0 18px #e9bd7030}
+#joystick{position:absolute;bottom:calc(155px + env(safe-area-inset-bottom));left:24px;width:118px;height:118px;border-radius:50%;border:1px solid #ffffff55;background:#ffffff12;touch-action:none}
+#knob{position:absolute;width:48px;height:48px;border-radius:50%;left:34px;top:34px;background:linear-gradient(145deg,#e6c17b,#a87939);box-shadow:0 5px 20px #0008;border:1px solid #fff8}
+#chat{position:absolute;bottom:calc(10px + env(safe-area-inset-bottom));left:12px;right:12px;max-width:540px;background:var(--glass);border:1px solid var(--line);border-radius:16px;padding:9px;backdrop-filter:blur(16px)}
+#feed{height:74px;overflow:auto;font-size:11px;line-height:1.6;color:#d8e0ed;margin-bottom:7px}
+.chatrow{display:flex;gap:7px}input{min-width:0;flex:1;background:#ffffff12;border:1px solid var(--line);border-radius:11px;color:#fff;padding:11px;font:12px Tahoma;outline:none}
+button{cursor:pointer}#send{border:0;border-radius:11px;background:linear-gradient(135deg,#e7c17b,#b48242);color:#1b1b1b;font-weight:bold;padding:0 15px}
+#action{position:absolute;bottom:calc(178px + env(safe-area-inset-bottom));right:12px;display:none;background:linear-gradient(135deg,#e7c17b,#b48242);border:0;border-radius:12px;color:#1c1b19;padding:12px 16px;font-weight:bold}
+#loading{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 35%,#2a4560,#0c1423 75%);z-index:5}
+.loadbox{text-align:center;padding:24px}.spinner{width:34px;height:34px;border:3px solid #ffffff30;border-top-color:var(--gold);border-radius:50%;margin:0 auto 15px;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+#toast{position:absolute;top:125px;left:50%;transform:translateX(-50%);background:#101a2c;border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:12px;display:none;max-width:90%;z-index:8}
+@media(min-width:700px){#chat{left:22px;right:auto;width:370px}#joystick{bottom:35px;left:25px}#action{bottom:38px;right:25px}#buildings{top:150px}}
+</style></head>
+<body>
+<canvas id="scene"></canvas>
+<div class="top"><div class="panel"><div class="brand">JINGO CITY</div><div class="sub" id="playerName">در حال ورود به شهر...</div></div><div class="panel stats"><div class="stat">کیف پول<b id="cash">—</b></div><div class="stat">بانک<b id="bank">—</b></div></div></div>
+<div id="hint" class="panel">برای حرکت، جوی‌استیک را بکش یا از کلیدهای جهت استفاده کن</div>
+<div id="buildings"></div><button id="action">ورود</button><button id="drive" style="position:absolute;bottom:calc(178px + env(safe-area-inset-bottom));right:12px;display:none;background:#233a50;border:1px solid #ffffff55;border-radius:12px;color:#fff;padding:11px 14px">سوار ماشین شو</button>
+<div id="joystick"><div id="knob"></div></div>
+<div id="chat"><div id="feed"></div><div class="chatrow"><input id="msg" maxlength="180" placeholder="با بازیکنان شهر صحبت کن..."><button id="send">ارسال</button></div></div>
+<div id="toast"></div>
+<div id="loading"><div class="loadbox"><div class="spinner"></div><b>در حال ساخت شهر جینگو</b><div class="sub">اتصال به شهر و بارگذاری شخصیت</div></div></div>
+<script>
+(()=>{
+const tg=window.Telegram?.WebApp;try{tg?.ready();tg?.expand()}catch(e){}
+const $=id=>document.getElementById(id),canvas=$('scene'),ctx=canvas.getContext('2d');
+const api=async(path,body)=>{const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Init-Data':tg?.initData||''},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.error||'ارتباط با سرور برقرار نشد');return d};
+let me=null,others=[],buildings={},chat=[],pos={x:600,z:820},target=null,near=null,keys={},joy={x:0,y:0},lastSend=0,lastFrame=0,heading=0,driving=false,carImage=null,heroImage=null;
+const names={cafe:'کافه',bank:'بانک',amusement:'شهربازی',store:'فروشگاه',home:'خانه',garage:'پارکینگ'};
+const colors={cafe:'#c77e54',bank:'#c8a85e',amusement:'#bd6487',store:'#5796a8',home:'#7288b4',garage:'#667b82'};
+function toast(t){$('toast').textContent=t;$('toast').style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>$('toast').style.display='none',2600)}
+function resize(){const d=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*d;canvas.height=innerHeight*d;canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';ctx.setTransform(d,0,0,d,0,0)}
+addEventListener('resize',resize);resize();
+function project(x,y,z){
+ const dx=x-pos.x,dz=z-pos.z, c=Math.cos(heading),s=Math.sin(heading);
+ const rx=dx*c-dz*s, rz=dx*s+dz*c+260;
+ const f=560/Math.max(70,rz);
+ return {x:innerWidth/2+rx*f,y:innerHeight*.61+(150-y)*f,scale:f,depth:rz};
+}
+function poly(points,fill,stroke){ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1;ctx.stroke()}}
+function box3(x,z,w,d,h,color,label){
+ const corners=[[x-w/2,0,z-d/2],[x+w/2,0,z-d/2],[x+w/2,0,z+d/2],[x-w/2,0,z+d/2]];
+ const top=corners.map(([a,b,c])=>project(a,h,c)),base=corners.map(([a,b,c])=>project(a,0,c));
+ poly([base[0],base[1],top[1],top[0]],shade(color,-22));poly([base[1],base[2],top[2],top[1]],shade(color,-38));poly(top,color,'#ffffff35');
+ const front=project(x, h+24,z);ctx.fillStyle='#fff';ctx.font=`bold ${Math.max(9,Math.min(14,13*front.scale))}px Tahoma`;ctx.textAlign='center';ctx.fillText(label,front.x,front.y-5);
+ // windows
+ for(let i=-1;i<=1;i++){const q=project(x+i*w*.22,h*.48,z+d/2+1);ctx.fillStyle='#f4d99a';ctx.globalAlpha=.72;ctx.fillRect(q.x-3*front.scale,q.y-4*front.scale,6*front.scale,8*front.scale);ctx.globalAlpha=1}
+}
+function shade(hex,amt){let n=parseInt(hex.slice(1),16),r=Math.max(0,Math.min(255,(n>>16)+amt)),g=Math.max(0,Math.min(255,((n>>8)&255)+amt)),b=Math.max(0,Math.min(255,(n&255)+amt));return '#'+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0')}
+function drawGround(){
+ const horizon=innerHeight*.36;const grad=ctx.createLinearGradient(0,horizon,0,innerHeight);grad.addColorStop(0,'#91b9c0');grad.addColorStop(.25,'#638b80');grad.addColorStop(1,'#315b4d');ctx.fillStyle=grad;ctx.fillRect(0,0,innerWidth,innerHeight);
+ // distant skyline
+ for(let i=0;i<15;i++){let x=i*innerWidth/14;let h=25+(i*37%80);ctx.fillStyle=['#52777b','#587b78','#496b70'][i%3];ctx.fillRect(x,horizon-h,innerWidth/18,h)}
+ // street and sidewalk lanes projected in world
+ for(let z=100;z<1500;z+=100){let a=project(0,0,z),b=project(1200,0,z);ctx.strokeStyle=z%200?'#ffffff16':'#f4d99a55';ctx.lineWidth=z%200?1:2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
+ for(let x=0;x<=1200;x+=100){let a=project(x,0,0),b=project(x,0,1500);ctx.strokeStyle='#ffffff10';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
+}
+function drawBuilding(key,b){
+ const p=project(b.x,0,b.z);if(p.depth<40||p.depth>1800)return;
+ const c=colors[key]||'#777';const w=key==='amusement'?170:125,d=key==='amusement'?120:105,h=key==='bank'?145:105;
+ box3(b.x,b.z,w,d,h,c,names[key]);
+ const door=project(b.x,0,b.z+d/2+3);ctx.fillStyle='#342c2a';ctx.fillRect(door.x-7*p.scale,door.y-20*p.scale,14*p.scale,20*p.scale);
+}
+function person(x,z,name,isMe,gender){
+ const foot=project(x,0,z);if(foot.depth<35||foot.depth>1000)return;
+ const sc=Math.max(.38,Math.min(1.45,foot.scale*1.8));
+ ctx.fillStyle='#0005';ctx.beginPath();ctx.ellipse(foot.x,foot.y,11*sc,4*sc,0,0,Math.PI*2);ctx.fill();
+ // legs
+ ctx.strokeStyle='#26364c';ctx.lineWidth=5*sc;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(foot.x-3*sc,foot.y-5*sc);ctx.lineTo(foot.x-5*sc,foot.y-18*sc);ctx.moveTo(foot.x+3*sc,foot.y-5*sc);ctx.lineTo(foot.x+5*sc,foot.y-18*sc);ctx.stroke();
+ // torso
+ ctx.fillStyle=isMe?'#d9a85f':(gender==='f'?'#a77dc5':'#4d8fa9');ctx.beginPath();ctx.roundRect(foot.x-8*sc,foot.y-39*sc,16*sc,22*sc,5*sc);ctx.fill();
+ if(isMe&&heroImage&&heroImage.complete){ctx.save();ctx.beginPath();ctx.arc(foot.x,foot.y-46*sc,8*sc,0,Math.PI*2);ctx.clip();ctx.drawImage(heroImage,foot.x-8*sc,foot.y-54*sc,16*sc,16*sc);ctx.restore()}else{ctx.fillStyle='#d9a47d';ctx.beginPath();ctx.arc(foot.x,foot.y-46*sc,7*sc,0,Math.PI*2);ctx.fill()}
+ ctx.fillStyle='#fff';ctx.font=`${Math.max(9,10*sc)}px Tahoma`;ctx.textAlign='center';ctx.fillText((name||'بازیکن').slice(0,14),foot.x,foot.y-57*sc);
+}
+function drawCar(x,z){const p=project(x,0,z);if(p.depth<30)return;const sc=Math.max(.45,Math.min(1.6,p.scale*1.7));ctx.fillStyle='#0006';ctx.beginPath();ctx.ellipse(p.x,p.y,27*sc,8*sc,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#b88a4f';ctx.beginPath();ctx.moveTo(p.x-27*sc,p.y-7*sc);ctx.lineTo(p.x-18*sc,p.y-20*sc);ctx.lineTo(p.x+15*sc,p.y-20*sc);ctx.lineTo(p.x+27*sc,p.y-7*sc);ctx.lineTo(p.x+24*sc,p.y+1*sc);ctx.lineTo(p.x-23*sc,p.y+1*sc);ctx.closePath();ctx.fill();ctx.fillStyle='#9dc4cf';ctx.fillRect(p.x-12*sc,p.y-18*sc,22*sc,9*sc);ctx.fillStyle='#17212a';for(const dx of [-17,17]){ctx.beginPath();ctx.arc(p.x+dx*sc,p.y,5*sc,0,Math.PI*2);ctx.fill()}}
+function draw(){
+ ctx.clearRect(0,0,innerWidth,innerHeight);drawGround();
+ // roadside trees
+ for(let z=150;z<1450;z+=180){for(const x of [120,1080]){let p=project(x,0,z);if(p.depth>0&&p.depth<1600){ctx.fillStyle='#624d38';ctx.fillRect(p.x-3*p.scale,p.y-32*p.scale,6*p.scale,32*p.scale);ctx.fillStyle='#3e855c';ctx.beginPath();ctx.arc(p.x,p.y-42*p.scale,15*p.scale,0,Math.PI*2);ctx.fill()}}}
+ Object.entries(buildings).forEach(([k,b])=>drawBuilding(k,b));
+ others.forEach(p=>p.vehicle?drawCar(p.x,p.z):person(p.x,p.z,p.name,false,p.gender));
+ if(driving)drawCar(pos.x,pos.z);else person(pos.x,pos.z,me?.name||'تو',true,me?.gender);
+ // soft vignette
+ const vg=ctx.createRadialGradient(innerWidth/2,innerHeight*.55,innerHeight*.2,innerWidth/2,innerHeight*.55,innerHeight*.8);vg.addColorStop(0,'transparent');vg.addColorStop(1,'#07101b88');ctx.fillStyle=vg;ctx.fillRect(0,0,innerWidth,innerHeight);
+}
+function findNear(){near=null;let best=1e9;for(const [k,b] of Object.entries(buildings)){const d=Math.hypot(pos.x-b.x,pos.z-b.z);if(d<best&&d<135){best=d;near=k}}$('action').style.display=near?'block':'none';$('action').textContent=near?'ورود به '+names[near]:'ورود'}
+function renderBuildings(){const root=$('buildings');root.innerHTML='';for(const [k,n] of Object.entries(names)){const b=document.createElement('button');b.className='build';b.textContent=n;b.onclick=()=>{const v=buildings[k];target={x:v.x,z:v.z+ (pos.z>v.z?90:-90)};toast('در حال رفتن به '+n)};root.append(b)}}
+function appendChat(rows){$('feed').innerHTML='';rows.slice(-30).forEach(m=>{const d=document.createElement('div');const b=document.createElement('b');b.textContent=m.name+': ';const span=document.createElement('span');span.textContent=m.message;d.append(b,span);$('feed').append(d)});$('feed').scrollTop=$('feed').scrollHeight}
+async function refresh(){try{const d=await api('/api/city/state');if(!me){me=d.me;pos={x:me.x,z:me.z};$('playerName').textContent=me.name;renderBuildings();try{const prof=await api('/api/myself');if(prof.photo){const im=await fetch(prof.photo,{headers:{'X-Init-Data':tg?.initData||''}});if(im.ok){heroImage=new Image();heroImage.src=URL.createObjectURL(await im.blob())}}}catch(e){}}else{me=d.me}others=d.players||[];chat=d.chat||[];me.cars=d.me.cars||[];driving=!!d.me.vehicle;$('drive').style.display=(me.cars.length?'block':'none');$('drive').textContent=driving?'پیاده شو':'سوار ماشین شو';$('cash').textContent=Number(me.cash).toLocaleString('fa-IR');$('bank').textContent=Number(me.bank).toLocaleString('fa-IR');appendChat(chat)}catch(e){toast(e.message)}}
+let moveTimer=0;
+async function syncMove(){if(Date.now()-lastSend<450)return;lastSend=Date.now();try{const d=await api('/api/city/move',{x:Math.round(pos.x),z:Math.round(pos.z),location:near||'street',vehicle:driving});pos.x=d.x;pos.z=d.z}catch(e){}}
+function update(dt){
+ let dx=joy.x+(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0),dz=-joy.y+(keys.ArrowUp?1:0)-(keys.ArrowDown?1:0);
+ if(target){dx=target.x-pos.x;dz=target.z-pos.z;const n=Math.hypot(dx,dz);if(n<14)target=null;else{dx/=n;dz/=n}}
+ const n=Math.hypot(dx,dz);if(n>.08){dx/=n;dz/=n;pos.x=Math.max(40,Math.min(1160,pos.x+dx*dt*(driving?190:32)));pos.z=Math.max(40,Math.min(1460,pos.z+dz*dt*(driving?190:32)));heading=Math.atan2(dx,dz);syncMove()}
+ findNear();draw();
+}
+function loop(t){const dt=Math.min(.05,(t-lastFrame)/1000||0);lastFrame=t;update(dt);requestAnimationFrame(loop)}
+$('action').onclick=async()=>{if(!near)return;try{const r=await api('/api/city/interact',{building:near});toast(r.name+' — '+r.detail);if(r.building==='bank')toast('کیف پول: '+Number(r.cash).toLocaleString('fa-IR')+' | بانک: '+Number(r.bank).toLocaleString('fa-IR'));if(r.building==='garage')toast(r.cars.length?'ماشین‌های تو: '+r.cars.map(c=>c.name).join('، '):'هنوز ماشینی در حسابت نداری')}catch(e){toast(e.message)}};
+$('drive').onclick=()=>{if(!me?.cars?.length){toast('برای رانندگی باید از سیستم ماشین‌های ربات خودرو داشته باشی');return}driving=!driving;toast(driving?'سوار ماشین شدی':'از ماشین پیاده شدی')};
+$('send').onclick=async()=>{const v=$('msg').value.trim();if(!v)return;try{await api('/api/city/chat',{message:v});$('msg').value='';await refresh()}catch(e){toast(e.message)}};$('msg').addEventListener('keydown',e=>{if(e.key==='Enter')$('send').click()});
+addEventListener('keydown',e=>{keys[e.key]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault()});addEventListener('keyup',e=>keys[e.key]=false);
+const stick=$('joystick'),knob=$('knob');let active=false,cx=0,cy=0;
+function joyStart(e){active=true;const r=stick.getBoundingClientRect();cx=r.left+r.width/2;cy=r.top+r.height/2;joyMove(e);e.preventDefault()}
+function joyMove(e){if(!active)return;const t=e.touches?e.touches[0]:e;let dx=t.clientX-cx,dy=t.clientY-cy;const n=Math.hypot(dx,dy),max=38;if(n>max){dx*=max/n;dy*=max/n}joy.x=dx/max;joy.y=dy/max;knob.style.transform=`translate(${dx}px,${dy}px)`}
+function joyEnd(){active=false;joy={x:0,y:0};knob.style.transform=''}
+stick.addEventListener('pointerdown',e=>{stick.setPointerCapture(e.pointerId);joyStart(e)});stick.addEventListener('pointermove',joyMove);stick.addEventListener('pointerup',joyEnd);stick.addEventListener('pointercancel',joyEnd);
+(async()=>{try{await refresh();$('loading').style.display='none';requestAnimationFrame(loop);setInterval(refresh,3500)}catch(e){$('loading').innerHTML='<div class="loadbox"><b>ورود به شهر ممکن نشد</b><div class="sub">'+e.message+'</div></div>'}})();
+})();
+</script></body></html>

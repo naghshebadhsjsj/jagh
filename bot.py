@@ -691,6 +691,10 @@ async def init_db(app: Application):
         # مهاجرت یک‌باره: شغل فعلی کاربرهای قبلی (که با امتیاز باز شده بود) ریست نشه.
         # سطح قدیمی = level_for(امتیاز)؛ پله‌ی آخر (۱۰) فقط با ۱۲۰۰ کار. فقط کسانی که هنوز با سیستم جدید کاری نکردن عوض میشن.
         await c.execute("CREATE TABLE IF NOT EXISTS bot_migrations (name TEXT PRIMARY KEY)")
+        await c.execute("""CREATE TABLE IF NOT EXISTS city_players (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, x REAL NOT NULL DEFAULT 600, z REAL NOT NULL DEFAULT 820, updated_at DOUBLE PRECISION NOT NULL DEFAULT 0, location TEXT NOT NULL DEFAULT 'street')""")
+        await c.execute("""CREATE TABLE IF NOT EXISTS city_chat (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE, name TEXT NOT NULL, message TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL)""")
+        await c.execute("CREATE INDEX IF NOT EXISTS city_chat_created_idx ON city_chat(created_at DESC)")
+        await c.execute("ALTER TABLE city_players ADD COLUMN IF NOT EXISTS vehicle BOOLEAN NOT NULL DEFAULT FALSE")
         if not await c.fetchval("SELECT 1 FROM bot_migrations WHERE name='job_level_from_jaghs'"):
             _n_jobs = len(LEVEL_THRESHOLDS)
             await c.execute(
@@ -9442,6 +9446,51 @@ _JOIN_OK: dict = {}   # آیدی کاربر → تا کی عضویتش تایی�
 
 
 
+# Jingo City multiplayer API
+_CITY_BUILDINGS={"cafe":{"name":"کافه","x":330,"z":330},"bank":{"name":"بانک","x":850,"z":330},"amusement":{"name":"شهربازی","x":330,"z":850},"store":{"name":"فروشگاه","x":850,"z":850},"home":{"name":"خانه","x":600,"z":160},"garage":{"name":"پارکینگ","x":600,"z":1040}}
+async def _city_state(user):
+    uid=int(user["id"]); row=await pool.fetchrow("SELECT u.name,u.gender,u.balance,u.bank_balance,cp.x,cp.z,cp.location,cp.vehicle FROM users u LEFT JOIN city_players cp ON cp.user_id=u.user_id WHERE u.user_id=$1",uid)
+    if not row: raise _ApiError("اول ربات رو استارت کن تا پروفایلت ساخته بشه")
+    now=time.time()
+    await pool.execute("""INSERT INTO city_players(user_id,x,z,updated_at,location) VALUES($1,600,820,$2,'street') ON CONFLICT(user_id) DO UPDATE SET updated_at=EXCLUDED.updated_at""",uid,now)
+    others=await pool.fetch("""SELECT cp.user_id,cp.x,cp.z,cp.location,cp.vehicle,u.name,u.gender FROM city_players cp JOIN users u USING(user_id) WHERE cp.user_id<>$1 AND cp.updated_at>$2 ORDER BY cp.updated_at DESC LIMIT 35""",uid,now-25)
+    chats=await pool.fetch("SELECT user_id,name,message,created_at FROM city_chat WHERE created_at>$1 ORDER BY id DESC LIMIT 30",now-3600)
+    return _j({"me":{"id":uid,"name":row["name"] or user.get("first_name") or "بازیکن","gender":row["gender"] or "m","x":float(row["x"] or 600),"z":float(row["z"] or 820),"location":row["location"] or "street","vehicle":bool(row["vehicle"]),"cash":int(row["balance"] or 0),"bank":int(row["bank_balance"] or 0),"cars":await _myself_cars(uid)},"players":[{"id":int(r["user_id"]),"name":r["name"] or "بازیکن","gender":r["gender"] or "m","x":float(r["x"]),"z":float(r["z"]),"location":r["location"],"vehicle":bool(r["vehicle"])} for r in others],"chat":[{"id":int(r["user_id"]),"name":r["name"],"message":r["message"],"at":int(r["created_at"])} for r in reversed(chats)],"buildings":_CITY_BUILDINGS})
+async def _city_move(data,user):
+    uid=int(user["id"]); x=_int(data.get("x"),None,0,1200); z=_int(data.get("z"),None,0,1200); loc=str(data.get("location") or "street")[:16]; vehicle=bool(data.get("vehicle"))
+    if x is None or z is None or loc not in ("street","cafe","bank","amusement","store","home","garage"): raise _ApiError("موقعیت نامعتبره")
+    if vehicle and not await _owned_cars(uid): raise _ApiError("برای رانندگی اول باید ماشین داشته باشی")
+    now=time.time()
+    async with pool.acquire() as c:
+      async with c.transaction():
+        old=await c.fetchrow("SELECT x,z,updated_at FROM city_players WHERE user_id=$1 FOR UPDATE",uid)
+        if old:
+          elapsed=max(.15,min(3.0,now-float(old["updated_at"] or now))); limit=(90 if vehicle else 32)*elapsed+5
+          dx=x-float(old["x"]); dz=z-float(old["z"]); dist=(dx*dx+dz*dz)**.5
+          if dist>limit:
+            scale=limit/dist; x=round(float(old["x"])+dx*scale); z=round(float(old["z"])+dz*scale)
+        await c.execute("""INSERT INTO city_players(user_id,x,z,updated_at,location,vehicle) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id) DO UPDATE SET x=EXCLUDED.x,z=EXCLUDED.z,updated_at=EXCLUDED.updated_at,location=EXCLUDED.location,vehicle=EXCLUDED.vehicle""",uid,x,z,now,loc,vehicle)
+    return _j({"ok":True,"x":x,"z":z})
+async def _city_chat(data,user):
+    uid=int(user["id"]); msg=" ".join(str(data.get("message") or "").split())[:180]
+    if not msg: raise _ApiError("پیامت خالیه")
+    now=time.time(); count=await pool.fetchval("SELECT COUNT(*) FROM city_chat WHERE user_id=$1 AND created_at>$2",uid,now-8)
+    if int(count or 0)>=2: raise _ApiError("کمی صبر کن و بعد دوباره پیام بده")
+    await pool.execute("INSERT INTO city_chat(user_id,name,message,created_at) VALUES($1,$2,$3,$4)",uid,str(user.get("first_name") or "بازیکن")[:40],msg,now)
+    return _j({"ok":True})
+async def _city_interact(data,user):
+    key=str(data.get("building") or "")
+    if key not in _CITY_BUILDINGS: raise _ApiError("ساختمان پیدا نشد")
+    info=_CITY_BUILDINGS[key]
+    if key=="bank":
+      r=await pool.fetchrow("SELECT balance,bank_balance FROM users WHERE user_id=$1",int(user["id"]))
+      return _j({"ok":True,"building":key,"name":info["name"],"cash":int(r["balance"] or 0),"bank":int(r["bank_balance"] or 0),"detail":"موجودی از حساب اصلی ربات خوانده شد."})
+    if key=="garage":
+      cars=await _myself_cars(int(user["id"]))
+      return _j({"ok":True,"building":key,"name":info["name"],"cars":[{"idx":c["idx"],"name":c["name"],"level":c["level"]} for c in cars],"detail":"ماشین‌های خریداری‌شده‌ی حساب تو."})
+    details={"cafe":"به کافه رسیدی. اینجا می‌تونی با بازیکن‌های دیگه گفت‌وگو کنی.","amusement":"به شهربازی رسیدی. بازی‌های تفریحی در توسعه‌های بعدی به بازی‌های ربات وصل می‌شن.","store":"به فروشگاه رسیدی. لباس و وسایل کاراکتر در این بخش قرار می‌گیرن.","home":"به خانه‌ات رسیدی؛ فضای شخصی تو در شهر.","garage":"به پارکینگ رسیدی؛ محل نمایش ماشین‌های حسابت."}
+    return _j({"ok":True,"building":key,"name":info["name"],"detail":details[key]})
+
 async def _web_route(method: str, path: str, qs: dict, headers: dict, body: bytes):
     """(status, content-type, body bytes, extra headers)"""
     if path in ("/", "/index.html"):
@@ -9450,6 +9499,9 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
         return 200, "text/plain", b"ok", {}
     if path == "/farm" and FARM_MAP_HTML:
         return 200, "text/html; charset=utf-8", FARM_MAP_HTML, {"Cache-Control": "no-cache"}
+    if path == "/city":
+        try: return 200, "text/html; charset=utf-8", Path(__file__).with_name("city.html").read_bytes(), {"Cache-Control":"no-store"}
+        except Exception: return 503, "text/plain; charset=utf-8", "فایل city.html کنار bot.py پیدا نشد".encode(), {}
     if path == "/farm/scene.jpg":
         return 200, "image/jpeg", FARM_SCENE_BYTES, {"Cache-Control": "public, max-age=86400"}
     if not path.startswith("/api/"):
@@ -9470,6 +9522,21 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
                 return _j({"error": "برای استفاده از مینی‌اپ باید اول توی کانال‌های اجباری عضو بشی.",
                            "blocked": "join", "channels": _miss}, 403)
             _JOIN_OK[_gid] = time.time() + 120
+    if path.startswith("/api/city/"):
+        if pool is None: return _j({"error":"دیتابیس هنوز آماده نیست"},503)
+        try:
+            if method in ("GET","HEAD") and path=="/api/city/state": return await _city_state(user)
+            if method=="POST":
+                try: data=json.loads(body.decode("utf-8") or "{}")
+                except Exception: raise _ApiError("درخواست نامعتبره")
+                if not isinstance(data,dict): raise _ApiError("درخواست نامعتبره")
+                if path=="/api/city/move": return await _city_move(data,user)
+                if path=="/api/city/chat": return await _city_chat(data,user)
+                if path=="/api/city/interact": return await _city_interact(data,user)
+        except _ApiError as e: return _j({"error":str(e)},e.status)
+        except Exception:
+            log.exception("city api error %s",path); return _j({"error":"خطای داخلی شهر"},500)
+        return _j({"error":"not found"},404)
     social = path.startswith("/api/social/")
     game = path.startswith("/api/game/")
     farm = path.startswith("/api/farm/")
@@ -12862,6 +12929,20 @@ async def ai_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str)
     return True
 
 
+async def send_jingo_city_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg=update.effective_message
+    if not msg: return True
+    if not WEBAPP_URL.startswith("https://"):
+        await msg.reply_text("شهر جینگو فعلاً در دسترس نیست."); return True
+    if msg.chat.type=="private":
+        await msg.reply_text("شهر جینگو آماده است. برای ورود انتخاب کن:",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ورود به شهر جینگو",web_app=WebAppInfo(url=WEBAPP_URL+"/city"))]]))
+    else:
+        try: botname=(await context.bot.get_me()).username
+        except Exception: botname=None
+        if botname: await msg.reply_text(f"برای ورود به شهر جینگو روی لینک زیر بزن:\nhttps://t.me/{botname}?startapp=city",disable_web_page_preview=True)
+        else: await msg.reply_text("لینک ورود شهر فعلاً آماده نیست.")
+    return True
+
 # ───────── چت با «جینگو» (شخصیت خوابالو و بی‌حال) ─────────
 # کاربر می‌نویسه «جینگو سلام» / «جینگو حالت چطوره» و ربات با لحن خوابالو جواب میده.
 # از همون سرویس‌های هوش مصنوعیِ بالا (Gemini/Groq/OpenRouter) استفاده می‌کنه. فقط وقتی فعال میشه که پیام هیچ‌کدوم از
@@ -12952,6 +13033,9 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         jobtag_touch(context.bot, msg.chat_id, user.id)   # تگ شغل (فقط وقتی ربات ادمین باشه)
     # حذف فاصله و کاراکترهای نامرئی (کیبوردهای فارسی گاهی نیم‌فاصله اضافه می‌کنن)
     text = "".join(ch for ch in msg.text if ch not in "\u200c\u200d\u200e\u200f\u200b\ufeff").strip()
+    if re.fullmatch(r"(?:ج[یي]نگو|jingo)", text, re.I):
+        await send_jingo_city_entry(update, context)
+        return
     log.info("group text from %s: %r", user.id, msg.text)
     if await duel_setup_text(update, context, text):   # مبلغ دوئل درسی
         return
@@ -13493,6 +13577,9 @@ async def purchase_cancel_text(update: Update, context: ContextTypes.DEFAULT_TYP
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تو پی‌وی ربات هم «خودم» کار می‌کنه."""
     msg = update.effective_message
+    if msg and msg.text and re.fullmatch(r"(?:ج[یي]نگو|jingo)", msg.text.strip(), re.I):
+        await send_jingo_city_entry(update, context)
+        return
     if await purchase_cancel_text(update, context):
         return
     if await jagsal_private_custom(update, context):
