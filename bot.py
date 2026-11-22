@@ -9669,8 +9669,9 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     if path == "/farmworld":
         try: return 200, "text/html; charset=utf-8", Path(__file__).with_name("farm_world.html").read_bytes(), {"Cache-Control": "no-store"}
         except Exception: return 503, "text/plain; charset=utf-8", "فایل farm_world.html کنار bot.py پیدا نشد".encode(), {}
-    if path == "/farmworld/world.webp" and FW_IMG:
-        return 200, "image/webp", FW_IMG, {"Cache-Control": "public, max-age=86400"}
+    if path == "/farmworld/map.webp":
+        try: return 200, "image/webp", Path(__file__).with_name("farm_map.webp").read_bytes(), {"Cache-Control": "no-cache"}
+        except Exception: return 404, "text/plain; charset=utf-8", "فایل farm_map.webp کنار bot.py پیدا نشد".encode(), {}
     if path == "/farm/scene.jpg":
         return 200, "image/jpeg", FARM_SCENE_BYTES, {"Cache-Control": "public, max-age=86400"}
     if not path.startswith("/api/"):
