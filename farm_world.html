@@ -29,12 +29,22 @@ radial-gradient(ellipse at 50% 50%,#0000 40%,#0002 100%),radial-gradient(circle,
 .bar{height:14px;border-radius:8px;background:#0003;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:linear-gradient(#ffd84a,#f0a000);width:0}
 .card{background:#fff6;border:2px solid #b97a3a;border-radius:14px;padding:8px 10px;margin:8px 0}.card .h{display:flex;justify-content:space-between;align-items:center;font-weight:700}.card small{display:block;color:#6a4a22;line-height:1.6;font-size:12px}.st{color:#e8a000;letter-spacing:1px}
 .tabs{display:flex;gap:8px;margin:6px 0 4px}.tabs .btn{flex:1}.tabs .btn.on{background:linear-gradient(#78c850,#3f8f2a);color:#fff;border-color:#245a14}
+#dl{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none}
+.dt{position:absolute;width:64px;height:32px;background:#6b4423;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+.dt::after{content:"";position:absolute;inset:2px 4px;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);background:radial-gradient(circle at 30% 40%,#e6c98a 0 2px,#0000 3px) 0 0/11px 7px,radial-gradient(circle at 70% 65%,#8a5c2e 0 1.5px,#0000 2.5px) 0 0/9px 6px,repeating-linear-gradient(100deg,#0000 0 5px,#f3dc9c55 5px 6px,#0000 6px 11px),linear-gradient(135deg,#d6a867,#b98443 55%,#c8975a)}
+.dt.v1::after{background:radial-gradient(circle at 30% 40%,#f0d896 0 2px,#0000 3px) 0 0/10px 7px,repeating-linear-gradient(80deg,#0000 0 4px,#fff2b455 4px 5px,#0000 5px 9px),linear-gradient(135deg,#e0b974,#c99552 55%,#d6a867)}
+.dt.v2::after{background:radial-gradient(circle at 30% 40%,#c9a064 0 2px,#0000 3px) 0 0/12px 7px,repeating-linear-gradient(120deg,#0000 0 6px,#e6c98a44 6px 7px,#0000 7px 12px),linear-gradient(135deg,#b7803f,#9c6a30 55%,#ad7737)}
+.dt.new{animation:dtp .35s ease-out}@keyframes dtp{0%{transform:translateY(-14px);opacity:0}100%{transform:none;opacity:1}}
+#gh{position:absolute;width:64px;height:32px;background:#ffffff66;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);pointer-events:none;display:none}
+#db{position:fixed;left:6px;right:6px;bottom:calc(max(10px,env(safe-area-inset-bottom)) + 52px);z-index:6;background:#ffe9b0;border:3px solid #8b5a2b;border-radius:16px;padding:8px 10px;box-shadow:0 4px 0 #5e3a17,0 8px 20px #0005;display:none}
+#db.o{display:block}#db .t{font:700 13px/1.6 Tahoma;margin-bottom:6px;text-align:center}#db .row{margin-top:0}#db .btn.on{background:linear-gradient(#78c850,#3f8f2a);color:#fff;border-color:#245a14;box-shadow:0 4px 0 #245a14}
 #x{position:absolute;top:8px;left:12px;font:700 22px Tahoma;color:#8b5a2b;padding:4px 8px}
 #toast{position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:9;background:#2b1a08e6;color:#fff;border-radius:14px;padding:8px 16px;font:700 14px Tahoma;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center}#toast.o{opacity:1}
 </style></head><body>
 <div id="vp"><div id="world"><div class="ground"></div></div></div>
 <div id="top"><span class="pill" id="pC">🪙 0</span><span class="pill" id="pU">📦 0/0</span><span class="pill" id="pW">🌾 0</span><span class="pill" id="pF">🥣 0</span><span class="pill" id="pB">🍞 0</span></div>
-<div id="nav"><button data-g="field">🌾 زمین</button><button data-g="mill">🌀 آسیاب</button><button data-g="bakery">🍞 نونوایی</button><button data-g="market">🏪 بازار</button></div>
+<div id="nav"><button data-g="field">🌾 زمین</button><button data-g="mill">🌀 آسیاب</button><button data-g="bakery">🍞 نونوایی</button><button data-g="market">🏪 بازار</button><button data-g="deco">🧱 تزئین</button></div>
+<div id="db"><div class="t" id="dt"></div><div class="row"><button class="btn" id="dpu">🧱 گذاشتن</button><button class="btn" id="der">🧽 برداشتن</button><button class="btn" id="dmv">🔀 جابجایی</button><button class="btn g" id="dok">✅ تموم</button></div></div>
 <div id="sh"><span id="x">✕</span><div id="sb"></div></div><div id="toast"></div>
 <script>
 const tg=window.Telegram&&Telegram.WebApp;if(tg){try{tg.ready();tg.expand();tg.disableVerticalSwipes&&tg.disableVerticalSwipes()}catch(e){}}
@@ -43,16 +53,20 @@ const api=(p,b)=>fetch('/api/farm/w/'+p,{method:b?'POST':'GET',headers:{'Content
 /* اطلس اسپرایت‌ها (x,y,w,h) و جای هر ساختمان روی زمین */
 const A={castle:[0,0,496,371],forge:[0,375,337,241],mill:[0,620,295,311],barn:[0,935,360,272],mine:[0,1211,315,262],dairy:[0,1477,316,241],bakery:[0,1722,334,255],field:[0,1981,482,256]};
 const POS={field:[120,700],barn:[30,40],castle:[500,10],mine:[1100,40],dairy:[30,380],forge:[420,400],mill:[1130,360],bakery:[700,700]};
-const ORDER=['mill','bakery','barn','dairy','forge','mine','castle','field'];
+const ORDER=['mill','bakery','dairy','forge','field'];
+const FIXED=['castle','barn','mine'];/* از اول هستن؛ نه خرید دارن نه ارتقا */
 const R={};for(const k in A)R[k]=[POS[k][0],POS[k][1],A[k][2],A[k][3]];
 const Q={T:[256,38],R:[440,123],B:[231,208],L:[58,126]},N=3,FX=POS.field;
 let S=null,off=0,sc=.8,tx=0,ty=0,drag=false,hits=0,cur=null,key='',mtab='buy';
 const wd=$('world');
+const dl=document.createElement('div');dl.id='dl';wd.append(dl);const gh=document.createElement('div');gh.id='gh';wd.append(gh);
+let deco=false,dmode='put',dsig='',mv=null;const GX=730,TW=32,TH=16;/* شبکه‌ی ایزومتریک کاشی‌ها: هر کاشی ۶۴×۳۲ */
+const dpos=(i,j)=>[GX+(i-j)*TW,(i+j)*TH];
 function cam(){const vw=innerWidth,vh=innerHeight;sc=Math.min(1.7,Math.max(.3,sc));tx=Math.min(160,Math.max(vw-W*sc-160,tx));ty=Math.min(160,Math.max(vh-H*sc-200,ty));wd.style.transform=`translate(${tx}px,${ty}px) scale(${sc})`;wd.style.setProperty('--inv',1/sc)}
 function focus(k,z){const r=R[k];sc=z||.9;tx=innerWidth/2-(r[0]+r[2]/2)*sc;ty=(innerHeight-260)/2-(r[1]+r[3]/2)*sc;wd.style.transition='transform .5s';cam();setTimeout(()=>wd.style.transition='',520)}
 /* ---- ساخت صحنه ---- */
 const bEl={};
-for(const k in A){const r=R[k],d=document.createElement('div');d.className='bd'+(k=='field'?' on':'');Object.assign(d.style,{left:r[0]+'px',top:r[1]+'px',width:r[2]+'px',height:r[3]+'px',backgroundImage:'url(/farmworld/atlas.webp)',backgroundPosition:`0 -${A[k][1]}px`});
+for(const k in A){const r=R[k],d=document.createElement('div');d.className='bd'+(k=='field'?' on':'');d.dataset.k=k;Object.assign(d.style,{left:r[0]+'px',top:r[1]+'px',width:r[2]+'px',height:r[3]+'px',backgroundImage:'url(/farmworld/atlas.webp)',backgroundPosition:`0 -${A[k][1]}px`});
  if(k=='field')d.style.pointerEvents='none';
  d.innerHTML='<span class="lbl"></span><span class="bdg" style="display:none"></span>';d.onclick=()=>{if(!drag)openSh(k)};wd.append(d);bEl[k]=d}
 const cells=[];
@@ -69,12 +83,13 @@ async function act(p,b){const old=S?{...S.b}:{};const r=await api(p,b||{});if(r.
  render(true);return r}
 const mst=()=>S.mill.n?(nowS()>=S.mill.at?'done':'run'):'idle',ost=()=>S.oven.n?(nowS()>=S.oven.at?'done':'run'):'idle';
 const rdy=()=>S.plots.filter((t,i)=>t&&i<S.open&&nowS()-t>=S.grow).length;
-function cellTap(i){if(!S)return;if(i>=S.open){toast('این خانه با ارتقای زمین باز میشه 🔒');return}const t=S.plots[i];if(!t)act('plant',{i}).then(r=>r&&puff('field','🌱'));else if(nowS()-t>=S.grow)act('harvest',{i}).then(r=>r&&puff('field','🌾'));else toast('هنوز نرسیده: '+fmt(S.grow-(nowS()-t))+' مونده ⏳')}
+function cellTap(i){if(!S||deco)return;if(i>=S.open){toast('این خانه با ارتقای زمین باز میشه 🔒');return}const t=S.plots[i];if(!t)act('plant',{i}).then(r=>r&&puff('field','🌱'));else if(nowS()-t>=S.grow)act('harvest',{i}).then(r=>r&&puff('field','🌾'));else toast('هنوز نرسیده: '+fmt(S.grow-(nowS()-t))+' مونده ⏳')}
 /* ---- نمایش ---- */
 function render(full){if(!S)return;$('pC').textContent='🪙 '+S.coins;$('pU').textContent='📦 '+S.used+'/'+S.cap;$('pW').textContent='🌾 '+S.inv.wheat;$('pF').textContent='🥣 '+S.inv.flour;$('pB').textContent='🍞 '+S.inv.bread;
  cells.forEach((d,i)=>{const t=S.plots[i],e=d.firstChild,tt=d.lastChild;d.classList.toggle('lk',i>=S.open);if(i>=S.open){e.textContent='🔒';tt.style.display='none';d.classList.remove('rp');return}
   if(!t){e.textContent='';tt.style.display='none';d.classList.remove('rp')}else{const el=nowS()-t;if(el>=S.grow){e.textContent='🌾🌾🌾';tt.style.display='none';d.classList.add('rp')}else{e.textContent=el>S.grow/2?'🌿🌿🌿':'🌱🌱';tt.style.display='';tt.textContent=fmt(S.grow-el);d.classList.remove('rp')}}});
- for(const k in A){if(k=='field')continue;const e=bEl[k],lv=S.b[k]||0;e.classList.toggle('on',lv>0);e.classList.toggle('l3',lv>=3&&lv<5);e.classList.toggle('l5',lv>=5);e.querySelector('.lbl').innerHTML=S.name[k]+' <b>Lv'+lv+'</b>'}
+ for(const k in A){if(k=='field')continue;const e=bEl[k],lv=S.b[k]||0;e.classList.toggle('on',lv>0);const fx=FIXED.includes(k);e.classList.toggle('l3',!fx&&lv>=3&&lv<5);e.classList.toggle('l5',!fx&&lv>=5);e.querySelector('.lbl').innerHTML=fx?S.name[k]:S.name[k]+' <b>Lv'+lv+'</b>'}
+ drawDeco();applyPos();
  const lf=bEl.field.querySelector('.lbl');lf.innerHTML=S.name.field+' <b>Lv'+S.b.field+'</b>';
  const bd=(k,t)=>{const b=bEl[k].querySelector('.bdg');b.style.display=t?'':'none';b.textContent=t||''},ms=S.b.mill?mst():'',os=S.b.bakery?ost():'',rr=rdy();
  bd('field',rr?'🌾 '+rr+' آماده':'');bd('mill',ms=='done'?'✅ آرد آماده! بزن':ms=='run'?'⏳ '+fmt(S.mill.at-nowS()):'');bd('bakery',os=='done'?'✅ نون آماده!':os=='run'?'⏳ '+fmt(S.oven.at-nowS()):'');
@@ -101,7 +116,7 @@ function draw(){const k=cur,s=$('sb'),R_=(...a)=>`<div class="row">${a.join('')}
    else h+=`<p>${S.oven.n} نان آماده‌ست 🥖</p>`+R_(bt('برداشت نان 🍞','bc','g'))}
   else if(k=='dairy'||k=='mine'){const n=S.acc[k];h+=`<p>${S.desc[k]}<br>آماده‌ی جمع: <b>${n}</b></p>`+R_(bt(k=='dairy'?'🥛 جمع کن':'🪨 جمع کن','co','g',!n))}
   else h+=`<p>${S.desc[k]}</p>`;
-  h+=upBtn(k)}
+  if(FIXED.includes(k))h+=`<p style="font-size:13px">🏰 این ساختمان از اول تو مزرعه‌ته؛ خرید و ارتقا نداره.<br>${S.info[k][(S.b[k]||1)-1]}</p>`;else h+=upBtn(k)}
  s.innerHTML=h;const g=i=>$(i);
  if(g('pa'))g('pa').onclick=()=>act('plant',{all:1}).then(r=>r&&puff('field','🌱'));if(g('ha'))g('ha').onclick=()=>act('harvest',{all:1}).then(r=>r&&puff('field','🌾'));
  if(g('mp'))g('mp').onclick=()=>act('mill_put',{});if(g('bp'))g('bp').onclick=()=>act('bake_put',{});if(g('bc'))g('bc').onclick=()=>act('bake_collect',{}).then(r=>r&&puff('bakery','🍞'));
@@ -109,17 +124,32 @@ function draw(){const k=cur,s=$('sb'),R_=(...a)=>`<div class="row">${a.join('')}
  s.querySelectorAll('.up').forEach(b=>b.onclick=()=>act('up',{k:b.dataset.k}));s.querySelectorAll('.sl').forEach(b=>b.onclick=()=>act('sell',{item:b.dataset.i,qty:S.inv[b.dataset.i]}).then(r=>r&&puff('field','🪙')));
  s.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{mtab=b.dataset.t;sheet(true)});if(S.oven&&(k=='mill'||k=='bakery'))upd()}
 function hitMill(){const h=bEl.mill;h.style.filter='brightness(1.35)';setTimeout(()=>h.style.filter='',130);puff('mill','💨');if(tg&&tg.HapticFeedback)tg.HapticFeedback.impactOccurred('medium');hits++;if(hits>=5){hits=0;act('mill_collect',{}).then(r=>r&&(puff('mill','🥣'),puff('mill','✨')))}else $('mh').textContent='آسیاب بزن 👊 ('+hits+'/5)'}
-function openSh(k){if(!S)return;cur=k;hits=0;key='';if(k!='market'&&R[k]&&(S.b[k]||k=='field'))focus(k,k=='field'?.85:.9);$('sh').classList.add('o');sheet(true)}
+function openSh(k){if(!S||deco)return;cur=k;hits=0;key='';if(k!='market'&&R[k]&&(S.b[k]||k=='field'))focus(k,k=='field'?.85:.9);$('sh').classList.add('o');sheet(true)}
 $('x').onclick=()=>{cur=null;$('sh').classList.remove('o')};
-document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{const g=b.dataset.g;if((g=='mill'||g=='bakery')&&S&&!S.b[g]){mtab='buy';openSh('market');toast('اول '+S.name[g]+' رو بخر 🏪');return}openSh(g)});
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{const g=b.dataset.g;if(g=='deco'){setDeco(!deco);return}if(deco)setDeco(false);if((g=='mill'||g=='bakery')&&S&&!S.b[g]){mtab='buy';openSh('market');toast('اول '+S.name[g]+' رو بخر 🏪');return}openSh(g)});
 /* ---- حرکت و زوم دوانگشتی ---- */
 const ptr=new Map();let d0,s0,moved=0;const vp=$('vp');
-vp.addEventListener('pointerdown',e=>{ptr.set(e.pointerId,[e.clientX,e.clientY]);moved=0;drag=false;if(ptr.size==2){const[a,b]=[...ptr.values()];d0=Math.hypot(a[0]-b[0],a[1]-b[1]);s0=sc}});
-addEventListener('pointermove',e=>{if(!ptr.has(e.pointerId))return;const o=ptr.get(e.pointerId),dx=e.clientX-o[0],dy=e.clientY-o[1];ptr.set(e.pointerId,[e.clientX,e.clientY]);moved+=Math.abs(dx)+Math.abs(dy);if(moved>10)drag=true;
+vp.addEventListener('pointerdown',e=>{if(deco&&dmode=='mv'&&S&&!e.target.closest('#db,#nav,#top')){const b=e.target.closest('.bd'),c=e.target.closest('.cell'),k=b?b.dataset.k:c?'field':null;if(k&&(k=='field'||S.b[k]>0)){mv={k,sx:e.clientX,sy:e.clientY,x0:R[k][0],y0:R[k][1],m:0};ptr.set(e.pointerId,[e.clientX,e.clientY]);drag=true;bEl[k].style.filter='brightness(1.2) drop-shadow(0 0 10px #fff)';return}}ptr.set(e.pointerId,[e.clientX,e.clientY]);moved=0;drag=false;if(ptr.size==2){const[a,b]=[...ptr.values()];d0=Math.hypot(a[0]-b[0],a[1]-b[1]);s0=sc}});
+addEventListener('pointermove',e=>{if(!ptr.has(e.pointerId))return;if(mv){mv.m=1;setPos(mv.k,mv.x0+(e.clientX-mv.sx)/sc,mv.y0+(e.clientY-mv.sy)/sc);return}const o=ptr.get(e.pointerId),dx=e.clientX-o[0],dy=e.clientY-o[1];ptr.set(e.pointerId,[e.clientX,e.clientY]);moved+=Math.abs(dx)+Math.abs(dy);if(moved>10)drag=true;
  if(ptr.size==1){tx+=dx;ty+=dy;cam()}else if(ptr.size==2){const[a,b]=[...ptr.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]),cx=(a[0]+b[0])/2,cy=(a[1]+b[1])/2,n=Math.min(1.7,Math.max(.3,s0*d/d0));tx=cx-(cx-tx)*n/sc;ty=cy-(cy-ty)*n/sc;sc=n;cam()}});
-const up=e=>{ptr.delete(e.pointerId);setTimeout(()=>{if(!ptr.size)drag=false},60)};addEventListener('pointerup',up);addEventListener('pointercancel',up);
+const up=e=>{ptr.delete(e.pointerId);if(mv){const m=mv;mv=null;bEl[m.k].style.filter='';if(m.m)act('move',{k:m.k,x:R[m.k][0],y:R[m.k][1]})}setTimeout(()=>{if(!ptr.size)drag=false},60)};addEventListener('pointerup',up);addEventListener('pointercancel',up);
 vp.addEventListener('wheel',e=>{e.preventDefault();const n=sc*(e.deltaY<0?1.1:.9);tx=e.clientX-(e.clientX-tx)*n/sc;ty=e.clientY-(e.clientY-ty)*n/sc;sc=n;cam()},{passive:false});
 addEventListener('resize',cam);
+/* ---- تزئین با کاشی کاه‌گلی ---- */
+const dok=(i,j)=>{const u=i-j,v=i+j;return u>=-21&&u<=21&&v>=2&&v<=58};
+function dblocked(i,j){const[cx,cy]=dpos(i,j);for(const k in A){if(k!='field'&&!(S.b[k]>0))continue;const r=R[k],x0=r[0]+r[2]*.12,x1=r[0]+r[2]*.88,y0=r[1]+r[3]*.25,y1=r[1]+r[3]*.92;if(cx>x0&&cx<x1&&cy>y0&&cy<y1)return true}return false}
+function drawDeco(){if(!S)return;const k=JSON.stringify(S.deco);if(k===dsig){dtxt();return}const old=new Set(dl.children.length?[...dl.children].map(e=>e.dataset.k):[]);dsig=k;dl.replaceChildren();
+ S.deco.slice().sort((a,b)=>(a[0]+a[1])-(b[0]+b[1])).forEach(([i,j])=>{const[cx,cy]=dpos(i,j),e=document.createElement('div'),kk=i+','+j;e.className='dt v'+((i*7+j*3)%3)+(old.size&&!old.has(kk)?' new':'');e.dataset.k=kk;e.style.left=(cx-32)+'px';e.style.top=(cy-16)+'px';dl.append(e)});dtxt()}
+function setPos(k,x,y){const r=R[k];x=Math.round(Math.max(0,Math.min(W-r[2],x)));y=Math.round(Math.max(0,Math.min(H-r[3],y)));if(x==r[0]&&y==r[1])return;const dx=x-r[0],dy=y-r[1];r[0]=x;r[1]=y;bEl[k].style.left=x+'px';bEl[k].style.top=y+'px';if(k=='field')cells.forEach(c=>{c.style.left=(parseFloat(c.style.left)+dx)+'px';c.style.top=(parseFloat(c.style.top)+dy)+'px'})}
+function applyPos(){if(!S)return;for(const k in A){if(mv&&mv.k==k)continue;const p=(S.pos&&S.pos[k])||POS[k];setPos(k,p[0],p[1])}}
+function dtxt(){if(!deco||!S)return;$('dt').innerHTML='🧱 کاشی کاه‌گلی: '+S.deco.length+'/'+S.deco_max+' • هر کاشی '+S.deco_price+' 🪙 • موجودی '+S.coins+' 🪙<br>'+(dmode=='put'?'روی زمین بزن تا کاشی بذاری':dmode=='mv'?'ساختمان یا زمین کشاورزی رو بگیر و بکش تا جابجا بشه 👆':'روی کاشی بزن تا برداشته بشه (+'+S.deco_refund+' 🪙)');$('dpu').classList.toggle('on',dmode=='put');$('der').classList.toggle('on',dmode=='del');$('dmv').classList.toggle('on',dmode=='mv')}
+function setDeco(v){if(!S)return;deco=v;$('db').classList.toggle('o',v);gh.style.display='none';if(v){cur=null;$('sh').classList.remove('o');dmode='put';dtxt()}}
+$('dpu').onclick=()=>{dmode='put';dtxt()};$('der').onclick=()=>{dmode='del';dtxt()};$('dmv').onclick=()=>{dmode='mv';dtxt()};$('dok').onclick=()=>setDeco(false);
+vp.addEventListener('click',async e=>{if(!deco||dmode=='mv'||drag||!S||e.target.closest('#db,#nav,#top'))return;const wx=(e.clientX-tx)/sc,wy=(e.clientY-ty)/sc,u=(wx-GX)/TW,v=wy/TH,i=Math.round((u+v)/2),j=Math.round((v-u)/2);
+ if(!dok(i,j)){toast('اینجا بیرون از مزرعه‌ست');return}
+ const has=S.deco.some(t=>t[0]==i&&t[1]==j);
+ if(dmode=='put'){if(has){toast('اینجا کاشی هست');return}if(dblocked(i,j)){toast('اینجا ساختمان یا زمین کشاورزیه 🚫');return}if(S.coins<S.deco_price){toast('سکه‌ات کم‌ه 🪙');return}const[cx,cy]=dpos(i,j);gh.style.left=(cx-32)+'px';gh.style.top=(cy-16)+'px';gh.style.display='block';await act('deco_put',{i,j});gh.style.display='none'}
+ else{if(!has){toast('اینجا کاشی نیست');return}await act('deco_del',{i,j})}});
 /* ---- شروع ---- */
 (async()=>{cam();const r=await api('state');if(r.error){toast(r.error);return}S=r.state;off=S.now-Date.now()/1000;render(true);focus('field',.9);setInterval(()=>render(false),500)})();
 </script></body></html>

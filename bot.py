@@ -9463,6 +9463,12 @@ FW_FPB = 2                                      # آرد برای هر نان
 FW_PRICE = {"wheat": 3, "flour": 6, "bread": 18, "milk": 10, "ore": 25}
 FW_ITEMS = tuple(FW_PRICE)
 FW_XP_STEP = 25
+# قصر، انبار و معدن از اول روی مزرعه‌ان؛ قابل خرید و ارتقا نیستن (لول ثابت: قصر ۱، انبار ۲ = ظرفیت ۱۵۰، معدن ۱)
+FW_FIXED = {"castle": 1, "barn": 2, "mine": 1}
+# کاشی کاه‌گلی برای تزئین مزرعه
+FW_DECO_PRICE = 10          # قیمت هر کاشی (سکه‌ی مزرعه)
+FW_DECO_REFUND = 5          # پس‌دادن پول وقتی کاشی رو برمی‌داره
+FW_DECO_MAX = 200           # حداکثر کاشی برای هر کاربر
 FW_NAME = {"field": "🌾 زمین گندم", "barn": "📦 انبار", "mill": "🌀 آسیاب", "bakery": "🍞 نونوایی", "dairy": "🧀 لبنیات",
            "forge": "⚒ آهنگری", "mine": "⛏ معدن", "castle": "🏰 قلعه"}
 FW_DESC = {"field": "گندم اینجا کاشته میشه؛ لول بالاتر یعنی خانه‌ی بیشتر و رشد سریع‌تر.", "barn": "ظرفیت نگهداری محصولاتت رو زیاد می‌کنه.",
@@ -9484,8 +9490,8 @@ FW_REDIR = ("<script>(function(){try{var m=(location.hash+location.search).match
 
 
 def _fw_new() -> dict:
-    return {"coins": 20, "xp": 0, "plots": [0] * 9, "inv": {k: 0 for k in FW_ITEMS}, "b": {"field": 1},
-            "mill": {"n": 0, "at": 0}, "oven": {"n": 0, "at": 0}, "prod": {"dairy": 0, "mine": 0}}
+    return {"coins": 20, "xp": 0, "plots": [0] * 9, "inv": {k: 0 for k in FW_ITEMS}, "b": {"field": 1, **FW_FIXED},
+            "mill": {"n": 0, "at": 0}, "oven": {"n": 0, "at": 0}, "prod": {"dairy": 0, "mine": time.time()}, "deco": [], "pos": {}}
 
 
 def _fw_unpack(raw) -> dict:
@@ -9503,14 +9509,41 @@ def _fw_unpack(raw) -> dict:
                 if k in FW_KEYS:
                     d["b"][k] = min(FW_MAXL, max(0, int(v)))
             d["b"]["field"] = max(1, d["b"].get("field", 1))
+            for k, v in FW_FIXED.items():          # ساختمان‌های ثابت همیشه هستن (اگه قبلاً لول بالاتری داشته، همون می‌مونه)
+                d["b"][k] = max(v, d["b"].get(k, 0))
             for k in ("mill", "oven"):
                 m = x.get(k) or {}
                 d[k] = {"n": max(0, int(m.get("n", 0))), "at": float(m.get("at", 0))}
             for k in ("dairy", "mine"):
                 d["prod"][k] = float((x.get("prod") or {}).get(k, 0))
+            if d["prod"]["mine"] <= 0:             # معدن تازه فعال شده؛ تولیدش از همین الان شروع میشه
+                d["prod"]["mine"] = time.time()
+            seen, deco = set(), []
+            for t in (x.get("deco") or [])[:FW_DECO_MAX]:
+                try:
+                    i, j = int(t[0]), int(t[1])
+                except Exception:
+                    continue
+                if _fw_deco_ok(i, j) and (i, j) not in seen:
+                    seen.add((i, j)); deco.append([i, j])
+            d["deco"] = deco
+            pos = {}
+            for k, t in (x.get("pos") or {}).items():
+                try:
+                    if k in FW_KEYS:
+                        pos[k] = [max(0, min(1400, int(t[0]))), max(0, min(900, int(t[1])))]
+                except Exception:
+                    continue
+            d["pos"] = pos
     except Exception:
         pass
     return d
+
+
+def _fw_deco_ok(i: int, j: int) -> bool:
+    """خونه‌ی کاشی باید داخل نقشه‌ی مزرعه باشه (شبکه‌ی ایزومتریک ۶۴×۳۲ روی صحنه‌ی ۱۴۶۰×۱۰۰۰)."""
+    u, v = i - j, i + j
+    return -21 <= u <= 21 and 2 <= v <= 58
 
 
 def _fw_lv(d: dict, k: str) -> int:
@@ -9540,14 +9573,15 @@ def _fw_acc(d: dict, k: str, now: float) -> int:
 
 def _fw_out(d: dict, now: float) -> dict:
     b = d["b"]
-    nxt = {k: (FW_COST[k][b.get(k, 0)] if b.get(k, 0) < FW_MAXL else None) for k in FW_KEYS}
+    nxt = {k: (FW_COST[k][b.get(k, 0)] if b.get(k, 0) < FW_MAXL and k not in FW_FIXED else None) for k in FW_KEYS}
     ml, bl = max(1, _fw_lv(d, "mill")), max(1, _fw_lv(d, "bakery"))
     return {"now": now, "coins": d["coins"], "xp": d["xp"], "plots": d["plots"], "inv": d["inv"], "b": b, "mill": d["mill"], "oven": d["oven"],
             "grow": _fw_grow(d), "yield": FW_YIELD[b["field"] - 1], "open": FW_PLOTS[b["field"] - 1],
             "mill_secs": FW_MILL_S[ml - 1], "mill_max": FW_MILL_MAX[ml - 1], "bake_secs": FW_BAKE_S[bl - 1], "bake_max": FW_BAKE_MAX[bl - 1],
             "fpb": FW_FPB, "cap": _fw_cap(d), "used": _fw_used(d), "price": FW_PRICE, "bonus": 1 + 0.05 * _fw_lv(d, "castle"),
             "acc": {k: _fw_acc(d, k, now) for k in ("dairy", "mine")},
-            "next_cost": nxt, "maxl": FW_MAXL, "info": FW_INFO, "name": FW_NAME, "desc": FW_DESC}
+            "next_cost": nxt, "maxl": FW_MAXL, "info": FW_INFO, "name": FW_NAME, "desc": FW_DESC,
+            "fixed": list(FW_FIXED), "deco": d["deco"], "pos": d["pos"], "deco_price": FW_DECO_PRICE, "deco_refund": FW_DECO_REFUND, "deco_max": FW_DECO_MAX}
 
 
 def _fw_apply(action: str, d: dict, data: dict, now: float) -> str:
@@ -9558,6 +9592,8 @@ def _fw_apply(action: str, d: dict, data: dict, now: float) -> str:
         k = str(data.get("k"))
         if k not in FW_KEYS:
             raise _ApiError("ساختمان نامعتبر")
+        if k in FW_FIXED:
+            raise _ApiError("این ساختمان از اول تو مزرعه‌ست و خرید و ارتقا نداره 🏰")
         lv = _fw_lv(d, k)
         if lv >= FW_MAXL:
             raise _ApiError("به آخرین لول رسیده")
@@ -9663,6 +9699,33 @@ def _fw_apply(action: str, d: dict, data: dict, now: float) -> str:
         gain = int(q * FW_PRICE[item] * (1 + 0.05 * _fw_lv(d, "castle")))
         inv[item] -= q; d["coins"] += gain
         return f"{q} عدد فروخته شد: +{gain} سکه 🪙"
+    if action == "move":
+        k = str(data.get("k"))
+        if k not in FW_KEYS or not _fw_lv(d, k):
+            raise _ApiError("ساختمان نامعتبر")
+        x, y = _int(data.get("x"), None, 0, 1400), _int(data.get("y"), None, 0, 900)
+        if x is None or y is None:
+            raise _ApiError("جای نامعتبر")
+        d["pos"][k] = [x, y]
+        return "ساختمان جابجا شد 🏗"
+    if action == "deco_put":
+        i, j = _int(data.get("i"), None, -100, 200), _int(data.get("j"), None, -100, 200)
+        if i is None or j is None or not _fw_deco_ok(i, j):
+            raise _ApiError("اینجا بیرون از مزرعه‌ست")
+        if [i, j] in d["deco"]:
+            raise _ApiError("اینجا کاشی هست")
+        if len(d["deco"]) >= FW_DECO_MAX:
+            raise _ApiError(f"حداکثر {FW_DECO_MAX} کاشی میشه گذاشت")
+        if d["coins"] < FW_DECO_PRICE:
+            raise _ApiError(f"{FW_DECO_PRICE - d['coins']} سکه‌ی دیگه لازمه 🪙")
+        d["coins"] -= FW_DECO_PRICE; d["deco"].append([i, j])
+        return f"کاشی کاه‌گلی گذاشته شد 🧱 −{FW_DECO_PRICE} 🪙"
+    if action == "deco_del":
+        i, j = _int(data.get("i"), None, -100, 200), _int(data.get("j"), None, -100, 200)
+        if i is None or j is None or [i, j] not in d["deco"]:
+            raise _ApiError("اینجا کاشی نیست")
+        d["deco"].remove([i, j]); d["coins"] += FW_DECO_REFUND
+        return f"کاشی برداشته شد +{FW_DECO_REFUND} 🪙"
     raise _ApiError("دستور نامعتبر")
 
 
@@ -9677,6 +9740,7 @@ async def _fw_get_state(qs, user):
     async with pool.acquire() as c:
         async with c.transaction():
             d = _fw_unpack(await _fw_load(c, uid))
+            await c.execute("UPDATE farm_world SET d=$2 WHERE uid=$1", uid, json.dumps(d))   # ذخیره‌ی ساختمان‌های ثابت و شروع تولید معدن برای کاربرهای قدیمی
     return _j({"ok": True, "state": _fw_out(d, now)})
 
 
@@ -9693,7 +9757,7 @@ def _fw_post(action: str):
 
 
 _FARM_GET["/api/farm/w/state"] = _fw_get_state
-for _a in ("up", "plant", "harvest", "mill_put", "mill_collect", "bake_put", "bake_collect", "collect", "sell"):
+for _a in ("up", "plant", "harvest", "mill_put", "mill_collect", "bake_put", "bake_collect", "collect", "sell", "deco_put", "deco_del", "move"):
     _FARM_POST[f"/api/farm/w/{_a}"] = _fw_post(_a)
 
 
