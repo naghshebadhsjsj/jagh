@@ -9439,33 +9439,53 @@ _FARM_POST["/api/farm/map/collect"] = _p_farm_map_collect
 _FARM_POST["/api/farm/map/deliver"] = _p_farm_map_deliver
 
 
-# ───────────── مزرعه‌ی جینگو (ایزومتریک: زمین گندم ← آسیاب ← نونوایی) ─────────────
+# ───────────── مزرعه‌ی جینگو (فقط یه زمین؛ بقیه‌ی ساختمان‌ها از بازار خریده میشن و لول دارن) ─────────────
 # با نوشتن «جینگو مزرعه» تو پی‌وی یا گروه باز میشه. سکه‌ی مزرعه جداست و به پول ربات ربطی نداره. همه‌ی زمان‌ها سمت سرور حساب میشن.
-FW_N = 9                 # تعداد خانه‌های کاشت (۳×۳)
-FW_GROW = 30             # ثانیه تا رسیدن گندم
-FW_YIELD = 2             # گندمِ هر خانه
-FW_MILL_SECS = 6         # ثانیه‌ی آسیاب برای هر گندم
-FW_MILL_MAX = 30
-FW_FPB = 2               # آرد برای هر نان
-FW_BAKE_SECS = 10        # ثانیه‌ی پخت هر نان
-FW_BAKE_MAX = 10
-FW_PRICE = {"wheat": 3, "flour": 6, "bread": 18}
+FW_KEYS = ("field", "barn", "mill", "bakery", "dairy", "forge", "mine", "castle")
+FW_MAXL = 5
+# هزینه‌ی رسیدن به لول ۱..۵ (لول ۱ یعنی خرید). زمین از اول لول ۱ داره.
+FW_COST = {"field": [0, 80, 200, 450, 900], "barn": [60, 120, 280, 600, 1200], "mill": [120, 200, 420, 850, 1600],
+           "bakery": [250, 350, 700, 1400, 2600], "dairy": [400, 450, 900, 1700, 3200], "forge": [600, 600, 1200, 2200, 4000],
+           "mine": [900, 800, 1500, 2800, 5000], "castle": [1500, 1200, 2400, 4500, 8000]}
+FW_PLOTS = [3, 4, 6, 8, 9]
+FW_GROW = [40, 34, 28, 22, 16]
+FW_YIELD = [2, 2, 3, 3, 4]
+FW_MILL_MAX = [10, 20, 30, 45, 60]
+FW_MILL_S = [6, 5, 4, 3, 2]
+FW_BAKE_MAX = [4, 6, 8, 10, 14]
+FW_BAKE_S = [10, 8, 7, 5, 4]
+FW_CAP = [40, 80, 150, 260, 420, 700]          # ظرفیت انبار: اندیس = لول انبار (۰ = نخریده)
+FW_DAIRY_S = [60, 50, 40, 30, 20]
+FW_DAIRY_CAP = [4, 6, 8, 10, 12]
+FW_MINE_S = [90, 75, 60, 45, 30]
+FW_MINE_CAP = [3, 4, 5, 6, 8]
+FW_FPB = 2                                      # آرد برای هر نان
+FW_PRICE = {"wheat": 3, "flour": 6, "bread": 18, "milk": 10, "ore": 25}
+FW_ITEMS = tuple(FW_PRICE)
 FW_XP_STEP = 25
-try:
-    FW_HTML = Path(__file__).with_name("farm_world.html").read_bytes()
-except Exception:
-    FW_HTML = b""
-try:
-    FW_IMG = Path(__file__).with_name("farm_world.webp").read_bytes()
-except Exception:
-    FW_IMG = b""
+FW_NAME = {"field": "🌾 زمین گندم", "barn": "📦 انبار", "mill": "🌀 آسیاب", "bakery": "🍞 نونوایی", "dairy": "🧀 لبنیات",
+           "forge": "⚒ آهنگری", "mine": "⛏ معدن", "castle": "🏰 قلعه"}
+FW_DESC = {"field": "گندم اینجا کاشته میشه؛ لول بالاتر یعنی خانه‌ی بیشتر و رشد سریع‌تر.", "barn": "ظرفیت نگهداری محصولاتت رو زیاد می‌کنه.",
+           "mill": "گندم رو آرد می‌کنه؛ باید آسیاب رو بزنی تا آرد بیرون بیاد.", "bakery": "از آرد نان می‌پزه (گرون‌ترین محصول).",
+           "dairy": "خودش شیر تولید می‌کنه؛ بیا جمع کن.", "mine": "خودش سنگ معدن تولید می‌کنه؛ بیا جمع کن.",
+           "forge": "گندم‌ها سریع‌تر می‌رسن.", "castle": "همه‌چیز رو گرون‌تر می‌فروشی."}
+FW_INFO = {
+    "field": [f"{FW_PLOTS[i]} خانه • رشد {FW_GROW[i]}s • {FW_YIELD[i]} گندم" for i in range(5)],
+    "barn": [f"ظرفیت انبار {FW_CAP[i + 1]}" for i in range(5)],
+    "mill": [f"تا {FW_MILL_MAX[i]} گندم • {FW_MILL_S[i]}s هر گندم" for i in range(5)],
+    "bakery": [f"تا {FW_BAKE_MAX[i]} نان • {FW_BAKE_S[i]}s هر نان" for i in range(5)],
+    "dairy": [f"هر {FW_DAIRY_S[i]}s یک شیر • ذخیره {FW_DAIRY_CAP[i]}" for i in range(5)],
+    "mine": [f"هر {FW_MINE_S[i]}s یک سنگ معدن • ذخیره {FW_MINE_CAP[i]}" for i in range(5)],
+    "forge": [f"رشد گندم {6 * (i + 1)}٪ سریع‌تر" for i in range(5)],
+    "castle": [f"قیمت فروش {5 * (i + 1)}٪ بیشتر" for i in range(5)],
+}
 FW_REDIR = ("<script>(function(){try{var m=(location.hash+location.search).match(/tgWebAppStartParam=([\\w-]+)/);"
             "if(m&&m[1]==='farm')location.replace('/farmworld'+location.hash)}catch(e){}})();</script>")
 
 
 def _fw_new() -> dict:
-    return {"coins": 20, "xp": 0, "plots": [0] * FW_N, "inv": {"wheat": 0, "flour": 0, "bread": 0},
-            "mill": {"n": 0, "at": 0}, "oven": {"n": 0, "at": 0}}
+    return {"coins": 20, "xp": 0, "plots": [0] * 9, "inv": {k: 0 for k in FW_ITEMS}, "b": {"field": 1},
+            "mill": {"n": 0, "at": 0}, "oven": {"n": 0, "at": 0}, "prod": {"dairy": 0, "mine": 0}}
 
 
 def _fw_unpack(raw) -> dict:
@@ -9476,57 +9496,118 @@ def _fw_unpack(raw) -> dict:
             d["coins"] = max(0, int(x.get("coins", d["coins"]))); d["xp"] = max(0, int(x.get("xp", 0)))
             pl = x.get("plots")
             if isinstance(pl, list):
-                d["plots"] = [float(t or 0) for t in pl[:FW_N]] + [0] * max(0, FW_N - len(pl))
-            for k in d["inv"]:
+                d["plots"] = ([float(t or 0) for t in pl[:9]] + [0] * 9)[:9]
+            for k in FW_ITEMS:
                 d["inv"][k] = max(0, int((x.get("inv") or {}).get(k, 0)))
+            for k, v in (x.get("b") or {}).items():
+                if k in FW_KEYS:
+                    d["b"][k] = min(FW_MAXL, max(0, int(v)))
+            d["b"]["field"] = max(1, d["b"].get("field", 1))
             for k in ("mill", "oven"):
                 m = x.get(k) or {}
                 d[k] = {"n": max(0, int(m.get("n", 0))), "at": float(m.get("at", 0))}
+            for k in ("dairy", "mine"):
+                d["prod"][k] = float((x.get("prod") or {}).get(k, 0))
     except Exception:
         pass
     return d
 
 
+def _fw_lv(d: dict, k: str) -> int:
+    return int(d["b"].get(k, 0))
+
+
+def _fw_grow(d: dict) -> int:
+    return max(5, int(round(FW_GROW[_fw_lv(d, "field") - 1] * (1 - 0.06 * _fw_lv(d, "forge")))))
+
+
+def _fw_cap(d: dict) -> int:
+    return FW_CAP[_fw_lv(d, "barn")]
+
+
+def _fw_used(d: dict) -> int:
+    return sum(d["inv"].values())
+
+
+def _fw_acc(d: dict, k: str, now: float) -> int:
+    """چندتا محصولِ جمع‌نشده تو لبنیات/معدن آماده‌ست."""
+    lv = _fw_lv(d, k)
+    if not lv:
+        return 0
+    s, cap = (FW_DAIRY_S, FW_DAIRY_CAP) if k == "dairy" else (FW_MINE_S, FW_MINE_CAP)
+    return min(cap[lv - 1], int(max(0, now - d["prod"][k]) // s[lv - 1]))
+
+
 def _fw_out(d: dict, now: float) -> dict:
-    return {"now": now, "coins": d["coins"], "xp": d["xp"], "lvl": 1 + d["xp"] // FW_XP_STEP, "plots": d["plots"], "inv": d["inv"],
-            "mill": d["mill"], "oven": d["oven"], "grow": FW_GROW, "yield": FW_YIELD, "mill_secs": FW_MILL_SECS,
-            "bake_secs": FW_BAKE_SECS, "fpb": FW_FPB, "max_bake": FW_BAKE_MAX, "price": FW_PRICE}
+    b = d["b"]
+    nxt = {k: (FW_COST[k][b.get(k, 0)] if b.get(k, 0) < FW_MAXL else None) for k in FW_KEYS}
+    ml, bl = max(1, _fw_lv(d, "mill")), max(1, _fw_lv(d, "bakery"))
+    return {"now": now, "coins": d["coins"], "xp": d["xp"], "plots": d["plots"], "inv": d["inv"], "b": b, "mill": d["mill"], "oven": d["oven"],
+            "grow": _fw_grow(d), "yield": FW_YIELD[b["field"] - 1], "open": FW_PLOTS[b["field"] - 1],
+            "mill_secs": FW_MILL_S[ml - 1], "mill_max": FW_MILL_MAX[ml - 1], "bake_secs": FW_BAKE_S[bl - 1], "bake_max": FW_BAKE_MAX[bl - 1],
+            "fpb": FW_FPB, "cap": _fw_cap(d), "used": _fw_used(d), "price": FW_PRICE, "bonus": 1 + 0.05 * _fw_lv(d, "castle"),
+            "acc": {k: _fw_acc(d, k, now) for k in ("dairy", "mine")},
+            "next_cost": nxt, "maxl": FW_MAXL, "info": FW_INFO, "name": FW_NAME, "desc": FW_DESC}
 
 
 def _fw_apply(action: str, d: dict, data: dict, now: float) -> str:
     """منطق خالص (بدون دیتابیس): d رو تغییر میده و پیام برمی‌گردونه یا _ApiError میندازه."""
     inv = d["inv"]
+    fl = d["b"]["field"]
+    if action == "up":
+        k = str(data.get("k"))
+        if k not in FW_KEYS:
+            raise _ApiError("ساختمان نامعتبر")
+        lv = _fw_lv(d, k)
+        if lv >= FW_MAXL:
+            raise _ApiError("به آخرین لول رسیده")
+        cost = FW_COST[k][lv]
+        if d["coins"] < cost:
+            raise _ApiError(f"{cost - d['coins']} سکه‌ی دیگه لازمه 🪙")
+        d["coins"] -= cost; d["b"][k] = lv + 1; d["xp"] += 5 * (lv + 1)
+        if k in ("dairy", "mine") and lv == 0:
+            d["prod"][k] = now
+        return f"{FW_NAME[k]} خریده شد 🎉" if lv == 0 else f"{FW_NAME[k]} رفت لول {lv + 1} ⭐"
     if action == "plant":
+        free = [i for i in range(FW_PLOTS[fl - 1]) if not d["plots"][i]]
         if data.get("all"):
-            idx = [i for i, t in enumerate(d["plots"]) if not t]
+            idx = free
         else:
-            i = _int(data.get("i"), -1, -1, FW_N - 1)
-            idx = [i] if i is not None and 0 <= i < FW_N and not d["plots"][i] else []
+            i = _int(data.get("i"), -1, -1, 8)
+            idx = [i] if i in free else []
         if not idx:
             raise _ApiError("خانه‌ی خالی نیست")
         for i in idx:
             d["plots"][i] = now
         return f"{len(idx)} خانه گندم کاشتی 🌱"
     if action == "harvest":
-        if data.get("all"):
-            idx = [i for i, t in enumerate(d["plots"]) if t and now - t >= FW_GROW]
-        else:
-            i = _int(data.get("i"), -1, -1, FW_N - 1)
-            idx = [i] if i is not None and 0 <= i < FW_N and d["plots"][i] and now - d["plots"][i] >= FW_GROW else []
-        if not idx:
+        g = _fw_grow(d)
+        ok = [i for i in range(FW_PLOTS[fl - 1]) if d["plots"][i] and now - d["plots"][i] >= g]
+        if not data.get("all"):
+            i = _int(data.get("i"), -1, -1, 8)
+            ok = [i] if i in ok else []
+        if not ok:
             raise _ApiError("گندمی آماده‌ی برداشت نیست")
-        for i in idx:
+        y = FW_YIELD[fl - 1]
+        fit = (_fw_cap(d) - _fw_used(d)) // y
+        if fit < 1:
+            raise _ApiError("انبار پره! بفروش یا انبار رو ارتقا بده 📦")
+        ok = ok[:fit]
+        for i in ok:
             d["plots"][i] = 0
-        inv["wheat"] += FW_YIELD * len(idx)
-        return f"+{FW_YIELD * len(idx)} گندم برداشت شد 🌾"
+        inv["wheat"] += y * len(ok)
+        return f"+{y * len(ok)} گندم برداشت شد 🌾"
     if action == "mill_put":
+        ml = _fw_lv(d, "mill")
+        if not ml:
+            raise _ApiError("اول آسیاب رو از بازار بخر 🏪")
         if d["mill"]["n"]:
             raise _ApiError("آسیاب مشغوله")
-        n = min(inv["wheat"], FW_MILL_MAX)
+        n = min(inv["wheat"], FW_MILL_MAX[ml - 1])
         if n < 1:
             raise _ApiError("گندم نداری؛ اول از زمین برداشت کن")
         inv["wheat"] -= n
-        d["mill"] = {"n": n, "at": now + n * FW_MILL_SECS}
+        d["mill"] = {"n": n, "at": now + n * FW_MILL_S[ml - 1]}
         return f"{n} گندم رفت تو آسیاب 🌀"
     if action == "mill_collect":
         m = d["mill"]
@@ -9537,13 +9618,16 @@ def _fw_apply(action: str, d: dict, data: dict, now: float) -> str:
         inv["flour"] += m["n"]; d["xp"] += m["n"]; d["mill"] = {"n": 0, "at": 0}
         return f"+{m['n']} آرد از آسیاب درآمد 🥣"
     if action == "bake_put":
+        bl = _fw_lv(d, "bakery")
+        if not bl:
+            raise _ApiError("اول نونوایی رو از بازار بخر 🏪")
         if d["oven"]["n"]:
             raise _ApiError("تنوره مشغوله")
-        b = min(inv["flour"] // FW_FPB, FW_BAKE_MAX)
+        b = min(inv["flour"] // FW_FPB, FW_BAKE_MAX[bl - 1])
         if b < 1:
             raise _ApiError(f"برای هر نان {FW_FPB} آرد لازمه")
         inv["flour"] -= b * FW_FPB
-        d["oven"] = {"n": b, "at": now + b * FW_BAKE_SECS}
+        d["oven"] = {"n": b, "at": now + b * FW_BAKE_S[bl - 1]}
         return f"{b} نان رفت تو تنوره 🔥"
     if action == "bake_collect":
         o = d["oven"]
@@ -9553,6 +9637,22 @@ def _fw_apply(action: str, d: dict, data: dict, now: float) -> str:
             raise _ApiError("نان هنوز آماده نشده")
         inv["bread"] += o["n"]; d["xp"] += 2 * o["n"]; d["oven"] = {"n": 0, "at": 0}
         return f"+{o['n']} نان تازه 🍞"
+    if action == "collect":
+        k = str(data.get("k"))
+        if k not in ("dairy", "mine"):
+            raise _ApiError("نامعتبر")
+        n = _fw_acc(d, k, now)
+        if n < 1:
+            raise _ApiError("هنوز چیزی آماده نشده ⏳")
+        n = min(n, _fw_cap(d) - _fw_used(d))
+        if n < 1:
+            raise _ApiError("انبار پره! بفروش یا انبار رو ارتقا بده 📦")
+        lv = _fw_lv(d, k)
+        s, cap = (FW_DAIRY_S, FW_DAIRY_CAP) if k == "dairy" else (FW_MINE_S, FW_MINE_CAP)
+        d["prod"][k] = now if _fw_acc(d, k, now) >= cap[lv - 1] else d["prod"][k] + n * s[lv - 1]
+        it = "milk" if k == "dairy" else "ore"
+        inv[it] += n
+        return f"+{n} {'شیر 🥛' if k == 'dairy' else 'سنگ معدن 🪨'}"
     if action == "sell":
         item = str(data.get("item"))
         if item not in FW_PRICE:
@@ -9560,8 +9660,9 @@ def _fw_apply(action: str, d: dict, data: dict, now: float) -> str:
         q = _int(data.get("qty"), 0, 0, 10 ** 6)
         if not q or q < 1 or q > inv[item]:
             raise _ApiError("موجودی کافی نیست")
-        inv[item] -= q; d["coins"] += q * FW_PRICE[item]
-        return f"{q} عدد فروخته شد: +{q * FW_PRICE[item]} سکه 🪙"
+        gain = int(q * FW_PRICE[item] * (1 + 0.05 * _fw_lv(d, "castle")))
+        inv[item] -= q; d["coins"] += gain
+        return f"{q} عدد فروخته شد: +{gain} سکه 🪙"
     raise _ApiError("دستور نامعتبر")
 
 
@@ -9592,7 +9693,7 @@ def _fw_post(action: str):
 
 
 _FARM_GET["/api/farm/w/state"] = _fw_get_state
-for _a in ("plant", "harvest", "mill_put", "mill_collect", "bake_put", "bake_collect", "sell"):
+for _a in ("up", "plant", "harvest", "mill_put", "mill_collect", "bake_put", "bake_collect", "collect", "sell"):
     _FARM_POST[f"/api/farm/w/{_a}"] = _fw_post(_a)
 
 
@@ -9669,9 +9770,9 @@ async def _web_route(method: str, path: str, qs: dict, headers: dict, body: byte
     if path == "/farmworld":
         try: return 200, "text/html; charset=utf-8", Path(__file__).with_name("farm_world.html").read_bytes(), {"Cache-Control": "no-store"}
         except Exception: return 503, "text/plain; charset=utf-8", "فایل farm_world.html کنار bot.py پیدا نشد".encode(), {}
-    if path == "/farmworld/map.webp":
-        try: return 200, "image/webp", Path(__file__).with_name("farm_map.webp").read_bytes(), {"Cache-Control": "no-cache"}
-        except Exception: return 404, "text/plain; charset=utf-8", "فایل farm_map.webp کنار bot.py پیدا نشد".encode(), {}
+    if path == "/farmworld/atlas.webp":
+        try: return 200, "image/webp", Path(__file__).with_name("farm_atlas.webp").read_bytes(), {"Cache-Control": "no-cache"}
+        except Exception: return 404, "text/plain; charset=utf-8", "فایل farm_atlas.webp کنار bot.py پیدا نشد".encode(), {}
     if path == "/farm/scene.jpg":
         return 200, "image/jpeg", FARM_SCENE_BYTES, {"Cache-Control": "public, max-age=86400"}
     if not path.startswith("/api/"):
