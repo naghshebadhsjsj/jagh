@@ -4,8 +4,8 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
 html,body{margin:0;height:100%;overflow:hidden;background:#5c9e3c;font-family:Tahoma,system-ui,sans-serif;touch-action:none;color:#4a2a0c}
 #vp{position:fixed;inset:0;overflow:hidden;background:radial-gradient(circle at 50% 40%,#92d45c,#5a9a3a)}
-#world{position:absolute;left:0;top:0;width:1537px;height:1023px;transform-origin:0 0;direction:ltr;will-change:transform;--inv:1}
-#world>img{position:absolute;left:0;top:0;width:1537px;height:1023px;pointer-events:none;-webkit-user-drag:none}
+#world{position:absolute;left:0;top:0;width:1536px;height:1024px;transform-origin:0 0;direction:ltr;will-change:transform;--inv:1}
+#world>img{position:absolute;left:0;top:0;width:1536px;height:1024px;pointer-events:none;-webkit-user-drag:none}
 .hs{position:absolute;border-radius:34px}.hs:active{background:#fff4}
 .lbl,.bdg{position:absolute;left:50%;transform:translateX(-50%) scale(var(--inv));white-space:nowrap;direction:rtl;pointer-events:none}
 .lbl{top:-4px;transform-origin:50% 0;background:linear-gradient(#b97a3a,#8b5a2b);color:#ffe9b0;border:2px solid #5e3a17;border-radius:10px;padding:3px 12px;font:700 14px Tahoma;box-shadow:0 3px 0 #5e3a17}
@@ -15,7 +15,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#5c9e3c;font-family:Ta
 .cell .e{position:absolute;left:50%;top:50%;transform:translate(-50%,-55%);font-size:34px;line-height:1;pointer-events:none;text-shadow:0 4px 3px #0005;white-space:nowrap}
 .cell.rp .e{animation:sw 1.4s ease-in-out infinite}@keyframes sw{50%{transform:translate(-50%,-55%) rotate(5deg)}}
 .cell .t{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(var(--inv));font:700 12px Tahoma;color:#fff;background:#0007;border-radius:8px;padding:1px 6px;pointer-events:none}
-.clone{position:absolute;display:none;pointer-events:none;background-image:url(/farmworld/world.webp);background-size:1537px 1023px}
+.clone{position:absolute;display:none;pointer-events:none;background-image:url(/farmworld/world.webp?v=2);background-size:1536px 1024px}
 .clone.on{display:block;animation:hit .22s}@keyframes hit{30%{transform:scale(1.05,.94)}60%{transform:scale(.97,1.04) rotate(-1deg)}}
 .pf{position:absolute;pointer-events:none;font-size:26px;animation:fl 1.1s ease-out forwards;transform:scale(var(--inv))}@keyframes fl{to{transform:translateY(-70px) scale(var(--inv));opacity:0}}
 #top{position:fixed;top:max(8px,env(safe-area-inset-top));left:8px;right:8px;display:flex;gap:6px;justify-content:center;z-index:5;pointer-events:none}
@@ -29,24 +29,24 @@ html,body{margin:0;height:100%;overflow:hidden;background:#5c9e3c;font-family:Ta
 #x{position:absolute;top:8px;left:12px;font:700 22px Tahoma;color:#8b5a2b}
 #toast{position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:9;background:#2b1a08e6;color:#fff;border-radius:14px;padding:8px 16px;font:700 14px Tahoma;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center}#toast.o{opacity:1}
 </style></head><body>
-<div id="vp"><div id="world"><img src="/farmworld/world.webp" alt="">
-<div class="clone" id="cMill"></div><div class="clone" id="cBak"></div></div></div>
+<div id="vp"><div id="world"><img src="/farmworld/world.webp?v=2" alt="">
+</div></div>
 <div id="top"><span class="pill" id="pC">🪙 0</span><span class="pill" id="pW">🌾 0</span><span class="pill" id="pF">🥣 0</span><span class="pill" id="pB">🍞 0</span></div>
 <div id="nav"><button data-g="field">🌾 زمین</button><button data-g="mill">🌀 آسیاب</button><button data-g="bakery">🍞 نونوایی</button><button data-g="barn">📦 انبار</button></div>
 <div id="sh"><span id="x">✕</span><div id="sb"></div></div><div id="toast"></div>
 <script>
 const tg=window.Telegram&&Telegram.WebApp;if(tg){try{tg.ready();tg.expand();tg.disableVerticalSwipes&&tg.disableVerticalSwipes()}catch(e){}}
-const $=i=>document.getElementById(i),W=1537,H=1023;
+const $=i=>document.getElementById(i),W=1536,H=1024;
 const api=(p,b)=>fetch('/api/farm/w/'+p,{method:b?'POST':'GET',headers:{'Content-Type':'application/json','X-Init-Data':tg?tg.initData:''},body:b?JSON.stringify(b):undefined}).then(r=>r.json()).catch(()=>({error:'اینترنت قطع شد'}));
 /* ساختمان‌ها: مختصات دقیقِ خود عکس */
-const B={mill:{n:'🌀 آسیاب',r:[1202,3,1509,326]},bakery:{n:'🍞 نونوایی',r:[335,285,665,545]},barn:{n:'📦 انبار',r:[335,10,695,240]},castle:{n:'🏰 قلعه',r:[700,5,1185,375]},
- mine:{n:'⛏ معدن',r:[10,25,320,235]},dairy:{n:'🧀 لبنیات',r:[10,290,330,505]},forge:{n:'⚒ آهنگری',r:[670,315,1000,560]}};
+const B={mill:{n:'🌀 آسیاب',r:[110,240,320,570]},bakery:{n:'🍞 نونوایی',r:[960,410,1480,720]},barn:{n:'📦 انبار',r:[450,15,940,340]},castle:{n:'🏰 قلعه',r:[990,0,1536,400]},
+ mine:{n:'⛏ معدن',r:[130,60,400,260]},dairy:{n:'🧀 لبنیات',r:[480,360,880,640]},forge:{n:'⚒ آهنگری',r:[800,680,1300,1000]}};
 /* زمین خاکی: چهار گوشه (بالا، راست، پایین، چپ) روی عکس */
-const Q={T:[1297,359],R:[1487,448],B:[1271,538],L:[1091,451]},N=3;
+const Q={T:[405,640],R:[752,803],B:[428,955],L:[75,790]},N=3;
 let S=null,off=0,sc=.6,tx=0,ty=0,drag=false,hits=0,cur=null,key='';
 const wd=$('world');
 function cam(){const vw=innerWidth,vh=innerHeight;sc=Math.min(1.8,Math.max(.28,sc));tx=Math.min(40,Math.max(vw-W*sc-40,tx));ty=Math.min(70,Math.max(vh-H*sc-110,ty));wd.style.transform=`translate(${tx}px,${ty}px) scale(${sc})`;wd.style.setProperty('--inv',1/sc)}
-function focus(k,z){const r=k=='field'?[1057,330,1510,595]:B[k].r;sc=z||.95;tx=innerWidth/2-(r[0]+r[2])/2*sc;ty=(innerHeight-170)/2-(r[1]+r[3])/2*sc;wd.style.transition='transform .45s';cam();setTimeout(()=>wd.style.transition='',480)}
+function focus(k,z){const r=k=='field'?[60,630,760,960]:B[k].r;sc=z||.95;tx=innerWidth/2-(r[0]+r[2])/2*sc;ty=(innerHeight-170)/2-(r[1]+r[3])/2*sc;wd.style.transition='transform .45s';cam();setTimeout(()=>wd.style.transition='',480)}
 /* ---- ساخت صحنه ---- */
 const hsEl={};
 function mk(k,x0,y0,x1,y1,label,fn){const d=document.createElement('div');d.className='hs';Object.assign(d.style,{left:x0+'px',top:y0+'px',width:x1-x0+'px',height:y1-y0+'px'});d.innerHTML=`<span class="lbl">${label}</span><span class="bdg" style="display:none"></span>`;d.onclick=()=>{if(!drag)fn()};wd.append(d);hsEl[k]=d;return d}
@@ -56,11 +56,10 @@ const cells=[];
 for(let j=0;j<N;j++)for(let i=0;i<N;i++){const c=[P(i,j),P(i+1,j),P(i+1,j+1),P(i,j+1)],xs=c.map(p=>p[0]),ys=c.map(p=>p[1]),x0=Math.min(...xs),y0=Math.min(...ys),w=Math.max(...xs)-x0,h=Math.max(...ys)-y0,idx=j*N+i;
 const d=document.createElement('div');d.className='cell';Object.assign(d.style,{left:x0+'px',top:y0+'px',width:w+'px',height:h+'px',clipPath:'polygon('+c.map(p=>(p[0]-x0)+'px '+(p[1]-y0)+'px').join(',')+')'});
 d.innerHTML='<span class="e"></span><span class="t"></span>';d.onclick=()=>{if(!drag)cellTap(idx)};wd.append(d);cells.push(d)}})();
-for(const [id,k] of [['cMill','mill'],['cBak','bakery']]){const r=B[k].r,c=$(id);Object.assign(c.style,{left:r[0]+'px',top:r[1]+'px',width:r[2]-r[0]+'px',height:r[3]-r[1]+'px',backgroundPosition:`-${r[0]}px -${r[1]}px`})}
 /* ---- کمک‌ها ---- */
 const nowS=()=>Date.now()/1000+off,fmt=s=>{s=Math.max(0,Math.ceil(s));return s>=60?Math.floor(s/60)+':'+String(s%60).padStart(2,'0'):s+'s'};
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('o');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('o'),2200)}
-function puff(k,e){const r=k=='field'?[1057,330,1510,595]:B[k].r,d=document.createElement('span');d.className='pf';d.textContent=e;d.style.left=r[0]+(r[2]-r[0])*(.3+Math.random()*.4)+'px';d.style.top=r[1]+(r[3]-r[1])*.5+'px';wd.append(d);setTimeout(()=>d.remove(),1100)}
+function puff(k,e){const r=k=='field'?[60,630,760,960]:B[k].r,d=document.createElement('span');d.className='pf';d.textContent=e;d.style.left=r[0]+(r[2]-r[0])*(.3+Math.random()*.4)+'px';d.style.top=r[1]+(r[3]-r[1])*.5+'px';wd.append(d);setTimeout(()=>d.remove(),1100)}
 async function act(p,b){const r=await api(p,b||{});if(r.error){toast(r.error);return null}S=r.state;off=S.now-Date.now()/1000;if(r.msg)toast(r.msg);render(true);return r}
 const mst=()=>S.mill.n?(nowS()>=S.mill.at?'done':'run'):'idle',ost=()=>S.oven.n?(nowS()>=S.oven.at?'done':'run'):'idle';
 const rdy=()=>S.plots.filter(t=>t&&nowS()-t>=S.grow).length;
@@ -92,7 +91,7 @@ function draw(){const k=cur,s=$('sb');let h='';const R=(...a)=>`<div class="row"
  if(g('pa'))g('pa').onclick=()=>act('plant',{all:1}).then(r=>r&&puff('field','🌱'));if(g('ha'))g('ha').onclick=()=>act('harvest',{all:1}).then(r=>r&&puff('field','🌾'));
  if(g('mp'))g('mp').onclick=()=>act('mill_put',{});if(g('bp'))g('bp').onclick=()=>act('bake_put',{});if(g('bc'))g('bc').onclick=()=>act('bake_collect',{}).then(r=>r&&puff('bakery','🍞'));
  if(g('mh'))g('mh').onclick=hitMill;s.querySelectorAll('.sl').forEach(b=>b.onclick=()=>act('sell',{item:b.dataset.i,qty:S.inv[b.dataset.i]}).then(r=>r&&puff('barn','🪙')));upd()}
-function hitMill(){const c=$('cMill');c.classList.remove('on');void c.offsetWidth;c.classList.add('on');puff('mill','💨');if(tg&&tg.HapticFeedback)tg.HapticFeedback.impactOccurred('medium');hits++;if(hits>=5){hits=0;act('mill_collect',{}).then(r=>r&&(puff('mill','🥣'),puff('mill','✨')))}else $('mh').textContent='آسیاب بزن 👊 ('+hits+'/5)'}
+function hitMill(){const h=hsEl.mill;h.style.background='#fff7';setTimeout(()=>h.style.background='',130);puff('mill','💨');if(tg&&tg.HapticFeedback)tg.HapticFeedback.impactOccurred('medium');hits++;if(hits>=5){hits=0;act('mill_collect',{}).then(r=>r&&(puff('mill','🥣'),puff('mill','✨')))}else $('mh').textContent='آسیاب بزن 👊 ('+hits+'/5)'}
 function openSh(k){cur=k;hits=0;key='';focus(k,k=='field'?.8:.9);$('sh').classList.add('o');if(S)sheet(true)}
 $('x').onclick=()=>{cur=null;$('sh').classList.remove('o')};
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>openSh(b.dataset.g));
@@ -107,5 +106,5 @@ const up=e=>{ptr.delete(e.pointerId);setTimeout(()=>{if(!ptr.size)drag=false},60
 vp.addEventListener('wheel',e=>{e.preventDefault();const n=sc*(e.deltaY<0?1.1:.9);tx=e.clientX-(e.clientX-tx)*n/sc;ty=e.clientY-(e.clientY-ty)*n/sc;sc=n;cam()},{passive:false});
 addEventListener('resize',cam);
 /* ---- شروع ---- */
-(async()=>{sc=.62;tx=innerWidth/2-1260*sc;ty=innerHeight/2-300*sc;cam();const r=await api('state');if(r.error){toast(r.error);return}S=r.state;off=S.now-Date.now()/1000;render(true);sc=.7;tx=innerWidth/2-1330*sc;ty=(innerHeight-120)/2-330*sc;cam();setInterval(()=>render(false),500)})();
+(async()=>{const r=await api('state');if(r.error){toast(r.error);return}S=r.state;off=S.now-Date.now()/1000;render(true);sc=.75;tx=innerWidth/2-400*sc;ty=(innerHeight-120)/2-600*sc;cam();setInterval(()=>render(false),500)})();
 </script></body></html>
