@@ -763,6 +763,8 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS bail_amount BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_cost BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_step INT NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS trace_at DOUBLE PRECISION NOT NULL DEFAULT 0")   # زمان آخرین خلاف؛ ۲ ساعت بعدش رد خودکار پاک میشه
+        await c.execute("UPDATE robbery_profile SET trace_at = EXTRACT(EPOCH FROM now()) WHERE trace > 0 AND trace_at = 0")   # ردهای قدیمی: ۲ ساعت از همین الان
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS heist_jail_until DOUBLE PRECISION NOT NULL DEFAULT 0")   # زندانِ سرقت گروهی (فقط خلاف/سرقت رو قفل می‌کنه، نه کل ربات)
         await c.execute("CREATE TABLE IF NOT EXISTS tasks (task_id BIGSERIAL PRIMARY KEY, period TEXT NOT NULL CHECK(period IN ('daily', 'weekly')), title TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
         await c.execute("CREATE TABLE IF NOT EXISTS task_completions (task_id BIGINT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE, user_id BIGINT NOT NULL, period_key TEXT NOT NULL, completed BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(task_id, user_id, period_key))")
@@ -14172,6 +14174,9 @@ SHIFT_EMOJI_PAY = "5386757680679377085"   # اول خط حقوق شیفت
 SKIN_SEP = "٠"
 
 
+WORK_ENERGY_COST = 0.25   # هر شیفتِ کار این‌قدر انرژی کم می‌کنه
+
+
 def short_money(n: int) -> str:
     """۱۲۰۰۰۰۰ ← «1.2 میل»، ۸۰۰۰۰۰ ← «800 هزار»."""
     n = int(n)
@@ -14226,10 +14231,11 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "WITH o AS (SELECT jagh_machine AS old_m FROM users WHERE user_id = $3::bigint FOR UPDATE) "
         "UPDATE users SET jagh_machine = LEAST(o.old_m + $1::bigint, $5::bigint), "
         "balance = balance + $6::bigint + GREATEST(o.old_m + $1::bigint - $5::bigint, 0), "
-        "last_shift = $2::double precision, work_count = work_count + 1 FROM o "
+        "last_shift = $2::double precision, work_count = work_count + 1, "
+        "energy = GREATEST(COALESCE(energy, 0) - $7::double precision, 0) FROM o "
         "WHERE user_id = $3::bigint AND last_shift <= $2::double precision - $4::double precision "
         "RETURNING jagh_machine, o.old_m",
-        profit_part, now, q.from_user.id, float(SHIFT_COOLDOWN), JM_CAP, wallet_part,
+        profit_part, now, q.from_user.id, float(SHIFT_COOLDOWN), JM_CAP, wallet_part, WORK_ENERGY_COST,
     )
     new_bal = None if _r is None else 1
     if new_bal is None:
@@ -19575,6 +19581,14 @@ ROBBERY_TRACE_LIMIT = 100
 ROBBERY_TRACE_CLEAN_COST = 1_300_000
 ROBBERY_TRACE_CLEAN_AMOUNT = 12
 ROBBERY_TRACE_LOCK = 2 * 60 * 60
+ROBBERY_TRACE_TTL = 2 * 60 * 60   # اگه کاربر ردش رو پاک نکنه، ۲ ساعت بعد از آخرین خلاف خودکار صفر میشه
+
+
+async def _rob_expire(db, uid: int, now: float):
+    """رد خلاف‌هایی که ۲ ساعت از آخرین خلافشون گذشته صفر میشن (روی pool یا connection صدا زده میشه)."""
+    await db.execute("UPDATE robbery_profile SET trace=0, clean_cost=0, clean_step=0, trace_until=0 "
+                     "WHERE user_id=$1 AND trace>0 AND trace_at>0 AND trace_at + $3::double precision <= $2::double precision",
+                     uid, now, float(ROBBERY_TRACE_TTL))
 
 
 def _duration_fa(seconds: int) -> str:
@@ -19605,6 +19619,12 @@ def rob_view(owner: int, profile, now: float):
     """(متن، کیبورد) درست بر اساس وضعیت: بازداشت → فقط وثیقه | محرومیت رد → ردگم‌کن+تایمر | تایمر فعال → تایمر (+پاک‌کردن ردِ آخرین خلاف) | آزاد → گزینه‌های خلاف."""
     trace = int(profile['trace'] or 0)
     head = f"{SWORDS_CE} <b>بازار خلاف</b>\n\n{HG_CE} رد خلاف: <b>{trace}٪</b> از ۱۰۰٪\n"
+    try:
+        _left = float(profile['trace_at'] or 0) + ROBBERY_TRACE_TTL - now
+        if trace > 0 and _left > 0:
+            head += f"{HG_CE} پاک شدن خودکار رد: <b>{_duration_fa(_left)}</b> دیگه\n"
+    except Exception:
+        pass
     lock = f"<tg-emoji emoji-id=\"{CASINO_CLOSED_EID}\">🔒</tg-emoji>"
     timer_btn = btn("تایمر", "primary", icon=EID_HOURGLASS, callback_data=f"rb:timer:{owner}:club")
     try:
@@ -19641,6 +19661,7 @@ def rob_view(owner: int, profile, now: float):
 
 async def _rob_profile(uid: int):
     await pool.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", uid)
+    await _rob_expire(pool, uid, time.time())
     return await pool.fetchrow("SELECT * FROM robbery_profile WHERE user_id=$1", uid)
 
 
@@ -19693,6 +19714,7 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", owner)
+            await _rob_expire(conn, owner, now)
             profile = await conn.fetchrow("SELECT * FROM robbery_profile WHERE user_id=$1 FOR UPDATE", owner)
             bal = await conn.fetchval("SELECT balance FROM users WHERE user_id=$1 FOR UPDATE", owner)
             if action == "trace":
@@ -19746,8 +19768,8 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_trace = min(ROBBERY_TRACE_LIMIT, profile['trace'] + cfg['trace_step'])
                 trace_until = now + ROBBERY_TRACE_LOCK if new_trace >= ROBBERY_TRACE_LIMIT else 0
                 arrest_until = now + cfg['lock'] if not success else 0
-                await conn.execute("UPDATE robbery_profile SET trace=$1, cooldown_until=$2, arrest_until=GREATEST(arrest_until,$3), trace_until=GREATEST(trace_until,$4) WHERE user_id=$5",
-                                   new_trace, now+cfg['cooldown'], arrest_until, trace_until, owner)
+                await conn.execute("UPDATE robbery_profile SET trace=$1, cooldown_until=$2, arrest_until=GREATEST(arrest_until,$3), trace_until=GREATEST(trace_until,$4), trace_at=$6 WHERE user_id=$5",
+                                   new_trace, now+cfg['cooldown'], arrest_until, trace_until, owner, now)
                 if success:
                     payout = random.randint(*cfg['payout']); new_balance = bal + payout
                     await conn.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", payout, owner)
@@ -25421,20 +25443,22 @@ def _cafe_short(price: int) -> str:
 
 
 def _cafe_menu_text() -> str:
-    lines = [f"{CAFE_CE} کافه جینگو",
-             "هرچی بخوری انرژی می‌گیری؛ با دعوت یه رفیق، هر دو نفر انرژی می‌گیرید 🥂", ""]
+    lines = [f"کافه جینگو {CAFE_CE}",
+             f"{CAFE_CE} لطفا نوشیدنی مورد نظر را انتخاب کنید", ""]
     for k, (name, _e, _f, price, lo, hi) in CAFE_ITEMS.items():
         cost = f"رایگان (هر {CAFE_WATER_COOLDOWN // 60} دقیقه)" if price == 0 else f"{price:,} تومن"
         en = _fmt_en(lo) if lo == hi else f"{_fmt_en(lo)} تا {_fmt_en(hi)}"
-        lines.append(f"{_cafe_ce(k)} {name} — {cost} · ⚡ {en}")
-    lines += ["", "دعوت: ریپلای روی یه نفر + <code>جینگو دعوت به کافه</code>", f"ویژه‌ی لول {CAFE_MIN_LEVEL} به بالا"]
+        lines += [f"{_cafe_ce(k)} {name}", f"┘─ {cost} · ⚡ {en}"]
+    lines += ["", "👇 یکی از گزینه های زیر رو انتخاب کنید", "",
+              "دعوت: ریپلای روی یه نفر + <code>جینگو دعوت به کافه</code>", f"ویژه‌ی لول {CAFE_MIN_LEVEL} به بالا"]
     return B("\n".join(lines))
 
 
 def _cafe_kb(cb_fn) -> InlineKeyboardMarkup:
-    btns = [btn(f"{name} · {_cafe_short(price)}", "success" if price == 0 else "primary", icon=eid, callback_data=cb_fn(k))
+    # بی‌رنگ، سه‌تا سه‌تا (مثل پنل کازینو)
+    btns = [btn(f"{name} · {_cafe_short(price)}", None, icon=eid, callback_data=cb_fn(k))
             for k, (name, eid, _f, price, _lo, _hi) in CAFE_ITEMS.items()]
-    return InlineKeyboardMarkup([btns[i:i + 2] for i in range(0, len(btns), 2)])
+    return InlineKeyboardMarkup([btns[i:i + 3] for i in range(0, len(btns), 3)])
 
 
 async def _cafe_level(uid: int) -> int:
