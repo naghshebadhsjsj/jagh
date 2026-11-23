@@ -251,7 +251,7 @@ async def start_support_userbot():
     global USERBOT_CLIENT
     api_id = os.environ.get("TELEGRAM_API_ID", "").strip()
     api_hash = os.environ.get("TELEGRAM_API_HASH", "").strip()
-    session = os.environ.get("USERBOT_SESSION", "").strip()
+    session = (await _ub_db_session()) or os.environ.get("USERBOT_SESSION", "").strip()
     if not (api_id and api_hash and session):
         log.warning("Support userbot disabled: TELEGRAM_API_ID, TELEGRAM_API_HASH or USERBOT_SESSION is missing")
         return
@@ -411,6 +411,232 @@ async def stop_support_userbot():
             await USERBOT_CLIENT.disconnect()
         finally:
             USERBOT_CLIENT = None
+
+
+# ───────── ورود یوزربات از داخل پنل پشتیبانی (شماره ← کد با کیبورد شیشه‌ای ← رمز دومرحله‌ای) ─────────
+# نشست تو جدول userbot_session ذخیره میشه و از متغیر USERBOT_SESSION اولویت داره. فقط صاحب‌ها.
+_UB_LOGIN: dict = {}     # uid -> {"client", "phone", "hash", "code", "step", "chat", "mid", "t"}
+_UB_CODE_LEN = 5
+
+
+async def _ub_db_session() -> str:
+    try:
+        return (await pool.fetchval("SELECT session FROM userbot_session WHERE id=1")) or ""
+    except Exception:
+        log.warning("userbot session read failed", exc_info=True)
+        return ""
+
+
+async def _ub_drop(uid: int):
+    st = _UB_LOGIN.pop(uid, None)
+    if st and st.get("client") is not None:
+        try:
+            await st["client"].disconnect()
+        except Exception:
+            pass
+
+
+def _ub_keys_ok() -> bool:
+    return bool(os.environ.get("TELEGRAM_API_ID", "").strip() and os.environ.get("TELEGRAM_API_HASH", "").strip())
+
+
+async def _ub_status_text() -> str:
+    src = "ذخیره‌شده تو ربات" if await _ub_db_session() else ("متغیر USERBOT_SESSION" if os.environ.get("USERBOT_SESSION", "").strip() else "ندارد")
+    if USERBOT_CLIENT is not None:
+        try:
+            me = await USERBOT_CLIENT.get_me()
+            who = f"{me.first_name or ''} (آیدی {me.id})"
+        except Exception:
+            who = "نامشخص"
+        state = f"🟢 روشن؛ اکانت: {who}"
+    else:
+        state = "🔴 خاموش"
+    keys = "✅" if _ub_keys_ok() else "❌ TELEGRAM_API_ID / TELEGRAM_API_HASH تو Railway نیست"
+    return f"🤖 یوزربات\n\nوضعیت: {state}\nنشست: {src}\nکلیدهای API: {keys}"
+
+
+def _ub_home_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("📲 ورود با شماره", "success", callback_data="ub:login")],
+        [btn("🔄 راه‌اندازی مجدد", "primary", callback_data="ub:restart"), btn("🚪 خروج", "danger", callback_data="ub:logout")],
+        [btn("🔙 پنل", None, icon=EID_BACK, callback_data="ub:back")],
+    ])
+
+
+def _ub_code_view(st: dict):
+    shown = " ".join(list(st["code"]) + ["•"] * (_UB_CODE_LEN - len(st["code"])))
+    text = f"🔐 کدی که تلگرام برای {st['phone']} فرستاد رو با دکمه‌ها بزن\n\n{shown}\n\n(کد رو تو چت نفرست؛ تلگرام باطلش می‌کنه.)"
+    d = lambda x: btn(str(x), None, callback_data=f"ub:d:{x}")
+    rows = [[d(1), d(2), d(3)], [d(4), d(5), d(6)], [d(7), d(8), d(9)],
+            [btn("⌫", "danger", callback_data="ub:del"), d(0), btn("✅", "success", callback_data="ub:ok")],
+            [btn("❌ لغو", "danger", callback_data="ub:cancel")]]
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def _ub_edit(bot, st: dict, text: str, kb):
+    try:
+        await bot.edit_message_text(text, chat_id=st["chat"], message_id=st["mid"], reply_markup=kb)
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            log.warning("userbot panel edit failed", exc_info=True)
+
+
+async def _ub_finish(bot, uid: int, st: dict):
+    """ورود موفق: نشست رو ذخیره می‌کنه و یوزربات رو دوباره بالا میاره."""
+    sess = st["client"].session.save()
+    await _ub_drop(uid)
+    await pool.execute("INSERT INTO userbot_session(id, session, uid, created) VALUES(1,$1,$2,$3) "
+                       "ON CONFLICT(id) DO UPDATE SET session=EXCLUDED.session, uid=EXCLUDED.uid, created=EXCLUDED.created",
+                       sess, uid, time.time())
+    await stop_support_userbot()
+    await start_support_userbot()
+    note = "" if USERBOT_CLIENT is not None else "\n\n⚠️ وارد شد ولی یوزربات بالا نیومد؛ این اکانت باید تو لیست پشتیبان‌ها دسترسی «panel» و «miniapp» داشته باشه (لاگ Railway رو هم ببین)."
+    await _ub_edit(bot, st, "✅ ورود انجام شد." + note + "\n\n" + await _ub_status_text(), _ub_home_kb())
+
+
+async def _ub_submit_code(bot, uid: int, st: dict):
+    from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneCodeExpiredError, FloodWaitError
+    try:
+        await st["client"].sign_in(phone=st["phone"], code=st["code"], phone_code_hash=st["hash"])
+    except SessionPasswordNeededError:
+        st["step"] = "pwd"
+        await _ub_edit(bot, st, "🔑 این اکانت رمز دومرحله‌ای داره؛ رمزش رو تو چت بفرست (پیامت خودکار پاک میشه).",
+                       InlineKeyboardMarkup([[btn("❌ لغو", "danger", callback_data="ub:cancel")]]))
+        return "pwd"
+    except PhoneCodeInvalidError:
+        st["code"] = ""
+        return "کد اشتباهه؛ دوباره بزن."
+    except PhoneCodeExpiredError:
+        await _ub_drop(uid)
+        await _ub_edit(bot, st, "⌛ کد منقضی شد؛ دوباره «ورود با شماره» رو بزن.\n\n" + await _ub_status_text(), _ub_home_kb())
+        return "منقضی شد."
+    except FloodWaitError as e:
+        await _ub_drop(uid)
+        await _ub_edit(bot, st, f"⏳ تلگرام محدود کرد؛ {getattr(e, 'seconds', 0)} ثانیه دیگه امتحان کن.", _ub_home_kb())
+        return "محدودیت تلگرام."
+    await _ub_finish(bot, uid, st)
+    return "✅ وارد شد"
+
+
+async def userbot_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    if uid not in OWNER_IDS:
+        await q.answer("فقط صاحب‌های ربات.", show_alert=True); return
+    p = q.data.split(":")
+    act = p[1]
+    st = _UB_LOGIN.get(uid)
+    if st and time.time() - st["t"] > 600:
+        await _ub_drop(uid); st = None
+    try:
+        if act == "home":
+            await q.answer()
+            await q.edit_message_text(await _ub_status_text(), reply_markup=_ub_home_kb())
+        elif act == "back":
+            await _ub_drop(uid)
+            await q.answer()
+            await q.edit_message_text(admin_menu_text(), reply_markup=admin_menu_kb(uid))
+        elif act == "cancel":
+            await _ub_drop(uid)
+            await q.answer("لغو شد.")
+            await q.edit_message_text(await _ub_status_text(), reply_markup=_ub_home_kb())
+        elif act == "login":
+            if not _ub_keys_ok():
+                await q.answer("اول TELEGRAM_API_ID و TELEGRAM_API_HASH رو تو Railway Variables بذار.", show_alert=True); return
+            await _ub_drop(uid)
+            _UB_LOGIN[uid] = {"client": None, "phone": "", "hash": "", "code": "", "step": "phone",
+                              "chat": q.message.chat_id, "mid": q.message.message_id, "t": time.time()}
+            await q.answer()
+            await q.edit_message_text("📲 شماره‌ی اکانتی که می‌خوای یوزربات بشه رو با کد کشور بفرست (مثل +989121234567).",
+                                      reply_markup=InlineKeyboardMarkup([[btn("❌ لغو", "danger", callback_data="ub:cancel")]]))
+        elif act in ("d", "del", "ok"):
+            if not st or st["step"] != "code":
+                await q.answer("این مرحله تموم شده؛ دوباره «ورود با شماره» رو بزن.", show_alert=True); return
+            if act == "d" and len(st["code"]) < _UB_CODE_LEN:
+                st["code"] += p[2]
+            elif act == "del":
+                st["code"] = st["code"][:-1]
+            elif act == "ok" and len(st["code"]) < 4:
+                await q.answer("کد کامل نیست.", show_alert=True); return
+            if act == "ok" or len(st["code"]) >= _UB_CODE_LEN:
+                await q.answer("⏳ در حال ورود...")
+                res = await _ub_submit_code(context.bot, uid, st)
+                if uid in _UB_LOGIN and st["step"] == "code":
+                    text, kb = _ub_code_view(st)
+                    await _ub_edit(context.bot, st, text, kb)
+                    await context.bot.send_message(st["chat"], "❌ " + str(res))
+                return
+            await q.answer()
+            text, kb = _ub_code_view(st)
+            await _ub_edit(context.bot, st, text, kb)
+        elif act == "restart":
+            await q.answer("⏳")
+            await stop_support_userbot()
+            await start_support_userbot()
+            await q.edit_message_text(await _ub_status_text(), reply_markup=_ub_home_kb())
+        elif act == "logout":
+            await q.answer("خارج شد.")
+            await stop_support_userbot()
+            await pool.execute("DELETE FROM userbot_session WHERE id=1")
+            await q.edit_message_text(await _ub_status_text(), reply_markup=_ub_home_kb())
+        else:
+            await q.answer()
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            log.warning("userbot_cb failed", exc_info=True)
+        try:
+            await q.answer()
+        except Exception:
+            pass
+    except Exception:
+        log.exception("userbot_cb failed")
+        try:
+            await q.answer("یه مشکلی پیش اومد؛ لاگ Railway رو ببین.", show_alert=True)
+        except Exception:
+            pass
+
+
+async def userbot_login_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """پیام متنیِ مرحله‌ی شماره / رمز دومرحله‌ای. True یعنی مصرف شد."""
+    msg, user = update.effective_message, update.effective_user
+    st = _UB_LOGIN.get(user.id) if user else None
+    if not st or st["step"] not in ("phone", "pwd") or not msg or not msg.text:
+        return False
+    if user.id not in OWNER_IDS:
+        return False
+    text = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+    bot = context.bot
+    try:
+        if st["step"] == "phone":
+            phone = "+" + re.sub(r"\D", "", text.translate(_DIG))
+            if len(phone) < 8:
+                await bot.send_message(msg.chat_id, "شماره معتبر نیست؛ با کد کشور بفرست (مثل +989121234567).")
+                return True
+            from telethon import TelegramClient
+            from telethon.sessions import StringSession
+            client = TelegramClient(StringSession(), int(os.environ["TELEGRAM_API_ID"].strip()), os.environ["TELEGRAM_API_HASH"].strip())
+            await client.connect()
+            sent = await client.send_code_request(phone)
+            st.update(client=client, phone=phone, hash=sent.phone_code_hash, code="", step="code", t=time.time())
+            ctext, kb = _ub_code_view(st)
+            await _ub_edit(bot, st, ctext, kb)
+        else:
+            from telethon.errors import PasswordHashInvalidError
+            try:
+                await st["client"].sign_in(password=text)
+            except PasswordHashInvalidError:
+                await bot.send_message(msg.chat_id, "❌ رمز اشتباهه؛ دوباره بفرست.")
+                return True
+            await _ub_finish(bot, user.id, st)
+    except Exception as e:
+        log.exception("userbot login failed")
+        await _ub_drop(user.id)
+        await bot.send_message(msg.chat_id, f"❌ ورود نشد: {type(e).__name__}: {str(e)[:150]}\nدوباره از «یوزربات» امتحان کن.")
+    return True
 
 TRIGGER_WORD = ""
 COOLDOWN_SECONDS = 5 * 60 + 5  # پایه ۵:۰۵؛ با پنج ارتقا به ۴:۴۰ می‌رسد
@@ -760,6 +986,7 @@ async def init_db(app: Application):
             PRIMARY KEY(user_id, role)
         )""")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_profile (user_id BIGINT PRIMARY KEY, trace INTEGER NOT NULL DEFAULT 0, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, arrest_until DOUBLE PRECISION NOT NULL DEFAULT 0, trace_until DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("CREATE TABLE IF NOT EXISTS userbot_session (id INTEGER PRIMARY KEY, session TEXT NOT NULL, uid BIGINT NOT NULL DEFAULT 0, created DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE TABLE IF NOT EXISTS fastfood (user_id BIGINT PRIMARY KEY, d TEXT NOT NULL DEFAULT '{}', created DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS bail_amount BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_cost BIGINT NOT NULL DEFAULT 0")
@@ -8692,7 +8919,7 @@ def _guide_sections() -> list:
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
         _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
         _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه. اسلات، تاس، برج گنج، بازی‌های ورزشی و سم یا خوراکی هر ۳ دقیقه یک بار؛ بت، مین و موشک هر ۱۵ ثانیه یک بار.\n<code>جینگو بت 10m</code> (بدون سقف، هر ۱۵ ثانیه یک بار)"),
-        _gq("🍔 فست فودی", "<code>فست فودی</code>\nفست فودی بساز (۱ میلیون تومن، ویژه‌ی لول ۳ به بالا). منوی اصلی سه بخش داره:\n• «پخت و پز»: ۶ تا سرخ کن داری؛ اولی رایگانه و بقیه رو باید بخری (هرکدوم ۵ میلیون). سرخ کن خالی رو بزن، غذا انتخاب کن و وقتی پخت تموم شد دکمه‌ش میشه «برداشت». هر غذا با فروش غذای قبلی باز میشه.\n• «سفارشات»: هر مشتری یه سفارش جدا داره؛ بزن روش و تحویلش بده (یا «تحویل همه»).\n• «یخچال»: نوشیدنی‌ها و سس‌ها رایگانن، فقط بردار."),
+        _gq("🍔 فست فودی", "<code>فست فودی</code>\nفست فودی بساز (۱ میلیون تومن، ویژه‌ی لول ۳ به بالا). منوی اصلی سه بخش داره:\n• «پخت و پز»: ۶ تا سرخ کن (اولی رایگان، بقیه هرکدوم ۵m) و ۸ تا بشقاب (۲ تا از اول، بقیه هرکدوم ۷m). غذا رو تو سرخ کن بپز و «برداشت» کن تا بره رو بشقاب؛ اگه بشقاب‌ها پر باشن برداشت نمیشه. غذای آماده اگه ۳۰ دقیقه برداشته نشه میسوزه و باید بره تو سطل زباله. هر غذا با فروش غذای قبلی باز میشه.\n• «سفارشات»: هر مشتری یه سفارش جدا داره؛ بعضی‌ها ۳ چیز می‌خوان و بیشتر پول میدن.\n• «یخچال»: نوشیدنی و سس رایگانه، ظرفیت کل ۶ تا."),
         _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
         _gq("📋 تسک", "<code>تسک</code>\nتسک‌های روزانه و هفتگی با جایزه؛ ربات خودش پیشرفتت رو حساب می‌کنه."),
@@ -12442,6 +12669,8 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await event_text(update, context, msg.text or ""):
         return
     if await spy_text(update, context, msg.text or ""):
+        return
+    if await userbot_login_input(update, context):
         return
     if await admin_input(update, context):
         return
@@ -20145,6 +20374,8 @@ def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
 
     if hp("panel"):
         rows.append([btn("📮 پست گذاشتن", "success", callback_data="ad:post")])
+    if uid in OWNER_IDS:
+        rows.append([btn("🤖 یوزربات", "primary", callback_data="ub:home")])
 
     add(("money_sub", btn("💸 کم کردن پول", "primary", callback_data="ad:money")),
         ("money_add", btn("➕ افزودن پول", "success", callback_data="ad:money_add")))
@@ -25423,6 +25654,12 @@ FF_FRYER_COUNT = 6                          # تعداد سرخ کن‌ها (ا�
 FF_FRYER_COST = 5_000_000                   # قیمت هر سرخ کن بعدی (5m)
 FF_FRYER_EID = "5334886776530026718"        # ایموجی سرخ کن
 FF_COOK_EID = "5787676174633143776"         # ایموجی دکمه‌ی پخت و پز
+FF_PLATE_EID = "5318791627106441787"        # ایموجی بشقاب
+FF_PLATE_START = 2                          # بشقاب‌های اولیه
+FF_PLATE_MAX = 8                            # حداکثر بشقاب (جمعاً)
+FF_PLATE_COST = 7_000_000                   # قیمت هر بشقاب بعدی (7m)
+FF_BURN_AFTER = 30 * 60                     # غذای آماده اگه ۳۰ دقیقه برداشته نشه میسوزه
+FF_FRIDGE_CAP = 6                           # ظرفیت کل نوشیدنی و سس تو یخچال
 FF_STOCK_MAX = 30                           # حداکثر موجودی هر آیتم تو یخچال
 # غذا: (اسم، ایموجی پرمیوم، ایموجی جایگزین، هزینه‌ی پخت، فروش از، فروش تا، دقیقه‌ی پخت، مشتری تو هر ۲۵ دقیقه، اسم کوتاه دکمه)
 FF_FOODS = {
@@ -25469,7 +25706,7 @@ def _ffk(n: int) -> str:
 
 def _ff_new() -> dict:
     # fr = سرخ‌کن‌های خریده‌شده (اولی از اول داده میشه)؛ هر کدوم {"f": غذای در حال پخت یا "", "at": شروع پخت}
-    return {"sold": {}, "stock": {}, "fr": [{"f": "", "at": 0}], "cyc": 0, "gen": {}, "orders": [], "oid": 0}
+    return {"sold": {}, "stock": {}, "fr": [{"f": "", "at": 0}], "pl": FF_PLATE_START, "cyc": 0, "gen": {}, "orders": [], "oid": 0}
 
 
 def _ff_parse(raw) -> dict:
@@ -25490,6 +25727,10 @@ def _ff_parse(raw) -> dict:
         if s.get("f") not in FF_FOODS:
             s["f"], s["at"] = "", 0
     d["fr"] = fr or [{"f": "", "at": 0}]
+    try:
+        d["pl"] = max(FF_PLATE_START, min(FF_PLATE_MAX, int(d["pl"])))
+    except Exception:
+        d["pl"] = FF_PLATE_START
     return d
 
 
@@ -25508,6 +25749,19 @@ def _ff_left(s: dict, now: float) -> int:
     if not s.get("f"):
         return 0
     return max(0, int(float(s["at"]) + FF_FOODS[s["f"]][6] * 60 - now + 0.999))
+
+
+def _ff_burnt(s: dict, now: float) -> bool:
+    """غذای آماده‌ای که بیشتر از ۳۰ دقیقه تو سرخ کن مونده."""
+    return bool(s.get("f")) and now > float(s["at"]) + FF_FOODS[s["f"]][6] * 60 + FF_BURN_AFTER
+
+
+def _ff_plate_used(d: dict) -> int:
+    return sum(int(d["stock"].get(k, 0)) for k in FF_FOODS)
+
+
+def _ff_fridge_used(d: dict) -> int:
+    return sum(int(d["stock"].get(k, 0)) for k in FF_FRIDGE)
 
 
 def _ff_mmss(sec: int) -> str:
@@ -25534,14 +25788,23 @@ def _ff_orders(d: dict, now: float):
                 spec = FF_FOODS.get(k) or FF_FRIDGE[k]
                 lo, hi = (spec[4], spec[5])
                 lines.append([k, qty, _ff_roll(lo, hi)])
+            big = random.random() < 0.25                       # سفارش ۳ تایی: پول بیشتر میدن
             add(p, 2 if random.random() < 0.3 else 1)
             others = [x for x in un if x != p]
-            if others and random.random() < 0.45:
+            if others and (big or random.random() < 0.4):
                 add(random.choice(others), 1)
-            if random.random() < 0.55:
+            if big or random.random() < 0.7:                   # نوشیدنی بیشتر از سس
                 add(random.choice(FF_DRINKS), 1)
-            if random.random() < 0.30:
+            if random.random() < 0.12:                         # سس کم‌تر
                 add(random.choice(FF_SAUCES), 1)
+            while big and len(lines) < 3:
+                pool_ = [x for x in FF_DRINKS + un if x not in [l[0] for l in lines]]
+                if not pool_:
+                    break
+                add(random.choice(pool_), 1)
+            if big:
+                for ln in lines:
+                    ln[2] = int(round(ln[2] * 1.25 / 1000)) * 1000
             d["oid"] += 1
             d["orders"].append({"id": d["oid"], "l": lines})
 
@@ -25571,7 +25834,7 @@ def _ff_serve(d: dict, o: dict) -> int:
 def _ff_panel(uid: int, d: dict, now: float):
     """منوی اصلی فست فودی: فقط موجودی + دکمه‌های بخش‌ها (پخت و پز / سفارشات / یخچال)."""
     un = _ff_unlocked(d)
-    ready = sum(1 for s in d["fr"] if s["f"] and _ff_left(s, now) == 0)
+    ready = sum(1 for s in d["fr"] if s["f"] and _ff_left(s, now) == 0 and not _ff_burnt(s, now))
     cooking = sum(1 for s in d["fr"] if s["f"]) - ready
     lines = [f"فست فودی جینگو {_ffce('burger')}", "", "📦 موجودی آماده:"]
     for k in un:
@@ -25583,6 +25846,7 @@ def _ff_panel(uid: int, d: dict, now: float):
     lines += ["",
               f'<tg-emoji emoji-id="{FF_FRYER_EID}">🍳</tg-emoji> سرخ کن‌ها: {len(d["fr"])}/{FF_FRYER_COUNT}'
               + (f" · در حال پخت {cooking}" if cooking else "") + (f" · ✅ {ready} آماده‌ی برداشت" if ready else ""),
+              f'<tg-emoji emoji-id="{FF_PLATE_EID}">🍽</tg-emoji> بشقاب‌ها: {_ff_plate_used(d)}/{d["pl"]}',
               f"🧾 مشتری‌های منتظر: {len(d['orders'])}"]
     cook_txt = "پخت و پز" + (f" (✅ {ready})" if ready else "")
     rows = [[btn(cook_txt, "success", icon=FF_COOK_EID, callback_data=f"ff:k:{uid}")],
@@ -25593,10 +25857,11 @@ def _ff_panel(uid: int, d: dict, now: float):
 
 
 def _ff_cook_view(uid: int, d: dict, now: float):
-    """بخش پخت و پز: ۶ تا سرخ کن (اولی از اول، بقیه با خرید)."""
+    """بخش پخت و پز: ۶ تا سرخ کن (اولی از اول، بقیه با خرید) + بشقاب‌ها (۲ تا از اول، تا ۸ تا)."""
     fe = f'<tg-emoji emoji-id="{FF_FRYER_EID}">🍳</tg-emoji>'
+    pe = f'<tg-emoji emoji-id="{FF_PLATE_EID}">🍽</tg-emoji>'
     lines = [f'<tg-emoji emoji-id="{FF_COOK_EID}">🍳</tg-emoji> پخت و پز',
-             "یه سرخ کن خالی رو بزن و غذا انتخاب کن؛ وقتی پخت تموم شد دکمه‌ش میشه «برداشت».", ""]
+             f"غذا رو تو سرخ کن بپز، بعد «برداشت» کن تا بره رو بشقاب. اگه ۳۰ دقیقه بعد آماده شدن برداشت نکنی میسوزه و باید بندازیش تو سطل.", ""]
     btns = []
     for i in range(FF_FRYER_COUNT):
         if i < len(d["fr"]):
@@ -25604,18 +25869,36 @@ def _ff_cook_view(uid: int, d: dict, now: float):
             if not s["f"]:
                 lines.append(f"{fe} سرخ کن {i + 1} · خالی")
                 btns.append(btn(f"سرخ کن {i + 1}", None, icon=FF_FRYER_EID, callback_data=f"ff:x:{uid}:{i}"))
+            elif _ff_burnt(s, now):
+                lines.append(f"🔥 سرخ کن {i + 1} · {_ffname(s['f'])} سوخت!")
+                btns.append(btn("🗑 سطل زباله", "danger", callback_data=f"ff:j:{uid}:{i}"))
             else:
                 left = _ff_left(s, now)
                 if left == 0:
-                    lines.append(f"{_ffce(s['f'])} سرخ کن {i + 1} · {_ffname(s['f'])} ✅ آماده")
+                    burn_in = int(float(s["at"]) + FF_FOODS[s["f"]][6] * 60 + FF_BURN_AFTER - now)
+                    lines.append(f"{_ffce(s['f'])} سرخ کن {i + 1} · {_ffname(s['f'])} ✅ آماده (تا {_ff_mmss(max(0, burn_in))} دیگه میسوزه)")
                     btns.append(btn("برداشت", "success", icon=FF_FOODS[s["f"]][1], callback_data=f"ff:t:{uid}:{i}"))
                 else:
                     lines.append(f"{_ffce(s['f'])} سرخ کن {i + 1} · {_ffname(s['f'])} · ⏱ {_ff_mmss(left)}")
                     btns.append(btn(f"⏳ {_ff_mmss(left)}", None, icon=FF_FOODS[s["f"]][1], callback_data=f"ff:w:{uid}:{i}"))
         else:
-            lines.append(f"🔒 سرخ کن {i + 1} · قفل (قیمت {FF_FRYER_COST // 1_000_000}m)")
+            lines.append(f"🔒 سرخ کن {i + 1} · قفل ({FF_FRYER_COST // 1_000_000}m)")
             btns.append(btn(f"🔒 سرخ کن {i + 1} · {FF_FRYER_COST // 1_000_000}m", "primary", callback_data=f"ff:y:{uid}:{i}"))
     rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+    # بشقاب‌ها: هر واحد غذای آماده یه بشقاب رو پر می‌کنه
+    plated = [k for k in FF_FOODS for _ in range(int(d["stock"].get(k, 0)))]
+    used = len(plated)
+    lines += ["", f"{pe} بشقاب‌ها {used}/{d['pl']}" + (" (پره!)" if used >= d["pl"] else "") + (f" · بشقاب بعدی {FF_PLATE_COST // 1_000_000}m" if d["pl"] < FF_PLATE_MAX else "")]
+    pb = []
+    for i in range(FF_PLATE_MAX):
+        if i < d["pl"]:
+            if i < len(plated):
+                pb.append(btn("پُر", None, icon=FF_FOODS[plated[i]][1], callback_data=f"ff:i:{uid}:{i}"))
+            else:
+                pb.append(btn("خالی", None, icon=FF_PLATE_EID, callback_data=f"ff:i:{uid}:{i}"))
+        else:
+            pb.append(btn(f"🔒 {FF_PLATE_COST // 1_000_000}m", "primary", callback_data=f"ff:z:{uid}:{i}"))
+    rows += [pb[i:i + 4] for i in range(0, len(pb), 4)]
     rows.append([btn("🔄 بروزرسانی", None, callback_data=f"ff:k:{uid}"),
                  btn("🔙 فست فودی", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
     return B("\n".join(lines)), InlineKeyboardMarkup(rows)
@@ -25678,14 +25961,14 @@ def _ff_order_view(uid: int, d: dict, oid: int):
 
 
 def _ff_fridge_view(uid: int, d: dict):
-    lines = [f'<tg-emoji emoji-id="{FF_FRIDGE_EID}">🧊</tg-emoji> یخچال فست فودی',
-             "نوشیدنی و سس رایگانه؛ بردار! مشتری‌ها همراه غذا اینارو هم سفارش می‌دن.", ""]
+    used = _ff_fridge_used(d)
+    lines = [f'<tg-emoji emoji-id="{FF_FRIDGE_EID}">🧊</tg-emoji> یخچال فست فودی · ظرفیت {used}/{FF_FRIDGE_CAP}',
+             "نوشیدنی و سس رایگانه؛ هر کدوم رو بزنی یکی برمی‌داری.", ""]
     btns = []
     for k, (name, _e, _f, cost, lo, hi) in FF_FRIDGE.items():
-        lines.append(f"{_ffce(k)} {name} · موجودی {int(d['stock'].get(k, 0))}")
-        lines.append(f"┘─ رایگان · فروش {_ffk(lo)} تا {_ffk(hi)}")
-        btns.append(btn(f"{name} · رایگان", None, icon=FF_FRIDGE[k][1], callback_data=f"ff:b:{uid}:{k}"))
-    rows = [btns[i:i + 3] for i in range(0, len(btns), 3)]
+        lines.append(f"{_ffce(k)} {name} · {int(d['stock'].get(k, 0))}")
+        btns.append(btn(str(int(d["stock"].get(k, 0))), None, icon=FF_FRIDGE[k][1], callback_data=f"ff:b:{uid}:{k}"))
+    rows = [btns[i:i + 4] for i in range(0, len(btns), 4)]
     rows.append([btn("🔙 فست فودی", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
     return B("\n".join(lines)), InlineKeyboardMarkup(rows)
 
@@ -25911,18 +26194,48 @@ async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if i < len(d["fr"]) and d["fr"][i]["f"]:
                         left = _ff_left(d["fr"][i], now)
                         toast = f"⏳ {_ff_mmss(left)} دیگه آماده میشه" if left else "✅ آماده‌ست؛ دوباره بزن."
-                elif act == "t":                                 # برداشت
+                elif act == "t":                                 # برداشت (میره رو بشقاب)
                     i = int(p[3]); view = "k"
                     s = d["fr"][i] if i < len(d["fr"]) else None
                     if not s or not s["f"]:
                         toast, alert = "چیزی تو این سرخ کن نیست.", True
+                    elif _ff_burnt(s, now):
+                        toast, alert = "🔥 این غذا سوخته؛ باید بندازیش تو سطل زباله.", True
                     elif _ff_left(s, now) > 0:
                         toast, alert = f"⏳ {_ff_mmss(_ff_left(s, now))} دیگه آماده میشه", True
+                    elif _ff_plate_used(d) >= int(d["pl"]):
+                        toast, alert = "🍽 بشقاب‌ها پره! اول سفارش تحویل بده یا بشقاب بخر.", True
                     else:
                         k = s["f"]
                         d["stock"][k] = int(d["stock"].get(k, 0)) + 1
                         d["fr"][i] = {"f": "", "at": 0}
-                        toast = f"✅ {FF_FOODS[k][0]} برداشتی (موجودی {d['stock'][k]})"
+                        toast = f"✅ {FF_FOODS[k][0]} رفت رو بشقاب ({_ff_plate_used(d)}/{d['pl']})"
+                elif act == "j":                                 # سطل زباله
+                    i = int(p[3]); view = "k"
+                    s = d["fr"][i] if i < len(d["fr"]) else None
+                    if s and _ff_burnt(s, now):
+                        d["fr"][i] = {"f": "", "at": 0}
+                        toast = "🗑 غذای سوخته انداخته شد."
+                    else:
+                        toast, alert = "این سرخ کن غذای سوخته‌ای نداره.", True
+                elif act == "i":                                 # بشقاب
+                    view = "k"
+                    i = int(p[3])
+                    plated = [k for k in FF_FOODS for _ in range(int(d["stock"].get(k, 0)))]
+                    toast = f"🍽 {FF_FOODS[plated[i]][0]}" if i < len(plated) else "🍽 بشقاب خالیه."
+                elif act == "z":                                 # خرید بشقاب
+                    i = int(p[3]); view = "k"
+                    if i < int(d["pl"]):
+                        toast, alert = "این بشقاب رو داری.", True
+                    elif i != int(d["pl"]) or i >= FF_PLATE_MAX:
+                        toast, alert = f"بشقاب‌ها به ترتیب خریده میشن؛ اول بشقاب {int(d['pl']) + 1} رو بخر.", True
+                    else:
+                        ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", FF_PLATE_COST, uid)
+                        if ok is None:
+                            toast, alert = f"بشقاب {FF_PLATE_COST:,} تومنه؛ پول جیبت کافی نیست.", True
+                        else:
+                            d["pl"] = int(d["pl"]) + 1
+                            toast = f"🍽 بشقاب {i + 1} مال توئه! ({d['pl']}/{FF_PLATE_MAX})"
                 elif act == "y":                                 # خرید سرخ کن
                     i = int(p[3]); view = "k"
                     if i < len(d["fr"]):
@@ -25969,8 +26282,8 @@ async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     k = p[3]
                     if k not in FF_FRIDGE:
                         toast, alert = "آیتم نامعتبره.", True
-                    elif int(d["stock"].get(k, 0)) >= FF_STOCK_MAX:
-                        toast, alert = f"یخچال پره؛ حداکثر {FF_STOCK_MAX} تا.", True
+                    elif _ff_fridge_used(d) >= FF_FRIDGE_CAP:
+                        toast, alert = f"ظرفیت یخچال پره؛ حداکثر {FF_FRIDGE_CAP} تا نوشیدنی و سس.", True
                     else:
                         d["stock"][k] = int(d["stock"].get(k, 0)) + 1
                         toast = f"✅ {FF_FRIDGE[k][0]} برداشتی (رایگان)"
@@ -26340,6 +26653,7 @@ def main():
     app.add_handler(CommandHandler("support", support_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("addsupport", add_support_cmd, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(support_cb, pattern=r"^sup:"))
+    app.add_handler(CallbackQueryHandler(userbot_cb, pattern=r"^ub:"))
     app.add_handler(CallbackQueryHandler(admin_cb, pattern=r"^ad:"))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(gw_precheckout))
