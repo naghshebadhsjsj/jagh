@@ -760,6 +760,7 @@ async def init_db(app: Application):
             PRIMARY KEY(user_id, role)
         )""")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_profile (user_id BIGINT PRIMARY KEY, trace INTEGER NOT NULL DEFAULT 0, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, arrest_until DOUBLE PRECISION NOT NULL DEFAULT 0, trace_until DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("CREATE TABLE IF NOT EXISTS fastfood (user_id BIGINT PRIMARY KEY, d TEXT NOT NULL DEFAULT '{}', created DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS bail_amount BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_cost BIGINT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS clean_step INT NOT NULL DEFAULT 0")
@@ -8691,6 +8692,7 @@ def _guide_sections() -> list:
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
         _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
         _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه. اسلات، تاس، برج گنج، بازی‌های ورزشی و سم یا خوراکی هر ۳ دقیقه یک بار؛ بت، مین و موشک هر ۱۵ ثانیه یک بار.\n<code>جینگو بت 10m</code> (بدون سقف، هر ۱۵ ثانیه یک بار)"),
+        _gq("🍔 فست فودی", "<code>فست فودی</code>\nفست فودی بساز (۱ میلیون تومن، ویژه‌ی لول ۳ به بالا)، غذا بپز و به مشتری‌ها بفروش؛ هر غذا با فروش غذای قبلی باز میشه. یخچال برای نوشیدنی و سس."),
         _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
         _gq("📋 تسک", "<code>تسک</code>\nتسک‌های روزانه و هفتگی با جایزه؛ ربات خودش پیشرفتت رو حساب می‌کنه."),
@@ -9909,6 +9911,8 @@ async def _do_account_transfer(src: int, dst: int) -> str | None:
             # وضعیت خلاف (بازداشت/ردگیری/کول‌داون) هم همراه اکانت میره تا انتقال راه فرار نباشه
             await conn.execute("DELETE FROM robbery_state WHERE user_id=$1", dst)
             await conn.execute("UPDATE robbery_state SET user_id=$2 WHERE user_id=$1", src, dst)
+            await conn.execute("DELETE FROM fastfood WHERE user_id=$1", dst)
+            await conn.execute("UPDATE fastfood SET user_id=$2 WHERE user_id=$1", src, dst)
             await conn.execute("DELETE FROM robbery_profile WHERE user_id=$1", dst)
             await conn.execute("UPDATE robbery_profile SET user_id=$2 WHERE user_id=$1", src, dst)
             await conn.execute("INSERT INTO robbery_profile(user_id) VALUES($1) ON CONFLICT DO NOTHING", src)
@@ -11908,6 +11912,8 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await pet_text(update, context, text):
         return
     if await cafe_text(update, context, text):
+        return
+    if await fastfood_text(update, context, text):
         return
     if _word_key(text) in ("تسک", "تسکها", "تسکروزانه", "تسکهفتگی", "tasks"):
         await show_tasks(update, context)
@@ -25404,6 +25410,430 @@ async def boss_loop(app: Application):
             log.exception("boss loop failed")
 
 
+# ───────────────────────── فست فودی جینگو ─────────────────────────
+# «جینگو فست فودی» یا «فست فودی»: ساخت (۱ میلیون) ← آشپزخونه با عکس و کپشن ← پخت غذاها ← سفارش مشتری‌ها ← یخچال (نوشیدنی و سس).
+# هر غذا با فروش تعداد مشخصی از غذای قبلی (به مشتری‌ها) باز میشه. وضعیت هر کاربر تو جدول fastfood (ستون d = JSON).
+FF_IMG = BASE_DIR / "fastfood.jpg"          # عکس فست فودی؛ کنار bot.py
+_FF_FID = None
+FF_WORDS = {"فستفودی", "جینگوفستفودی", "فستفود", "جینگوفستفود"}
+FF_BUILD_COST = 1_000_000                   # قیمت ساخت
+FF_MIN_LEVEL = 3                            # فقط لول ۳ به بالا (مثل کافه)
+FF_CYCLE = 25 * 60                          # مشتری‌ها هر ۲۵ دقیقه عوض میشن
+FF_QUEUE_MAX = 5                            # حداکثر صف پخت هر غذا
+FF_STOCK_MAX = 30                           # حداکثر موجودی هر آیتم تو یخچال
+# غذا: (اسم، ایموجی پرمیوم، ایموجی جایگزین، هزینه‌ی پخت، فروش از، فروش تا، دقیقه‌ی پخت، مشتری تو هر ۲۵ دقیقه، اسم کوتاه دکمه)
+FF_FOODS = {
+    "fries":   ("سیب زمینی سرخ‌کرده", "4992729985010631999", "🍟", 8_000,   12_000,  20_000,  8,  2, "سیب زمینی"),
+    "nugget":  ("ناگت مرغ",           "5285371103596784579", "🍗", 12_000,  25_000,  34_000,  10, 3, "ناگت"),
+    "hotdog":  ("هات داگ",            "5352992176806567738", "🌭", 17_000,  37_000,  59_000,  7,  4, "هات داگ"),
+    "burger":  ("جینگو همبرگر",       "5201879022421688548", "🍔", 25_000,  75_000,  75_000,  9,  5, "همبرگر"),
+    "chicken": ("مرغ سوخاری",         "5217455356975788977", "🍗", 36_000,  120_000, 120_000, 15, 6, "مرغ سوخاری"),
+    "pizza":   ("پیتزا پپرونی",       "5327923547916493653", "🍕", 40_000,  180_000, 180_000, 15, 7, "پیتزا"),
+}
+# باز شدن هر غذا: (غذای قبلی، تعداد فروش لازم از اون)
+FF_UNLOCK = {"nugget": ("fries", 30), "hotdog": ("nugget", 35), "burger": ("hotdog", 40),
+             "chicken": ("burger", 45), "pizza": ("chicken", 50)}
+FF_FRIDGE_EID = "5800648191342809303"
+# یخچال: (اسم، ایموجی پرمیوم، ایموجی جایگزین، قیمت خرید، فروش به مشتری از، فروش تا)
+FF_FRIDGE = {
+    "water":    ("آب معدنی",   "5328154754595955417", "💧", 2_000,  5_000,  10_000),
+    "soda":     ("نوشابه قوطی", "5893085516869407706", "🥤", 5_000,  12_000, 20_000),
+    "lemonade": ("لیموناد",    "5442969692958377040", "🍋", 8_000,  18_000, 30_000),
+    "doogh":    ("دوغ",        "5404639785606192872", "🥛", 6_000,  15_000, 25_000),
+    "delester": ("دلستر",      "5402227731972771532", "🍺", 12_000, 30_000, 50_000),
+    "ketchup":  ("سس کچاپ",    "5284983646007075097", "🍅", 1_000,  3_000,  6_000),
+    "mayo":     ("سس مایونز",  "5377633336191630844", "🥫", 1_000,  3_000,  6_000),
+}
+FF_DRINKS = ["water", "soda", "lemonade", "doogh", "delester"]
+FF_SAUCES = ["ketchup", "mayo"]
+
+
+def _ffce(k: str) -> str:
+    if k in FF_FOODS:
+        _n, eid, fb = FF_FOODS[k][:3]
+    else:
+        _n, eid, fb = FF_FRIDGE[k][:3]
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
+
+
+def _ffname(k: str) -> str:
+    return FF_FOODS[k][0] if k in FF_FOODS else FF_FRIDGE[k][0]
+
+
+def _ffk(n: int) -> str:
+    return f"{n // 1000}k" if n % 1000 == 0 else f"{n:,}"
+
+
+def _ff_new() -> dict:
+    return {"sold": {}, "stock": {}, "q": {}, "cyc": 0, "gen": {}, "orders": [], "oid": 0}
+
+
+def _ff_parse(raw) -> dict:
+    d = _ff_new()
+    try:
+        x = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    except Exception:
+        x = {}
+    for k in d:
+        if k in x and isinstance(x[k], type(d[k])):
+            d[k] = x[k]
+    return d
+
+
+def _ff_unlocked(d: dict) -> list:
+    out = ["fries"]
+    for k, (prev, need) in FF_UNLOCK.items():
+        if prev in out and int(d["sold"].get(prev, 0)) >= need:
+            out.append(k)
+        else:
+            break
+    return out
+
+
+def _ff_tick(d: dict, now: float):
+    """غذاهایی که پختشون تموم شده میرن تو موجودی (هر غذا صف خودش رو داره؛ هر واحد به ترتیب پخته میشه)."""
+    for k, spec in FF_FOODS.items():
+        qq = d["q"].get(k)
+        if not qq or int(qq.get("n", 0)) <= 0:
+            d["q"].pop(k, None)
+            continue
+        T = spec[6] * 60
+        done = min(int(qq["n"]), int((now - float(qq["at"])) // T))
+        if done > 0:
+            d["stock"][k] = int(d["stock"].get(k, 0)) + done
+            qq["n"] = int(qq["n"]) - done
+            qq["at"] = float(qq["at"]) + done * T
+            if qq["n"] <= 0:
+                d["q"].pop(k, None)
+
+
+def _ff_roll(lo: int, hi: int) -> int:
+    return random.randint(lo // 1000, hi // 1000) * 1000
+
+
+def _ff_orders(d: dict, now: float):
+    """مشتری‌های این دوره‌ی ۲۵ دقیقه‌ای: هر غذای باز شده تعداد مشخصی مشتری داره؛ هر مشتری ممکنه چند چیز بخواد."""
+    cyc = int(now // FF_CYCLE)
+    if d["cyc"] != cyc:
+        d["cyc"], d["orders"], d["gen"] = cyc, [], {}
+    un = _ff_unlocked(d)
+    for p in un:
+        if d["gen"].get(p) == cyc:
+            continue
+        d["gen"][p] = cyc
+        for _ in range(FF_FOODS[p][7]):
+            lines = []
+            def add(k, qty):
+                spec = FF_FOODS.get(k) or FF_FRIDGE[k]
+                lo, hi = (spec[4], spec[5])
+                lines.append([k, qty, _ff_roll(lo, hi)])
+            add(p, 2 if random.random() < 0.3 else 1)
+            others = [x for x in un if x != p]
+            if others and random.random() < 0.45:
+                add(random.choice(others), 1)
+            if random.random() < 0.55:
+                add(random.choice(FF_DRINKS), 1)
+            if random.random() < 0.30:
+                add(random.choice(FF_SAUCES), 1)
+            d["oid"] += 1
+            d["orders"].append({"id": d["oid"], "l": lines})
+
+
+def _ff_sync(d: dict, now: float):
+    _ff_tick(d, now)
+    _ff_orders(d, now)
+
+
+def _ff_total(o: dict) -> int:
+    return sum(int(q) * int(u) for _k, q, u in o["l"])
+
+
+def _ff_missing(d: dict, o: dict) -> list:
+    return [f"{_ffname(k)} ×{int(q) - int(d['stock'].get(k, 0))}" for k, q, _u in o["l"] if int(d["stock"].get(k, 0)) < int(q)]
+
+
+def _ff_serve(d: dict, o: dict) -> int:
+    """سفارش رو تحویل میده؛ پول رو برمی‌گردونه (موجودی کافی باید قبلاً چک شده باشه)."""
+    for k, q, _u in o["l"]:
+        d["stock"][k] = int(d["stock"].get(k, 0)) - int(q)
+        if k in FF_FOODS:
+            d["sold"][k] = int(d["sold"].get(k, 0)) + int(q)
+    d["orders"] = [x for x in d["orders"] if x["id"] != o["id"]]
+    return _ff_total(o)
+
+
+def _ff_panel(uid: int, d: dict, now: float):
+    un = _ff_unlocked(d)
+    lines = [f"فست فودی جینگو {_ffce('burger')}",
+             f"{_ffce('burger')} آشپزخونه فست فودی؛ لطفا غذای مورد نظر را برای پخت انتخاب کنید", ""]
+    for k, (name, _e, _f, cost, lo, hi, mins, _c, _s) in FF_FOODS.items():
+        if k in un:
+            n = int(d["stock"].get(k, 0))
+            qn = int((d["q"].get(k) or {}).get("n", 0))
+            price = _ffk(lo) if lo == hi else f"{_ffk(lo)} تا {_ffk(hi)}"
+            lines.append(f"{_ffce(k)} {name} · آماده {n}")
+            lines.append(f"┘─ پخت {_ffk(cost)} · فروش {price} · ⏱ {mins} دقیقه" + (f" · در حال پخت {qn}" if qn else ""))
+        else:
+            prev, need = FF_UNLOCK[k]
+            lines.append(f"{_ffce(k)} {name} 🔒")
+            lines.append(f"┘─ با فروش {need} {_ffname(prev)} باز میشه ({int(d['sold'].get(prev, 0))}/{need})")
+    lines += ["", "👇 غذایی که می‌خوای بپزی رو بزن"]
+    btns = [btn(FF_FOODS[k][8], None, icon=FF_FOODS[k][1], callback_data=f"ff:c:{uid}:{k}") for k in un]
+    rows = [btns[i:i + 3] for i in range(0, len(btns), 3)]
+    rows.append([btn(f"سفارشات ({len(d['orders'])})", None, callback_data=f"ff:o:{uid}"),
+                 btn("یخچال", None, icon=FF_FRIDGE_EID, callback_data=f"ff:f:{uid}"),
+                 btn("🔄 بروزرسانی", None, callback_data=f"ff:p:{uid}")])
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+
+def _ff_orders_view(uid: int, d: dict, now: float):
+    left = int(FF_CYCLE - (now % FF_CYCLE))
+    lines = [f"🧾 سفارشات مشتری‌ها", f"⏱ مشتری‌های جدید: {_duration_fa(left)} دیگه", ""]
+    rows, row = [], []
+    if not d["orders"]:
+        lines.append("الان مشتری‌ای نیست؛ منتظر دوره‌ی بعدی باش.")
+    for i, o in enumerate(d["orders"], 1):
+        txt = " + ".join(f"{_ffce(k)} {_ffname(k)}" + (f" ×{q}" if int(q) > 1 else "") for k, q, _u in o["l"])
+        miss = _ff_missing(d, o)
+        lines.append(f"{i}) {txt}\n┘─ {_ff_total(o):,} تومن " + ("✅ آماده‌ی تحویل" if not miss else "❌ کم داری: " + "، ".join(miss)))
+        row.append(btn(f"{'✅' if not miss else '❌'} {i}", None, callback_data=f"ff:s:{uid}:{o['id']}"))
+        if len(row) == 4:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    rows.append([btn("✅ تحویل همه", None, callback_data=f"ff:a:{uid}"), btn("🔄 بروزرسانی", None, callback_data=f"ff:o:{uid}")])
+    rows.append([btn("🔙 آشپزخونه", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+
+def _ff_fridge_view(uid: int, d: dict):
+    lines = [f'<tg-emoji emoji-id="{FF_FRIDGE_EID}">🧊</tg-emoji> یخچال فست فودی',
+             "نوشیدنی و سس بخر؛ مشتری‌ها همراه غذا اینارو هم سفارش می‌دن.", ""]
+    btns = []
+    for k, (name, _e, _f, cost, lo, hi) in FF_FRIDGE.items():
+        lines.append(f"{_ffce(k)} {name} · موجودی {int(d['stock'].get(k, 0))}")
+        lines.append(f"┘─ خرید {_ffk(cost)} · فروش {_ffk(lo)} تا {_ffk(hi)}")
+        btns.append(btn(f"{name} · {_ffk(cost)}", None, icon=FF_FRIDGE[k][1], callback_data=f"ff:b:{uid}:{k}"))
+    rows = [btns[i:i + 3] for i in range(0, len(btns), 3)]
+    rows.append([btn("🔙 آشپزخونه", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+
+async def _ff_get(c, uid: int, lock: bool = False):
+    row = await c.fetchrow("SELECT d FROM fastfood WHERE user_id=$1" + (" FOR UPDATE" if lock else ""), uid)
+    return None if row is None else _ff_parse(row["d"])
+
+
+async def _ff_save(c, uid: int, d: dict):
+    await c.execute("UPDATE fastfood SET d=$2 WHERE user_id=$1", uid, json.dumps(d, ensure_ascii=False))
+
+
+async def _ff_send_panel(bot, chat_id: int, uid: int, d: dict, now: float, reply_to: int | None = None):
+    """عکس فست فودی + کپشن آشپزخونه + دکمه‌ها. اگه عکس نبود/نشد، متنی می‌فرسته."""
+    global _FF_FID
+    text, kb = _ff_panel(uid, d, now)
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    for cap in (text, _strip_te(text)):
+        try:
+            if _FF_FID:
+                return await bot.send_photo(chat_id, _FF_FID, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            if FF_IMG.exists():
+                with open(FF_IMG, "rb") as f:
+                    m = await bot.send_photo(chat_id, f, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+                try:
+                    _FF_FID = m.photo[-1].file_id
+                except Exception:
+                    pass
+                return m
+            break
+        except Exception:
+            log.warning("fastfood photo send failed", exc_info=True)
+            _FF_FID = None
+    return await send_html(bot, chat_id, text, reply_markup=kb, reply_parameters=rp)
+
+
+async def _ff_show_panel(q, uid: int, d: dict, now: float):
+    m = q.message
+    if getattr(m, "photo", None):
+        text, kb = _ff_panel(uid, d, now)
+        for cap in (text, _strip_te(text)):
+            try:
+                await q.edit_message_caption(caption=cap, parse_mode="HTML", reply_markup=kb)
+                return
+            except BadRequest as e:
+                if "not modified" in str(e).lower():
+                    return
+                log.warning("fastfood caption edit failed", exc_info=True)
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    await _ff_send_panel(q.get_bot(), m.chat_id, uid, d, now)
+
+
+async def _ff_show_text(q, text: str, kb):
+    m = q.message
+    if getattr(m, "photo", None):
+        try:
+            await m.delete()
+        except Exception:
+            pass
+        await send_html(q.get_bot(), m.chat_id, text, reply_markup=kb)
+        return
+    for t in (text, _strip_te(text)):
+        try:
+            await q.edit_message_text(t, parse_mode="HTML", reply_markup=kb)
+            return
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return
+            log.warning("fastfood text edit failed", exc_info=True)
+
+
+async def fastfood_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """«جینگو فست فودی» / «فست فودی»: اگه نساخته پیشنهاد ساخت، اگه ساخته آشکار کردن آشپزخونه."""
+    if _word_key(text) not in FF_WORDS:
+        return False
+    msg, user = update.effective_message, update.effective_user
+    await upsert_user(user.id, user.full_name)
+    lvl = await _cafe_level(user.id)
+    if lvl < FF_MIN_LEVEL:
+        await _eq_say(msg, f"{_ffce('burger')} فست فودی جینگو از لول {FF_MIN_LEVEL} باز میشه؛ تو الان لول {lvl} هستی.")
+        return True
+    now = time.time()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            d = await _ff_get(c, user.id, lock=True)
+            if d is not None:
+                _ff_sync(d, now)
+                await _ff_save(c, user.id, d)
+    if d is None:
+        kb = InlineKeyboardMarkup([[btn(f"ساخت فست فودی | {FF_BUILD_COST:,} تومن", "success", icon=FF_FOODS["burger"][1],
+                                        callback_data=f"ff:build:{user.id}")]])
+        await send_html(context.bot, msg.chat_id,
+                        B(f"{_ffce('burger')} فست فودی جینگو\n\nهنوز فست فودی نداری! بسازش، غذا بپز، به مشتری‌ها بفروش و از "
+                          f"سیب زمینی تا پیتزا پپرونی همه‌چی رو باز کن.\n\nقیمت ساخت: {FF_BUILD_COST:,} تومن (از پول جیبت)\nویژه‌ی لول {FF_MIN_LEVEL} به بالا"),
+                        reply_markup=kb, reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+        return True
+    await _ff_send_panel(context.bot, msg.chat_id, user.id, d, now, reply_to=msg.message_id)
+    return True
+
+
+async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    p = q.data.split(":")
+    try:
+        act, uid = p[1], int(p[2])
+    except (IndexError, ValueError):
+        await q.answer("درخواست نامعتبره.", show_alert=True); return
+    if q.from_user.id != uid:
+        await q.answer("این فست فودی مال تو نیست؛ خودت بنویس «فست فودی».", show_alert=True); return
+    now = time.time()
+    await upsert_user(uid, q.from_user.full_name)
+    try:
+        if act == "build":
+            if await _cafe_level(uid) < FF_MIN_LEVEL:
+                await q.answer(f"فست فودی فقط برای لول {FF_MIN_LEVEL} به بالاست.", show_alert=True); return
+            async with pool.acquire() as c:
+                async with c.transaction():
+                    if await _ff_get(c, uid, lock=True) is not None:
+                        await q.answer("فست فودیت از قبل ساخته شده.", show_alert=True); return
+                    ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", FF_BUILD_COST, uid)
+                    if ok is None:
+                        await q.answer(f"ساخت فست فودی {FF_BUILD_COST:,} تومنه؛ پول جیبت کافی نیست.", show_alert=True); return
+                    d = _ff_new(); _ff_sync(d, now)
+                    await c.execute("INSERT INTO fastfood(user_id, d, created) VALUES($1,$2,$3)", uid, json.dumps(d, ensure_ascii=False), now)
+            await q.answer("🍔 فست فودیت ساخته شد!")
+            try:
+                await q.message.delete()
+            except Exception:
+                pass
+            await _ff_send_panel(context.bot, q.message.chat_id, uid, d, now)
+            return
+        async with pool.acquire() as c:
+            async with c.transaction():
+                d = await _ff_get(c, uid, lock=True)
+                if d is None:
+                    await q.answer("اول باید فست فودی بسازی؛ بنویس «فست فودی».", show_alert=True); return
+                _ff_sync(d, now)
+                toast, alert, view = None, False, "p"
+                un0 = _ff_unlocked(d)
+                if act == "c":                                   # پخت
+                    k = p[3]
+                    if k not in FF_FOODS or k not in _ff_unlocked(d):
+                        toast, alert = "این غذا هنوز باز نشده.", True
+                    elif int((d["q"].get(k) or {}).get("n", 0)) >= FF_QUEUE_MAX:
+                        toast, alert = f"صف پخت {FF_FOODS[k][0]} پره ({FF_QUEUE_MAX} تا)؛ یکم صبر کن.", True
+                    else:
+                        cost = FF_FOODS[k][3]
+                        ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", cost, uid)
+                        if ok is None:
+                            toast, alert = f"پخت {FF_FOODS[k][0]} {cost:,} تومنه؛ پول جیبت کافی نیست.", True
+                        else:
+                            qq = d["q"].get(k)
+                            if qq:
+                                qq["n"] = int(qq["n"]) + 1
+                            else:
+                                d["q"][k] = {"n": 1, "at": now}
+                            toast = f"🍳 شروع شد؛ {FF_FOODS[k][6]} دقیقه دیگه آماده میشه"
+                elif act == "o":
+                    view = "o"
+                elif act in ("s", "a"):                          # تحویل سفارش
+                    view = "o"
+                    got = n = 0
+                    for o in list(d["orders"]):
+                        if act == "s" and str(o["id"]) != p[3]:
+                            continue
+                        if _ff_missing(d, o):
+                            if act == "s":
+                                toast, alert = "کم داری: " + "، ".join(_ff_missing(d, o)), True
+                            continue
+                        got += _ff_serve(d, o); n += 1
+                    if n:
+                        await c.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", got, uid)
+                        toast = f"💰 {n} سفارش تحویل شد: +{got:,} تومن"
+                        _ff_orders(d, now)                       # اگه غذای جدیدی باز شد، مشتری‌هاش همین الان میان
+                        new = [x for x in _ff_unlocked(d) if x not in un0]
+                        if new:
+                            toast += "\n🔓 باز شد: " + "، ".join(_ffname(x) for x in new)
+                            alert = True
+                    elif toast is None:
+                        toast, alert = ("این سفارش دیگه نیست." if act == "s" else "هیچ سفارشی آماده‌ی تحویل نیست."), True
+                elif act == "f":
+                    view = "f"
+                elif act == "b":                                 # خرید از یخچال
+                    view = "f"
+                    k = p[3]
+                    if k not in FF_FRIDGE:
+                        toast, alert = "آیتم نامعتبره.", True
+                    elif int(d["stock"].get(k, 0)) >= FF_STOCK_MAX:
+                        toast, alert = f"یخچال پره؛ حداکثر {FF_STOCK_MAX} تا.", True
+                    else:
+                        cost = FF_FRIDGE[k][3]
+                        ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", cost, uid)
+                        if ok is None:
+                            toast, alert = f"{FF_FRIDGE[k][0]} {cost:,} تومنه؛ پول جیبت کافی نیست.", True
+                        else:
+                            d["stock"][k] = int(d["stock"].get(k, 0)) + 1
+                            toast = f"✅ {FF_FRIDGE[k][0]} خریدی"
+                elif act != "p":
+                    await q.answer(); return
+                await _ff_save(c, uid, d)
+        await q.answer((toast or "")[:190], show_alert=alert)
+        if view == "o":
+            text, kb = _ff_orders_view(uid, d, now); await _ff_show_text(q, text, kb)
+        elif view == "f":
+            text, kb = _ff_fridge_view(uid, d); await _ff_show_text(q, text, kb)
+        else:
+            await _ff_show_panel(q, uid, d, now)
+    except Exception:
+        log.exception("fastfood_cb failed")
+        try:
+            await q.answer("یه مشکلی پیش اومد؛ دوباره امتحان کن.", show_alert=True)
+        except Exception:
+            pass
+
+
 # ───────────────────────── کافه جینگو ─────────────────────────
 # فقط برای سطح ۳ به بالا (همون «سطح» پنل خودم). منو: «جینگو کافه» یا «کافه جینگو».
 # دعوت: ریپلای روی یه نفر + «جینگو دعوت به کافه» ← طرف قبول کنه ← دعوت‌کننده سفارش میده ← پولش از دعوت‌کننده کم میشه
@@ -25721,6 +26151,7 @@ def main():
     app.add_handler(CallbackQueryHandler(equip_cb, pattern=r"^eq:"))
     app.add_handler(CallbackQueryHandler(pet_cb, pattern=r"^pt:"))
     app.add_handler(CallbackQueryHandler(cafe_cb, pattern=r"^cf:"))
+    app.add_handler(CallbackQueryHandler(fastfood_cb, pattern=r"^ff:"))
     app.add_handler(CallbackQueryHandler(top_cb, pattern=r"^tp:"))
     app.add_handler(CallbackQueryHandler(sex_cb, pattern=r"^sx:"))
     app.add_handler(CallbackQueryHandler(shop_cb, pattern=r"^shp:"))
