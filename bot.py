@@ -25745,11 +25745,13 @@ async def _ff_show_panel(q, uid: int, d: dict, now: float):
 async def _ff_show_text(q, text: str, kb):
     m = q.message
     if getattr(m, "photo", None):
+        rt = getattr(m, "reply_to_message", None)
         try:
             await m.delete()
         except Exception:
             pass
-        await send_html(q.get_bot(), m.chat_id, text, reply_markup=kb)
+        await send_html(q.get_bot(), m.chat_id, text, reply_markup=kb,
+                        reply_parameters=ReplyParameters(message_id=rt.message_id, allow_sending_without_reply=True) if rt else None)
         return
     for t in (text, _strip_te(text)):
         try:
@@ -25759,6 +25761,55 @@ async def _ff_show_text(q, text: str, kb):
             if "not modified" in str(e).lower():
                 return
             log.warning("fastfood text edit failed", exc_info=True)
+
+
+FF_VIMG = {"p": FF_IMG, "k": BASE_DIR / "fastfood_cook.jpg", "f": BASE_DIR / "fastfood_fridge.jpg", "o": BASE_DIR / "fastfood_orders.jpg"}
+_FF_FIDS: dict = {}
+
+
+async def _ff_show(q, key: str, text: str, kb):
+    """هر بخش عکس خودش رو داره (p منو، k پخت و پز، f یخچال، o سفارشات). عکس و کپشن همون پیام عوض میشه (edit_message_media)
+    تا ریپلای روی پیام کاربر بمونه؛ اگه مجبور شد پیام رو پاک کنه و دوباره بفرسته، باز هم ریپلای رو نگه می‌داره."""
+    m = q.message
+    path = FF_VIMG.get(key)
+    if path is None or not path.exists() or len(re.sub(r"<[^>]+>", "", text)) > 1000:
+        await _ff_show_text(q, text, kb)
+        return
+    for cap in (text, _strip_te(text)):
+        if not getattr(m, "photo", None):
+            break
+        try:
+            src = _FF_FIDS.get(key) or path.read_bytes()
+            r = await q.edit_message_media(InputMediaPhoto(src, caption=cap, parse_mode="HTML"), reply_markup=kb)
+            try:
+                _FF_FIDS[key] = r.photo[-1].file_id
+            except Exception:
+                pass
+            return
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return
+            log.warning("fastfood media edit failed", exc_info=True)
+            _FF_FIDS.pop(key, None)
+    rt = getattr(m, "reply_to_message", None)
+    rp = ReplyParameters(message_id=rt.message_id, allow_sending_without_reply=True) if rt else None
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    for cap in (text, _strip_te(text)):
+        try:
+            src = _FF_FIDS.get(key) or path.read_bytes()
+            nm = await q.get_bot().send_photo(m.chat_id, src, caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            try:
+                _FF_FIDS[key] = nm.photo[-1].file_id
+            except Exception:
+                pass
+            return
+        except Exception:
+            log.warning("fastfood photo resend failed", exc_info=True)
+            _FF_FIDS.pop(key, None)
+    await send_html(q.get_bot(), m.chat_id, text, reply_markup=kb, reply_parameters=rp)
 
 
 async def fastfood_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
@@ -25928,18 +25979,18 @@ async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _ff_save(c, uid, d)
         await q.answer((toast or "")[:190], show_alert=alert)
         if view == "o":
-            text, kb = _ff_orders_view(uid, d, now); await _ff_show_text(q, text, kb)
+            text, kb = _ff_orders_view(uid, d, now); await _ff_show(q, "o", text, kb)
         elif view == "v":
             r = _ff_order_view(uid, d, vi)
-            text, kb = r if r else _ff_orders_view(uid, d, now); await _ff_show_text(q, text, kb)
+            text, kb = r if r else _ff_orders_view(uid, d, now); await _ff_show(q, "o", text, kb)
         elif view == "k":
-            text, kb = _ff_cook_view(uid, d, now); await _ff_show_text(q, text, kb)
+            text, kb = _ff_cook_view(uid, d, now); await _ff_show(q, "k", text, kb)
         elif view == "x":
-            text, kb = _ff_food_view(uid, d, vi); await _ff_show_text(q, text, kb)
+            text, kb = _ff_food_view(uid, d, vi); await _ff_show(q, "k", text, kb)
         elif view == "f":
-            text, kb = _ff_fridge_view(uid, d); await _ff_show_text(q, text, kb)
+            text, kb = _ff_fridge_view(uid, d); await _ff_show(q, "f", text, kb)
         else:
-            await _ff_show_panel(q, uid, d, now)
+            text, kb = _ff_panel(uid, d, now); await _ff_show(q, "p", text, kb)
     except Exception:
         log.exception("fastfood_cb failed")
         try:
