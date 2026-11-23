@@ -8692,7 +8692,7 @@ def _guide_sections() -> list:
         _gq("🎭 گی و لز", "ریپلای + <code>گی</code> یا <code>لز</code>\nهر کاربر هر ۳۰ دقیقه یه بار."),
         _gq("🧠 دوئل درسی", "ریپلای + <code>دوئل درسی</code>\nطرف مقابل باید قبول کنه؛ ۱۰ سؤال به نوبت پرسیده می‌شه و هر پاسخ درست یک امتیاز داره. اول دعوت‌کننده مبلغ و موضوع رو انتخاب می‌کنه؛ هر سؤال ۱۵ ثانیه وقت داره. بیشترین امتیاز برنده‌ست و کل مبلغ شرط + ۵ واحد درسی می‌گیره. در هر گروه فقط یک دوئل همزمان اجرا می‌شه."),
         _gq("🎰 کازینو", "<code>کازینو</code>\nتاس، اسلات، مین، موشک و میزهای دونفره. سقف شرط ۵۰ میلیون تومنه. اسلات، تاس، برج گنج، بازی‌های ورزشی و سم یا خوراکی هر ۳ دقیقه یک بار؛ بت، مین و موشک هر ۱۵ ثانیه یک بار.\n<code>جینگو بت 10m</code> (بدون سقف، هر ۱۵ ثانیه یک بار)"),
-        _gq("🍔 فست فودی", "<code>فست فودی</code>\nفست فودی بساز (۱ میلیون تومن، ویژه‌ی لول ۳ به بالا)، غذا بپز و به مشتری‌ها بفروش؛ هر غذا با فروش غذای قبلی باز میشه. یخچال برای نوشیدنی و سس."),
+        _gq("🍔 فست فودی", "<code>فست فودی</code>\nفست فودی بساز (۱ میلیون تومن، ویژه‌ی لول ۳ به بالا). منوی اصلی سه بخش داره:\n• «پخت و پز»: ۶ تا سرخ کن داری؛ اولی رایگانه و بقیه رو باید بخری (هرکدوم ۵ میلیون). سرخ کن خالی رو بزن، غذا انتخاب کن و وقتی پخت تموم شد دکمه‌ش میشه «برداشت». هر غذا با فروش غذای قبلی باز میشه.\n• «سفارشات»: هر مشتری یه سفارش جدا داره؛ بزن روش و تحویلش بده (یا «تحویل همه»).\n• «یخچال»: نوشیدنی‌ها و سس‌ها رایگانن، فقط بردار."),
         _gq("🚨 خلاف", "<code>خلاف</code>\nعملیات‌های خلاف با ریسک گیر افتادن؛ هرچی انرژی کمتر، شانس گیر افتادنت بیشتر."),
         _gq("💸 انتقال پول", "ریپلای + <code>انتقال پول 100 هزار</code>\nسقف انتقال: ۲۰۰ میلیون تومن در روز."),
         _gq("📋 تسک", "<code>تسک</code>\nتسک‌های روزانه و هفتگی با جایزه؛ ربات خودش پیشرفتت رو حساب می‌کنه."),
@@ -25419,7 +25419,10 @@ FF_WORDS = {"فستفودی", "جینگوفستفودی", "فستفود", "جی�
 FF_BUILD_COST = 1_000_000                   # قیمت ساخت
 FF_MIN_LEVEL = 3                            # فقط لول ۳ به بالا (مثل کافه)
 FF_CYCLE = 25 * 60                          # مشتری‌ها هر ۲۵ دقیقه عوض میشن
-FF_QUEUE_MAX = 5                            # حداکثر صف پخت هر غذا
+FF_FRYER_COUNT = 6                          # تعداد سرخ کن‌ها (اولی از اول داده میشه)
+FF_FRYER_COST = 5_000_000                   # قیمت هر سرخ کن بعدی (5m)
+FF_FRYER_EID = "5334886776530026718"        # ایموجی سرخ کن
+FF_COOK_EID = "5787676174633143776"         # ایموجی دکمه‌ی پخت و پز
 FF_STOCK_MAX = 30                           # حداکثر موجودی هر آیتم تو یخچال
 # غذا: (اسم، ایموجی پرمیوم، ایموجی جایگزین، هزینه‌ی پخت، فروش از، فروش تا، دقیقه‌ی پخت، مشتری تو هر ۲۵ دقیقه، اسم کوتاه دکمه)
 FF_FOODS = {
@@ -25434,15 +25437,15 @@ FF_FOODS = {
 FF_UNLOCK = {"nugget": ("fries", 30), "hotdog": ("nugget", 35), "burger": ("hotdog", 40),
              "chicken": ("burger", 45), "pizza": ("chicken", 50)}
 FF_FRIDGE_EID = "5800648191342809303"
-# یخچال: (اسم، ایموجی پرمیوم، ایموجی جایگزین، قیمت خرید، فروش به مشتری از، فروش تا)
+# یخچال (همه‌چی رایگانه، قیمت خرید = 0): (اسم، ایموجی پرمیوم، ایموجی جایگزین، قیمت خرید، فروش به مشتری از، فروش تا)
 FF_FRIDGE = {
-    "water":    ("آب معدنی",   "5328154754595955417", "💧", 2_000,  5_000,  10_000),
-    "soda":     ("نوشابه قوطی", "5893085516869407706", "🥤", 5_000,  12_000, 20_000),
-    "lemonade": ("لیموناد",    "5442969692958377040", "🍋", 8_000,  18_000, 30_000),
-    "doogh":    ("دوغ",        "5404639785606192872", "🥛", 6_000,  15_000, 25_000),
-    "delester": ("دلستر",      "5402227731972771532", "🍺", 12_000, 30_000, 50_000),
-    "ketchup":  ("سس کچاپ",    "5284983646007075097", "🍅", 1_000,  3_000,  6_000),
-    "mayo":     ("سس مایونز",  "5377633336191630844", "🥫", 1_000,  3_000,  6_000),
+    "water":    ("آب معدنی",   "5328154754595955417", "💧", 0,  5_000,  10_000),
+    "soda":     ("نوشابه قوطی", "5893085516869407706", "🥤", 0,  12_000, 20_000),
+    "lemonade": ("لیموناد",    "5442969692958377040", "🍋", 0,  18_000, 30_000),
+    "doogh":    ("دوغ",        "5404639785606192872", "🥛", 0,  15_000, 25_000),
+    "delester": ("دلستر",      "5402227731972771532", "🍺", 0, 30_000, 50_000),
+    "ketchup":  ("سس کچاپ",    "5284983646007075097", "🍅", 0,  3_000,  6_000),
+    "mayo":     ("سس مایونز",  "5377633336191630844", "🥫", 0,  3_000,  6_000),
 }
 FF_DRINKS = ["water", "soda", "lemonade", "doogh", "delester"]
 FF_SAUCES = ["ketchup", "mayo"]
@@ -25465,7 +25468,8 @@ def _ffk(n: int) -> str:
 
 
 def _ff_new() -> dict:
-    return {"sold": {}, "stock": {}, "q": {}, "cyc": 0, "gen": {}, "orders": [], "oid": 0}
+    # fr = سرخ‌کن‌های خریده‌شده (اولی از اول داده میشه)؛ هر کدوم {"f": غذای در حال پخت یا "", "at": شروع پخت}
+    return {"sold": {}, "stock": {}, "fr": [{"f": "", "at": 0}], "cyc": 0, "gen": {}, "orders": [], "oid": 0}
 
 
 def _ff_parse(raw) -> dict:
@@ -25477,6 +25481,15 @@ def _ff_parse(raw) -> dict:
     for k in d:
         if k in x and isinstance(x[k], type(d[k])):
             d[k] = x[k]
+    if "fr" not in x and isinstance(x.get("q"), dict):      # نسخه‌ی قدیمی (صف پخت): هرچی تو صف بود میره تو موجودی
+        for k, qq in x["q"].items():
+            if k in FF_FOODS and isinstance(qq, dict):
+                d["stock"][k] = int(d["stock"].get(k, 0)) + int(qq.get("n", 0))
+    fr = [s for s in d["fr"] if isinstance(s, dict)][:FF_FRYER_COUNT]
+    for s in fr:
+        if s.get("f") not in FF_FOODS:
+            s["f"], s["at"] = "", 0
+    d["fr"] = fr or [{"f": "", "at": 0}]
     return d
 
 
@@ -25490,21 +25503,15 @@ def _ff_unlocked(d: dict) -> list:
     return out
 
 
-def _ff_tick(d: dict, now: float):
-    """غذاهایی که پختشون تموم شده میرن تو موجودی (هر غذا صف خودش رو داره؛ هر واحد به ترتیب پخته میشه)."""
-    for k, spec in FF_FOODS.items():
-        qq = d["q"].get(k)
-        if not qq or int(qq.get("n", 0)) <= 0:
-            d["q"].pop(k, None)
-            continue
-        T = spec[6] * 60
-        done = min(int(qq["n"]), int((now - float(qq["at"])) // T))
-        if done > 0:
-            d["stock"][k] = int(d["stock"].get(k, 0)) + done
-            qq["n"] = int(qq["n"]) - done
-            qq["at"] = float(qq["at"]) + done * T
-            if qq["n"] <= 0:
-                d["q"].pop(k, None)
+def _ff_left(s: dict, now: float) -> int:
+    """ثانیه‌ی مونده تا آماده شدن غذای این سرخ‌کن (۰ = آماده)."""
+    if not s.get("f"):
+        return 0
+    return max(0, int(float(s["at"]) + FF_FOODS[s["f"]][6] * 60 - now + 0.999))
+
+
+def _ff_mmss(sec: int) -> str:
+    return f"{sec // 60}:{sec % 60:02d}"
 
 
 def _ff_roll(lo: int, hi: int) -> int:
@@ -25540,7 +25547,6 @@ def _ff_orders(d: dict, now: float):
 
 
 def _ff_sync(d: dict, now: float):
-    _ff_tick(d, now)
     _ff_orders(d, now)
 
 
@@ -25563,59 +25569,124 @@ def _ff_serve(d: dict, o: dict) -> int:
 
 
 def _ff_panel(uid: int, d: dict, now: float):
+    """منوی اصلی فست فودی: فقط موجودی + دکمه‌های بخش‌ها (پخت و پز / سفارشات / یخچال)."""
     un = _ff_unlocked(d)
-    lines = [f"فست فودی جینگو {_ffce('burger')}",
-             f"{_ffce('burger')} آشپزخونه فست فودی؛ لطفا غذای مورد نظر را برای پخت انتخاب کنید", ""]
+    ready = sum(1 for s in d["fr"] if s["f"] and _ff_left(s, now) == 0)
+    cooking = sum(1 for s in d["fr"] if s["f"]) - ready
+    lines = [f"فست فودی جینگو {_ffce('burger')}", "", "📦 موجودی آماده:"]
+    for k in un:
+        lines.append(f"{_ffce(k)} {_ffname(k)} · {int(d['stock'].get(k, 0))}")
+    fr_items = [k for k in FF_FRIDGE if int(d["stock"].get(k, 0)) > 0]
+    if fr_items:
+        lines.append("")
+        lines.append(f'<tg-emoji emoji-id="{FF_FRIDGE_EID}">🧊</tg-emoji> یخچال: ' + " · ".join(f"{_ffce(k)}{int(d['stock'][k])}" for k in fr_items))
+    lines += ["",
+              f'<tg-emoji emoji-id="{FF_FRYER_EID}">🍳</tg-emoji> سرخ کن‌ها: {len(d["fr"])}/{FF_FRYER_COUNT}'
+              + (f" · در حال پخت {cooking}" if cooking else "") + (f" · ✅ {ready} آماده‌ی برداشت" if ready else ""),
+              f"🧾 مشتری‌های منتظر: {len(d['orders'])}"]
+    cook_txt = "پخت و پز" + (f" (✅ {ready})" if ready else "")
+    rows = [[btn(cook_txt, "success", icon=FF_COOK_EID, callback_data=f"ff:k:{uid}")],
+            [btn(f"سفارشات ({len(d['orders'])})", None, callback_data=f"ff:o:{uid}"),
+             btn("یخچال", None, icon=FF_FRIDGE_EID, callback_data=f"ff:f:{uid}")],
+            [btn("🔄 بروزرسانی", None, callback_data=f"ff:p:{uid}")]]
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+
+def _ff_cook_view(uid: int, d: dict, now: float):
+    """بخش پخت و پز: ۶ تا سرخ کن (اولی از اول، بقیه با خرید)."""
+    fe = f'<tg-emoji emoji-id="{FF_FRYER_EID}">🍳</tg-emoji>'
+    lines = [f'<tg-emoji emoji-id="{FF_COOK_EID}">🍳</tg-emoji> پخت و پز',
+             "یه سرخ کن خالی رو بزن و غذا انتخاب کن؛ وقتی پخت تموم شد دکمه‌ش میشه «برداشت».", ""]
+    btns = []
+    for i in range(FF_FRYER_COUNT):
+        if i < len(d["fr"]):
+            s = d["fr"][i]
+            if not s["f"]:
+                lines.append(f"{fe} سرخ کن {i + 1} · خالی")
+                btns.append(btn(f"سرخ کن {i + 1}", None, icon=FF_FRYER_EID, callback_data=f"ff:x:{uid}:{i}"))
+            else:
+                left = _ff_left(s, now)
+                if left == 0:
+                    lines.append(f"{_ffce(s['f'])} سرخ کن {i + 1} · {_ffname(s['f'])} ✅ آماده")
+                    btns.append(btn("برداشت", "success", icon=FF_FOODS[s["f"]][1], callback_data=f"ff:t:{uid}:{i}"))
+                else:
+                    lines.append(f"{_ffce(s['f'])} سرخ کن {i + 1} · {_ffname(s['f'])} · ⏱ {_ff_mmss(left)}")
+                    btns.append(btn(f"⏳ {_ff_mmss(left)}", None, icon=FF_FOODS[s["f"]][1], callback_data=f"ff:w:{uid}:{i}"))
+        else:
+            lines.append(f"🔒 سرخ کن {i + 1} · قفل (قیمت {FF_FRYER_COST // 1_000_000}m)")
+            btns.append(btn(f"🔒 سرخ کن {i + 1} · {FF_FRYER_COST // 1_000_000}m", "primary", callback_data=f"ff:y:{uid}:{i}"))
+    rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+    rows.append([btn("🔄 بروزرسانی", None, callback_data=f"ff:k:{uid}"),
+                 btn("🔙 فست فودی", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+
+def _ff_food_view(uid: int, d: dict, i: int):
+    """انتخاب غذا برای یه سرخ کن خالی."""
+    un = _ff_unlocked(d)
+    lines = [f'<tg-emoji emoji-id="{FF_FRYER_EID}">🍳</tg-emoji> سرخ کن {i + 1}؛ چی بپزم؟', ""]
     for k, (name, _e, _f, cost, lo, hi, mins, _c, _s) in FF_FOODS.items():
         if k in un:
-            n = int(d["stock"].get(k, 0))
-            qn = int((d["q"].get(k) or {}).get("n", 0))
             price = _ffk(lo) if lo == hi else f"{_ffk(lo)} تا {_ffk(hi)}"
-            lines.append(f"{_ffce(k)} {name} · آماده {n}")
-            lines.append(f"┘─ پخت {_ffk(cost)} · فروش {price} · ⏱ {mins} دقیقه" + (f" · در حال پخت {qn}" if qn else ""))
+            lines.append(f"{_ffce(k)} {name} · آماده {int(d['stock'].get(k, 0))}")
+            lines.append(f"┘─ پخت {_ffk(cost)} · فروش {price} · ⏱ {mins} دقیقه")
         else:
             prev, need = FF_UNLOCK[k]
             lines.append(f"{_ffce(k)} {name} 🔒")
             lines.append(f"┘─ با فروش {need} {_ffname(prev)} باز میشه ({int(d['sold'].get(prev, 0))}/{need})")
-    lines += ["", "👇 غذایی که می‌خوای بپزی رو بزن"]
-    btns = [btn(FF_FOODS[k][8], None, icon=FF_FOODS[k][1], callback_data=f"ff:c:{uid}:{k}") for k in un]
-    rows = [btns[i:i + 3] for i in range(0, len(btns), 3)]
-    rows.append([btn(f"سفارشات ({len(d['orders'])})", None, callback_data=f"ff:o:{uid}"),
-                 btn("یخچال", None, icon=FF_FRIDGE_EID, callback_data=f"ff:f:{uid}"),
-                 btn("🔄 بروزرسانی", None, callback_data=f"ff:p:{uid}")])
+    btns = [btn(FF_FOODS[k][8], None, icon=FF_FOODS[k][1], callback_data=f"ff:c:{uid}:{i}:{k}") for k in un]
+    rows = [btns[j:j + 3] for j in range(0, len(btns), 3)]
+    rows.append([btn("🔙 پخت و پز", None, icon=EID_BACK, callback_data=f"ff:k:{uid}")])
     return B("\n".join(lines)), InlineKeyboardMarkup(rows)
 
 
+def _ff_order_txt(o: dict) -> str:
+    return " + ".join(f"{_ffce(k)} {_ffname(k)}" + (f" ×{q}" if int(q) > 1 else "") for k, q, _u in o["l"])
+
+
 def _ff_orders_view(uid: int, d: dict, now: float):
+    """لیست سفارشات؛ هر سفارش یه دکمه‌ی جدا داره و صفحه‌ی خودش."""
     left = int(FF_CYCLE - (now % FF_CYCLE))
-    lines = [f"🧾 سفارشات مشتری‌ها", f"⏱ مشتری‌های جدید: {_duration_fa(left)} دیگه", ""]
-    rows, row = [], []
+    lines = ["🧾 سفارشات مشتری‌ها", f"⏱ مشتری‌های جدید: {_duration_fa(left)} دیگه", ""]
+    btns = []
     if not d["orders"]:
         lines.append("الان مشتری‌ای نیست؛ منتظر دوره‌ی بعدی باش.")
     for i, o in enumerate(d["orders"], 1):
-        txt = " + ".join(f"{_ffce(k)} {_ffname(k)}" + (f" ×{q}" if int(q) > 1 else "") for k, q, _u in o["l"])
-        miss = _ff_missing(d, o)
-        lines.append(f"{i}) {txt}\n┘─ {_ff_total(o):,} تومن " + ("✅ آماده‌ی تحویل" if not miss else "❌ کم داری: " + "، ".join(miss)))
-        row.append(btn(f"{'✅' if not miss else '❌'} {i}", None, callback_data=f"ff:s:{uid}:{o['id']}"))
-        if len(row) == 4:
-            rows.append(row); row = []
-    if row:
-        rows.append(row)
-    rows.append([btn("✅ تحویل همه", None, callback_data=f"ff:a:{uid}"), btn("🔄 بروزرسانی", None, callback_data=f"ff:o:{uid}")])
-    rows.append([btn("🔙 آشپزخونه", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
+        ok = not _ff_missing(d, o)
+        lines.append(f"{i}) {'✅' if ok else '❌'} {_ff_total(o):,} تومن")
+        btns.append(btn(f"{'✅' if ok else '❌'} سفارش {i} · {_ffk(_ff_total(o))}", None, callback_data=f"ff:v:{uid}:{o['id']}"))
+    rows = [btns[j:j + 2] for j in range(0, len(btns), 2)]
+    rows.append([btn("✅ تحویل همه", "success", callback_data=f"ff:a:{uid}"), btn("🔄 بروزرسانی", None, callback_data=f"ff:o:{uid}")])
+    rows.append([btn("🔙 فست فودی", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
+    return B("\n".join(lines)), InlineKeyboardMarkup(rows)
+
+
+def _ff_order_view(uid: int, d: dict, oid: int):
+    """صفحه‌ی یه سفارش."""
+    o = next((x for x in d["orders"] if str(x["id"]) == str(oid)), None)
+    if o is None:
+        return None
+    idx = d["orders"].index(o) + 1
+    miss = _ff_missing(d, o)
+    lines = [f"🧾 سفارش {idx}", ""]
+    for k, q, u in o["l"]:
+        lines.append(f"{_ffce(k)} {_ffname(k)} ×{int(q)} · {int(q) * int(u):,} تومن · موجودی {int(d['stock'].get(k, 0))}")
+    lines += ["", f"💰 جمع: {_ff_total(o):,} تومن", "✅ آماده‌ی تحویل" if not miss else "❌ کم داری: " + "، ".join(miss)]
+    rows = [[btn("✅ تحویل بده", "success", callback_data=f"ff:s:{uid}:{o['id']}")],
+            [btn("🔙 سفارشات", None, icon=EID_BACK, callback_data=f"ff:o:{uid}")]]
     return B("\n".join(lines)), InlineKeyboardMarkup(rows)
 
 
 def _ff_fridge_view(uid: int, d: dict):
     lines = [f'<tg-emoji emoji-id="{FF_FRIDGE_EID}">🧊</tg-emoji> یخچال فست فودی',
-             "نوشیدنی و سس بخر؛ مشتری‌ها همراه غذا اینارو هم سفارش می‌دن.", ""]
+             "نوشیدنی و سس رایگانه؛ بردار! مشتری‌ها همراه غذا اینارو هم سفارش می‌دن.", ""]
     btns = []
     for k, (name, _e, _f, cost, lo, hi) in FF_FRIDGE.items():
         lines.append(f"{_ffce(k)} {name} · موجودی {int(d['stock'].get(k, 0))}")
-        lines.append(f"┘─ خرید {_ffk(cost)} · فروش {_ffk(lo)} تا {_ffk(hi)}")
-        btns.append(btn(f"{name} · {_ffk(cost)}", None, icon=FF_FRIDGE[k][1], callback_data=f"ff:b:{uid}:{k}"))
+        lines.append(f"┘─ رایگان · فروش {_ffk(lo)} تا {_ffk(hi)}")
+        btns.append(btn(f"{name} · رایگان", None, icon=FF_FRIDGE[k][1], callback_data=f"ff:b:{uid}:{k}"))
     rows = [btns[i:i + 3] for i in range(0, len(btns), 3)]
-    rows.append([btn("🔙 آشپزخونه", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
+    rows.append([btn("🔙 فست فودی", None, icon=EID_BACK, callback_data=f"ff:p:{uid}")])
     return B("\n".join(lines)), InlineKeyboardMarkup(rows)
 
 
@@ -25756,28 +25827,68 @@ async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if d is None:
                     await q.answer("اول باید فست فودی بسازی؛ بنویس «فست فودی».", show_alert=True); return
                 _ff_sync(d, now)
-                toast, alert, view = None, False, "p"
+                toast, alert, view, vi = None, False, "p", 0
                 un0 = _ff_unlocked(d)
-                if act == "c":                                   # پخت
-                    k = p[3]
-                    if k not in FF_FOODS or k not in _ff_unlocked(d):
+                if act == "k":                                   # بخش پخت و پز
+                    view = "k"
+                elif act == "x":                                 # انتخاب غذا برای یه سرخ کن خالی
+                    i = int(p[3])
+                    if i >= len(d["fr"]):
+                        toast, alert, view = "این سرخ کن هنوز خریده نشده.", True, "k"
+                    elif d["fr"][i]["f"]:
+                        toast, alert, view = "این سرخ کن مشغوله.", True, "k"
+                    else:
+                        view, vi = "x", i
+                elif act == "c":                                 # شروع پخت تو سرخ کن i
+                    i, k = int(p[3]), p[4]
+                    view = "k"
+                    if i >= len(d["fr"]) or d["fr"][i]["f"]:
+                        toast, alert = "این سرخ کن خالی نیست.", True
+                    elif k not in FF_FOODS or k not in _ff_unlocked(d):
                         toast, alert = "این غذا هنوز باز نشده.", True
-                    elif int((d["q"].get(k) or {}).get("n", 0)) >= FF_QUEUE_MAX:
-                        toast, alert = f"صف پخت {FF_FOODS[k][0]} پره ({FF_QUEUE_MAX} تا)؛ یکم صبر کن.", True
                     else:
                         cost = FF_FOODS[k][3]
                         ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", cost, uid)
                         if ok is None:
                             toast, alert = f"پخت {FF_FOODS[k][0]} {cost:,} تومنه؛ پول جیبت کافی نیست.", True
+                            view, vi = "x", i
                         else:
-                            qq = d["q"].get(k)
-                            if qq:
-                                qq["n"] = int(qq["n"]) + 1
-                            else:
-                                d["q"][k] = {"n": 1, "at": now}
+                            d["fr"][i] = {"f": k, "at": now}
                             toast = f"🍳 شروع شد؛ {FF_FOODS[k][6]} دقیقه دیگه آماده میشه"
+                elif act == "w":                                 # هنوز آماده نیست
+                    i = int(p[3]); view = "k"
+                    if i < len(d["fr"]) and d["fr"][i]["f"]:
+                        left = _ff_left(d["fr"][i], now)
+                        toast = f"⏳ {_ff_mmss(left)} دیگه آماده میشه" if left else "✅ آماده‌ست؛ دوباره بزن."
+                elif act == "t":                                 # برداشت
+                    i = int(p[3]); view = "k"
+                    s = d["fr"][i] if i < len(d["fr"]) else None
+                    if not s or not s["f"]:
+                        toast, alert = "چیزی تو این سرخ کن نیست.", True
+                    elif _ff_left(s, now) > 0:
+                        toast, alert = f"⏳ {_ff_mmss(_ff_left(s, now))} دیگه آماده میشه", True
+                    else:
+                        k = s["f"]
+                        d["stock"][k] = int(d["stock"].get(k, 0)) + 1
+                        d["fr"][i] = {"f": "", "at": 0}
+                        toast = f"✅ {FF_FOODS[k][0]} برداشتی (موجودی {d['stock'][k]})"
+                elif act == "y":                                 # خرید سرخ کن
+                    i = int(p[3]); view = "k"
+                    if i < len(d["fr"]):
+                        toast, alert = "این سرخ کن رو داری.", True
+                    elif i != len(d["fr"]) or i >= FF_FRYER_COUNT:
+                        toast, alert = f"سرخ کن‌ها به ترتیب خریده میشن؛ اول سرخ کن {len(d['fr']) + 1} رو بخر.", True
+                    else:
+                        ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", FF_FRYER_COST, uid)
+                        if ok is None:
+                            toast, alert = f"سرخ کن {FF_FRYER_COST:,} تومنه؛ پول جیبت کافی نیست.", True
+                        else:
+                            d["fr"].append({"f": "", "at": 0})
+                            toast = f"🍳 سرخ کن {i + 1} مال توئه!"
                 elif act == "o":
                     view = "o"
+                elif act == "v":                                 # صفحه‌ی یه سفارش
+                    view, vi = "v", p[3]
                 elif act in ("s", "a"):                          # تحویل سفارش
                     view = "o"
                     got = n = 0
@@ -25787,6 +25898,7 @@ async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if _ff_missing(d, o):
                             if act == "s":
                                 toast, alert = "کم داری: " + "، ".join(_ff_missing(d, o)), True
+                                view, vi = "v", p[3]
                             continue
                         got += _ff_serve(d, o); n += 1
                     if n:
@@ -25801,7 +25913,7 @@ async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         toast, alert = ("این سفارش دیگه نیست." if act == "s" else "هیچ سفارشی آماده‌ی تحویل نیست."), True
                 elif act == "f":
                     view = "f"
-                elif act == "b":                                 # خرید از یخچال
+                elif act == "b":                                 # برداشتن از یخچال (رایگان)
                     view = "f"
                     k = p[3]
                     if k not in FF_FRIDGE:
@@ -25809,19 +25921,21 @@ async def fastfood_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     elif int(d["stock"].get(k, 0)) >= FF_STOCK_MAX:
                         toast, alert = f"یخچال پره؛ حداکثر {FF_STOCK_MAX} تا.", True
                     else:
-                        cost = FF_FRIDGE[k][3]
-                        ok = await c.fetchval("UPDATE users SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance", cost, uid)
-                        if ok is None:
-                            toast, alert = f"{FF_FRIDGE[k][0]} {cost:,} تومنه؛ پول جیبت کافی نیست.", True
-                        else:
-                            d["stock"][k] = int(d["stock"].get(k, 0)) + 1
-                            toast = f"✅ {FF_FRIDGE[k][0]} خریدی"
+                        d["stock"][k] = int(d["stock"].get(k, 0)) + 1
+                        toast = f"✅ {FF_FRIDGE[k][0]} برداشتی (رایگان)"
                 elif act != "p":
                     await q.answer(); return
                 await _ff_save(c, uid, d)
         await q.answer((toast or "")[:190], show_alert=alert)
         if view == "o":
             text, kb = _ff_orders_view(uid, d, now); await _ff_show_text(q, text, kb)
+        elif view == "v":
+            r = _ff_order_view(uid, d, vi)
+            text, kb = r if r else _ff_orders_view(uid, d, now); await _ff_show_text(q, text, kb)
+        elif view == "k":
+            text, kb = _ff_cook_view(uid, d, now); await _ff_show_text(q, text, kb)
+        elif view == "x":
+            text, kb = _ff_food_view(uid, d, vi); await _ff_show_text(q, text, kb)
         elif view == "f":
             text, kb = _ff_fridge_view(uid, d); await _ff_show_text(q, text, kb)
         else:
