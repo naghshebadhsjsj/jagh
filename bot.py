@@ -986,6 +986,13 @@ async def init_db(app: Application):
             PRIMARY KEY(user_id, role)
         )""")
         await c.execute("CREATE TABLE IF NOT EXISTS robbery_profile (user_id BIGINT PRIMARY KEY, trace INTEGER NOT NULL DEFAULT 0, cooldown_until DOUBLE PRECISION NOT NULL DEFAULT 0, arrest_until DOUBLE PRECISION NOT NULL DEFAULT 0, trace_until DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS lang TEXT NOT NULL DEFAULT 'fa'")
+        try:
+            USER_LANG.clear()
+            for _r in await c.fetch("SELECT user_id, lang FROM users WHERE lang IN ('en','ru')"):
+                USER_LANG[int(_r["user_id"])] = _r["lang"]
+        except Exception:
+            log.warning("lang load failed", exc_info=True)
         await c.execute("CREATE TABLE IF NOT EXISTS userbot_session (id INTEGER PRIMARY KEY, session TEXT NOT NULL, uid BIGINT NOT NULL DEFAULT 0, created DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE TABLE IF NOT EXISTS fastfood (user_id BIGINT PRIMARY KEY, d TEXT NOT NULL DEFAULT '{}', created DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("ALTER TABLE robbery_profile ADD COLUMN IF NOT EXISTS bail_amount BIGINT NOT NULL DEFAULT 0")
@@ -8933,23 +8940,24 @@ def _guide_sections() -> list:
 GUIDE_SPLIT = 14
 
 
-def guide_text(page: int = 0) -> str:
-    secs = _guide_sections()
+def guide_text(page: int = 0, lang: str = "fa") -> str:
+    secs = _guide_sections() if lang == "fa" else _guide_sections_t(lang)
     part = secs[:GUIDE_SPLIT] if page == 0 else secs[GUIDE_SPLIT:]
-    head = f"📖 <b>راهنمای ربات — صفحه {1 if page == 0 else 2} از ۲</b>"
+    head = T(lang, "g_head", p=1 if page == 0 else 2)
     return head + "\n\n" + "\n".join(part)
 
 
-def guide_kb(page: int, back_cb: str, next_cb: str, prev_cb: str) -> InlineKeyboardMarkup:
-    nav = [btn("صفحه بعد ⬅️", "primary", callback_data=next_cb)] if page == 0 else [btn("➡️ صفحه قبل", "primary", callback_data=prev_cb)]
-    return InlineKeyboardMarkup([nav, [btn("🔙 برگشت", "primary", callback_data=back_cb)]])
+def guide_kb(page: int, back_cb: str, next_cb: str, prev_cb: str, lang: str = "fa") -> InlineKeyboardMarkup:
+    nav = [btn(T(lang, "g_next"), "primary", callback_data=next_cb)] if page == 0 else [btn(T(lang, "g_prev"), "primary", callback_data=prev_cb)]
+    return InlineKeyboardMarkup([nav, [btn(T(lang, "g_back"), "primary", callback_data=back_cb)]])
 
 
 async def guide_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     page = 1 if q.data == "guide:p1" else 0
     await q.answer()
-    await q.edit_message_text(guide_text(page), parse_mode="HTML", reply_markup=guide_kb(page, "guide:back", "guide:p1", "guide:open"))
+    _lg = lang_of(q.from_user.id)
+    await q.edit_message_text(guide_text(page, _lg), parse_mode="HTML", reply_markup=guide_kb(page, "guide:back", "guide:p1", "guide:open", _lg))
 
 JOIN_MSG = "🔒 برای استفاده از ربات باید توی کانال‌های زیر عضو باشی، بعدش دکمه «✅ عضو شدم» رو بزن:"
 
@@ -9673,28 +9681,197 @@ CARS_BTN_ICON = "5323272789824654613"
 
 
 # تو پی‌وی ربات فقط این بخش‌های پنل «خودم» کار می‌کنن؛ بقیه (ماشین، کازینو، خلاف، دست، خونه، ...) باید تو گروه انجام بشن.
-PM_ALLOWED_PANEL_ACTIONS = {"home", "settings", "gender", "guide", "guide2", "transfer", "bank", "special"}
+PM_ALLOWED_PANEL_ACTIONS = {"home", "settings", "gender", "guide", "guide2", "transfer", "bank", "special", "lang", "lang_en", "lang_ru", "lang_fa"}
 PM_GROUP_ONLY_TEXT = "این بخش فقط تو گروه کار می‌کنه؛ برو تو گروه و همونجا انجامش بده. تو پی‌وی فقط تنظیمات و بانک فعاله."
 
 
 def self_panel_keyboard(uid: int, private: bool = False) -> InlineKeyboardMarkup:
     if private:
-        return InlineKeyboardMarkup([[btn("⚙️ تنظیمات", None, callback_data=f"sp:settings:{uid}"), btn("بانک", "primary", icon=BANK_ICON_ID, callback_data=f"sp:bank:{uid}")],
+        return InlineKeyboardMarkup([[btn(T(uid, "b_settings"), None, callback_data=f"sp:settings:{uid}"), btn("بانک", "primary", icon=BANK_ICON_ID, callback_data=f"sp:bank:{uid}")],
                                      [btn("کاراکترهای ویژه", "success", icon="5244933196230972438", callback_data=f"sp:special:{uid}")]])
     return InlineKeyboardMarkup([
         [btn("ماشینم", "primary", icon=CARS_BTN_ICON, callback_data=f"sp:cars:{uid}"), btn("کازینو", "primary", icon=DICE_EID, callback_data=f"sp:casino:{uid}")],
         [btn("خلاف", "danger", icon=EID_SWORDS, callback_data=f"sp:robbery:{uid}"), btn("قدرت‌ها", "success", icon=POWERS_EID, callback_data=f"sp:powers:{uid}")],
-        [btn("⚙️ تنظیمات", None, callback_data=f"sp:settings:{uid}"), btn("بانک", "primary", icon=BANK_ICON_ID, callback_data=f"sp:bank:{uid}")],
+        [btn(T(uid, "b_settings"), None, callback_data=f"sp:settings:{uid}"), btn("بانک", "primary", icon=BANK_ICON_ID, callback_data=f"sp:bank:{uid}")],
         [btn("کاراکترهای ویژه", "success", icon="5244933196230972438", callback_data=f"sp:special:{uid}")],
     ])
 
 
+# ───────────────────────── زبان ربات برای هر کاربر (فارسی / English / Русский) ─────────────────────────
+# فقط بخش «تنظیمات» (منو، جنسیت، راهنما، انتقال اکانت، زبان) ترجمه میشه. زبان هر کاربر تو ستون users.lang
+# (پیش‌فرض fa) ذخیره میشه و برای سرعت تو حافظه‌ی USER_LANG هم هست. دستورها همچنان فارسی نوشته میشن.
+LANGS = ("fa", "en", "ru")
+USER_LANG: dict = {}
+LANG_ICONS = {"en": "5390967044982190257", "ru": "5449408995691341691", "fa": "4981209710196687892"}
+LANG_NAMES = {"en": "English", "ru": "Русский", "fa": "فارسی"}
+
+
+def lang_of(uid) -> str:
+    try:
+        return USER_LANG.get(int(uid), "fa")
+    except Exception:
+        return "fa"
+
+
+async def set_lang(uid: int, lang: str):
+    lang = lang if lang in LANGS else "fa"
+    await pool.execute("UPDATE users SET lang=$2 WHERE user_id=$1", uid, lang)
+    if lang == "fa":
+        USER_LANG.pop(int(uid), None)
+    else:
+        USER_LANG[int(uid)] = lang
+
+
+I18N = {
+    "st_title": {"fa": "⚙️ تنظیمات\n\nیکی از گزینه‌ها رو انتخاب کن:", "en": "⚙️ Settings\n\nPick an option:", "ru": "⚙️ Настройки\n\nВыберите пункт:"},
+    "b_settings": {"fa": "⚙️ تنظیمات", "en": "⚙️ Settings", "ru": "⚙️ Настройки"},
+    "b_gender": {"fa": "🧔👩 تغییر جنسیت", "en": "🧔👩 Change gender", "ru": "🧔👩 Сменить пол"},
+    "b_guide": {"fa": "📖 راهنما", "en": "📖 Guide", "ru": "📖 Справка"},
+    "b_transfer": {"fa": "🔁 انتقال اکانت با آیدی عددی", "en": "🔁 Transfer account by numeric ID", "ru": "🔁 Перенос аккаунта по числовому ID"},
+    "b_lang": {"fa": "🌐 زبان", "en": "🌐 Language", "ru": "🌐 Язык"},
+    "b_back_panel": {"fa": "🔙 برگشت به پنل شخصی", "en": "🔙 Back to personal panel", "ru": "🔙 Назад в личную панель"},
+    "b_back_settings": {"fa": "🔙 برگشت به تنظیمات", "en": "🔙 Back to settings", "ru": "🔙 Назад в настройки"},
+    "b_cancel": {"fa": "❌ لغو", "en": "❌ Cancel", "ru": "❌ Отмена"},
+    "gender_t": {"fa": "جنسیتت رو انتخاب کن تا کاراکترت عوض بشه 👇", "en": "Choose your gender to change your character 👇", "ru": "Выберите пол, чтобы сменить персонажа 👇"},
+    "b_man": {"fa": "🧔 آقا", "en": "🧔 Male", "ru": "🧔 Мужчина"},
+    "b_woman": {"fa": "👩 خانوم", "en": "👩 Female", "ru": "👩 Женщина"},
+    "gender_ok": {"fa": "ثبت شد ✅", "en": "Saved ✅", "ru": "Сохранено ✅"},
+    "not_yours": {"fa": "این دکمه مال تو نیست 😅", "en": "This button isn't yours 😅", "ru": "Эта кнопка не для вас 😅"},
+    "lang_t": {
+        "fa": "🌐 زبان ربات\n\nزبان تنظیمات و راهنمای ربات برای خودت رو انتخاب کن. هر وقت خواستی می‌تونی دوباره فارسی کنی.\n(دستورها مثل «خودم» و «بانک» همچنان فارسی نوشته میشن.)",
+        "en": "🌐 Bot language\n\nChoose the language of your settings and guide. You can switch back to Persian at any time.\n(Commands such as «خودم» and «بانک» are still typed in Persian.)",
+        "ru": "🌐 Язык бота\n\nВыберите язык настроек и справки. В любой момент можно вернуться на персидский.\n(Команды, например «خودم» и «بانک», по-прежнему пишутся по-персидски.)"},
+    "lang_ok": {"fa": "زبان فارسی شد ✅", "en": "Language set to English ✅", "ru": "Язык: русский ✅"},
+    "g_head": {"fa": "📖 <b>راهنمای ربات — صفحه {p} از ۲</b>", "en": "📖 <b>Bot guide — page {p} of 2</b>", "ru": "📖 <b>Справка по боту — страница {p} из 2</b>"},
+    "g_next": {"fa": "صفحه بعد ⬅️", "en": "Next page ➡️", "ru": "Следующая ➡️"},
+    "g_prev": {"fa": "➡️ صفحه قبل", "en": "⬅️ Previous page", "ru": "⬅️ Предыдущая"},
+    "g_back": {"fa": "🔙 برگشت", "en": "🔙 Back", "ru": "🔙 Назад"},
+    "t_title": {
+        "fa": "🔁 انتقال اکانت\n\nآیدی عددی اکانت مقصد رو بفرست.\n\n• اکانت مقصد باید قبلاً ربات رو استارت کرده باشه و کاملاً تازه و خالی باشه.\n• همه‌ی پول، بانک، امتیازها، ماشین‌ها، خونه‌ها و سطح هوش به اون اکانت منتقل میشه و اکانت فعلی خالی میشه.\n• اکانت مقصد هم باید انتقال رو تایید کنه.\n\nبرای لغو بنویس «لغو».",
+        "en": "🔁 Account transfer\n\nSend the numeric ID of the target account.\n\n• The target account must have already started the bot and must be completely new and empty.\n• All money, bank, points, cars, houses and intelligence level will be moved to that account and the current account will be emptied.\n• The target account must also confirm the transfer.\n\nTo cancel, type «لغو» (or «cancel»).",
+        "ru": "🔁 Перенос аккаунта\n\nОтправьте числовой ID целевого аккаунта.\n\n• Целевой аккаунт должен уже запускать бота и быть совершенно новым и пустым.\n• Все деньги, банк, очки, машины, дома и уровень интеллекта будут перенесены на этот аккаунт, а текущий аккаунт обнулится.\n• Целевой аккаунт тоже должен подтвердить перенос.\n\nЧтобы отменить, напишите «لغو» (или «отмена»)."},
+    "t_cancelled": {"fa": "❌ انتقال اکانت لغو شد.", "en": "❌ Account transfer cancelled.", "ru": "❌ Перенос аккаунта отменён."},
+    "t_only_id": {"fa": "فقط آیدی عددی رو بفرست (مثلا 123456789) یا بنویس «لغو».", "en": "Send only a numeric ID (e.g. 123456789) or type «لغو» to cancel.", "ru": "Отправьте только числовой ID (например, 123456789) или напишите «لغو» для отмены."},
+    "t_confirm": {
+        "fa": "⚠️ مطمئنی؟\n\nهمه‌ی اطلاعات اکانت فعلیت (پول، بانک، امتیازها، ماشین‌ها، خونه‌ها، سطح هوش و ...) به اکانت {name} ({dst}) منتقل میشه و اکانت فعلیت خالی میشه.\nاین کار برگشت‌پذیر نیست و اکانت مقصد هم باید تایید کنه.",
+        "en": "⚠️ Are you sure?\n\nAll data of your current account (money, bank, points, cars, houses, intelligence level, etc.) will be moved to the account {name} ({dst}) and your current account will be emptied.\nThis cannot be undone and the target account must confirm too.",
+        "ru": "⚠️ Вы уверены?\n\nВсе данные вашего текущего аккаунта (деньги, банк, очки, машины, дома, уровень интеллекта и т. д.) будут перенесены на аккаунт {name} ({dst}), а ваш аккаунт обнулится.\nЭто необратимо, и целевой аккаунт тоже должен подтвердить."},
+    "t_confirm_btn": {"fa": "✅ تایید و ارسال درخواست", "en": "✅ Confirm and send request", "ru": "✅ Подтвердить и отправить"},
+    "t_user": {"fa": "کاربر", "en": "User", "ru": "Пользователь"},
+    "t_e_self": {"fa": "نمی‌تونی اکانت رو به خودش منتقل کنی.", "en": "You can't transfer an account to itself.", "ru": "Нельзя перенести аккаунт на самого себя."},
+    "t_e_staff": {"fa": "انتقال از/به اکانت پشتیبان‌ها ممکن نیست.", "en": "Transfers from/to support accounts are not possible.", "ru": "Перенос с/на аккаунты поддержки невозможен."},
+    "t_e_ban": {"fa": "اکانت مقصد محروم شده و نمی‌تونه انتقال بگیره.", "en": "The target account is banned and cannot receive a transfer.", "ru": "Целевой аккаунт заблокирован и не может получить перенос."},
+    "t_e_nf": {"fa": "این آیدی پیدا نشد یا هنوز ربات رو استارت نکرده. از اکانت مقصد تو پی‌وی ربات /start بزن و دوباره امتحان کن.", "en": "This ID was not found or hasn't started the bot yet. Press /start in the bot's private chat from the target account and try again.", "ru": "Этот ID не найден или ещё не запускал бота. Нажмите /start в личном чате с ботом с целевого аккаунта и попробуйте снова."},
+    "t_e_notempty": {"fa": "اکانت مقصد باید تازه و خالی باشه (پول، امتیاز، هوش یا شغلش صفر نیست).", "en": "The target account must be new and empty (its money, points, intelligence or job is not zero).", "ru": "Целевой аккаунт должен быть новым и пустым (деньги, очки, интеллект или работа не равны нулю)."},
+    "t_e_notempty2": {"fa": "اکانت مقصد باید تازه و خالی باشه (ماشین یا خونه داره).", "en": "The target account must be new and empty (it owns a car or a house).", "ru": "Целевой аккаунт должен быть новым и пустым (есть машина или дом)."},
+    "t_e_db": {"fa": "یکی از اکانت‌ها تو دیتابیس پیدا نشد.", "en": "One of the accounts was not found in the database.", "ru": "Один из аккаунтов не найден в базе данных."},
+    "t_e_gone": {"fa": "اکانت مقصد دیگه خالی نیست.", "en": "The target account is no longer empty.", "ru": "Целевой аккаунт больше не пустой."},
+    "t_nodm": {"fa": "❌ نتونستم به اکانت مقصد پیام بدم. باید ربات رو استارت کرده و بلاک نکرده باشه.", "en": "❌ I couldn't message the target account. It must have started the bot and not blocked it.", "ru": "❌ Не удалось написать целевому аккаунту. Он должен запустить бота и не блокировать его."},
+    "t_sent": {"fa": "✅ درخواست برای اکانت مقصد فرستاده شد. منتظر تاییدش باش (۱۰ دقیقه اعتبار داره).", "en": "✅ The request was sent to the target account. Wait for its confirmation (valid for 10 minutes).", "ru": "✅ Запрос отправлен целевому аккаунту. Ожидайте подтверждения (действует 10 минут)."},
+    "t_req": {
+        "fa": "🔁 درخواست انتقال اکانت\n\n{name} ({src}) می‌خواد همه‌ی اطلاعات اکانتش (پول، بانک، امتیازها، ماشین‌ها، خونه‌ها، سطح هوش) رو به این اکانت منتقل کنه.\nاگه خودت درخواست دادی قبول کن؛ وگرنه رد کن.\n(این درخواست ۱۰ دقیقه اعتبار داره)",
+        "en": "🔁 Account transfer request\n\n{name} ({src}) wants to move all data of their account (money, bank, points, cars, houses, intelligence level) to this account.\nIf you requested it, accept; otherwise decline.\n(This request is valid for 10 minutes)",
+        "ru": "🔁 Запрос на перенос аккаунта\n\n{name} ({src}) хочет перенести все данные своего аккаунта (деньги, банк, очки, машины, дома, уровень интеллекта) на этот аккаунт.\nЕсли запрос ваш — примите, иначе отклоните.\n(Запрос действует 10 минут)"},
+    "t_accept": {"fa": "✅ قبول می‌کنم", "en": "✅ Accept", "ru": "✅ Принять"},
+    "t_reject": {"fa": "❌ رد", "en": "❌ Decline", "ru": "❌ Отклонить"},
+    "t_rejected": {"fa": "❌ اکانت مقصد درخواست انتقال رو رد کرد.", "en": "❌ The target account declined the transfer request.", "ru": "❌ Целевой аккаунт отклонил запрос на перенос."},
+    "t_expired": {"fa": "⌛ این درخواست منقضی شده؛ از اکانت مبدا دوباره درخواست بده.", "en": "⌛ This request has expired; send a new request from the source account.", "ru": "⌛ Запрос истёк; отправьте новый с исходного аккаунта."},
+    "t_srcban": {"fa": "❌ اکانت مبدا محروم شده و انتقال انجام نشد.", "en": "❌ The source account is banned; the transfer was not made.", "ru": "❌ Исходный аккаунт заблокирован; перенос не выполнен."},
+    "t_done": {"fa": "✅ انتقال اکانت انجام شد! برای دیدن دارایی‌هات بنویس «خودم».", "en": "✅ Account transfer completed! Type «خودم» to see your assets.", "ru": "✅ Перенос аккаунта выполнен! Напишите «خودم», чтобы увидеть своё имущество."},
+    "t_done_src": {"fa": "✅ انتقال اکانت انجام شد و اطلاعات اکانتت به اکانت مقصد رفت.", "en": "✅ The transfer is complete and your account data moved to the target account.", "ru": "✅ Перенос выполнен, данные вашего аккаунта перешли на целевой аккаунт."},
+}
+
+
+def T(lang_or_uid, key: str, **kw) -> str:
+    lg = lang_or_uid if isinstance(lang_or_uid, str) else lang_of(lang_or_uid)
+    s = (I18N.get(key) or {}).get(lg) or (I18N.get(key) or {}).get("fa") or key
+    return s.format(**kw) if kw else s
+
+
+def lang_view(uid: int):
+    cur = lang_of(uid)
+    rows = [[btn(("✅ " if code == cur else "") + LANG_NAMES[code], "success" if code == cur else None,
+                 icon=LANG_ICONS[code], callback_data=f"sp:lang_{code}:{uid}")] for code in ("en", "ru", "fa")]
+    rows.append([btn(T(uid, "b_back_settings"), "primary", icon=EID_BACK, callback_data=f"sp:settings:{uid}")])
+    return BP(T(uid, "lang_t")), InlineKeyboardMarkup(rows)
+
+
+# ── راهنما به زبان‌های دیگه (دستورها داخل <code> فارسی می‌مونن) ──
+def _guide_sections_t(lang: str) -> list:
+    if lang == "en":
+        return [
+            _gq("🎓 Study & lessons", "<code>تحصیل</code> degrees table\n<code>درس</code> every 6 min 45 s one question from history, math & IQ, literature or science; each correct answer gives 2–4 units, a wrong one costs 1 unit."),
+            _gq(f"{JM_CE} Profit", f"<code>پروفیت</code>\n5% of shift income (work) and hug/kiss money goes into your profit (capacity {JM_CAP:,} toman). Typing this word moves it all into your wallet; at least {JM_MIN:,} toman must be in it. When it's full new money doesn't fit, so collect on time. It is also shown in the «خودم» panel."),
+            _gq("🎖 Personal panel", "<code>خودم</code>\nOpens bank, crimes, my car, casino, powers and settings (change gender, guide, account transfer, language). Your character, job and assets are written here too."),
+            _gq(f"{POWERS_CE} Powers", "From the «خودم» panel ← Powers: spying, intelligence, theft, equipment (grenade and atom bomb for the boss: reply to the boss + <code>جینگو نارنجک</code> / <code>جینگو بمب اتم</code>) and bodyguard (<code>خرید بادیگارد</code>, price 1.4m; every 4 hours <code>بادیگارد</code> blocks one theft)."),
+            _gq(f"{HAND_CE} Intelligence", "<code>هوش</code>\nHas 5 upgrade levels and affects the intelligence power; class time follows the fixed 6:45 schedule."),
+            _gq(f"{SPY_CE} Spying", f"<code>خرید جاسوسی</code>\nPrice: {SPY_PRICE:,} toman. Then reply to a user's message and type <code>جاسوسی</code> to see their money, bank, job and activity. {SPY_DAILY_LIMIT} times a day."),
+            _gq(f"{THEFT_CE} Theft", f"Reply to a user's message and type <code>دزدی</code>\nOnce every 3 hours you take between {THEFT_MIN:,} and {THEFT_MAX:,} toman from their pocket. Money in the bank is safe; if their pocket is empty you only learn they're broke."),
+            _gq("🏦 Bank", f"<code>بانک</code>\n<code>واریز 100m</code> (fee {BANK_FEE:,} toman)\n<code>برداشت 100m</code> (no fee)\n{BANK_INTEREST_RATE_PCT}% interest every 12 hours on the bank balance; the next interest amount is shown in the bank panel."),
+            _gq("👛 Assets", "<code>دارایی</code>\nYour pocket money, bank and total assets."),
+            _gq("💼 Jobs & shifts", "<code>شغل</code> jobs table (degree and cost of each) + buttons to pick the active job and buy the next one\n<code>کار</code> work shift (once every 12 min 30 s) and getting your salary."),
+            _gq("🎖 Character", "<code>کاراکتر</code>\nShows your character and level; the level (1 to 10) comes from your study units and degree: collect units with «تحصیل» and earn degrees to level up."),
+            _gq("🚗 Cars & garage", f"<code>ماشینم</code> car panel\n<code>گاراژ</code> cars table\nCars are bought in order. Each of the 4 parts (engine, body, tires, glass & rims) can be upgraded up to level {CAR_MAX_LEVEL} and the car color costs {CAR_COLOR_PRICE:,} toman. Hourly income goes into the vault (limit {CAR_VAULT_CAP:,} toman per car) and is collected with the «Collect» button."),
+            _gq("🏠 House", "<code>خونه</code>\nBuy and repair a house and its furniture, and collect its income."),
+            _gq("🤗 Hugs & kisses", f"Reply to a user's message and type <code>بوس</code> or <code>بغل</code>\nEach user can be hugged/kissed once every 5 minutes. Both of you get energy and {HUG_MONEY[0]} to {HUG_MONEY[1]} toman (into profit). Hugging/kissing someone else's spouse costs 3 energy."),
+            _gq("🎁 Gifts", "<code>هدیه</code> gifts list and prices\nReply + <code>هدیه گل</code>\nA gift gives energy to the other person."),
+            _gq("⚡ Energy", "Energy below 30% means half the points money, 25% less car income and a higher chance of getting caught in crimes. Hugs, kisses and gifts raise it."),
+            _gq("💍 Marriage", "A man replies to a woman's message + <code>ازدواج</code> (support staff can too; divorce by support doesn't move money)\n<code>همسرم</code> spouse info, relationship level and the divorce button\n<code>سکس</code> between couples (every 120 min)\n<code>فروشگاه</code> buy condoms and pills."),
+            _gq("👶 Adoption", "Married couples: reply to a user + <code>جینگو فرزندخواندگی</code> (or <code>فرزندخواندگی</code>); if they accept they become your adopted child.\n<code>خانواده</code> parents, children and the family-tree button (leaderboard ← family champions). Hugs/kisses between relatives don't count as cheating | <code>شجره نامه</code> family-tree picture.\nParent: reply + <code>عیدی ۱۰۰۰۰۰</code> | reply + <code>عاق</code>\nAdopted child: <code>پول توجیبی</code> (50k a day from parents) | <code>ترک خانواده</code>"),
+            _gq("💔 Quarrel & making up", "Reply + <code>قهر</code>\nFor up to 3 hours they can't hug, kiss, gift, duel or gamble together.\nReply + <code>آشتی</code> ends the quarrel."),
+            _gq("🎭 Gay & lesbian", "Reply + <code>گی</code> or <code>لز</code>\nOnce every 30 minutes per user."),
+            _gq("🧠 Study duel", "Reply + <code>دوئل درسی</code>\nThe other person must accept; 10 questions are asked in turn and each correct answer is worth one point. The inviter first picks the stake and subject; each question has 15 seconds. The highest score wins the whole stake + 5 study units. Only one duel can run at a time in each group."),
+            _gq("🎰 Casino", "<code>کازینو</code>\nDice, slots, mines, rocket and two-player tables. Bet limit is 50 million toman. Slots, dice, treasure tower, sports games and poison-or-food once every 3 minutes; bet, mines and rocket once every 15 seconds.\n<code>جینگو بت 10m</code> (no limit, once every 15 seconds)"),
+            _gq("🍔 Fast food", "<code>فست فودی</code>\nBuild a fast-food place (1 million toman, level 3 and up). The main menu has three sections:\n• «پخت و پز» (Cooking): 6 fryers (the first is free, the others cost 5m each) and 8 plates (2 at the start, the others cost 7m each). Cook food in a fryer and press «برداشت» (collect) to put it on a plate; if plates are full you can't collect. Cooked food that isn't collected within 30 minutes burns and must go into the trash. Each food unlocks by selling the previous one.\n• «سفارشات» (Orders): every customer has a separate order; some want 3 items and pay more.\n• «یخچال» (Fridge): drinks and sauces are free, 6 in total."),
+            _gq("🚨 Crime", "<code>خلاف</code>\nCriminal operations with a risk of getting caught; the lower your energy, the higher the chance."),
+            _gq("💸 Money transfer", "Reply + <code>انتقال پول 100 هزار</code>\nTransfer limit: 200 million toman per day."),
+            _gq("📋 Tasks", "<code>تسک</code>\nDaily and weekly tasks with rewards; the bot tracks your progress itself."),
+            _gq("🏆 Leaderboard", "<code>لیدربرد</code>\nTop players by money and points."),
+            _gq("🔥 Income event", "Sometimes support starts an event and the «work» income is multiplied for a limited time; the bot announces it in all groups."),
+            _gq("🎁 Giveaway", "Support creates giveaways. Join with the «participate» button and invite friends to get more tickets (if an invitee leaves the channels, the ticket goes too)."),
+            _gq("🔁 Account transfer", "Only in the bot's private chat: <code>خودم</code> ← Settings ← Account transfer by numeric ID."),
+        ]
+    return [
+        _gq("🎓 Учёба и уроки", "<code>تحصیل</code> таблица дипломов\n<code>درس</code> каждые 6 мин 45 с один вопрос по истории, математике и IQ, литературе или науке; верный ответ даёт 2–4 единицы, неверный отнимает 1."),
+        _gq(f"{JM_CE} Профит", f"<code>پروفیت</code>\n5% дохода со смены (работа) и деньги за поцелуи/объятия попадают в профит (лимит {JM_CAP:,} томан). Это слово переводит всё в кошелёк; нужно минимум {JM_MIN:,} томан. Когда профит полон, новые деньги не помещаются, так что забирайте вовремя. Он виден и в панели «خودم»."),
+        _gq("🎖 Личная панель", "<code>خودم</code>\nОткрывает банк, преступления, мою машину, казино, способности и настройки (смена пола, справка, перенос аккаунта, язык). Здесь же написаны персонаж, работа и имущество."),
+        _gq(f"{POWERS_CE} Способности", "Из панели «خودم» ← Способности: шпионаж, интеллект, кража, снаряжение (граната и атомная бомба для босса: ответ на босса + <code>جینگو نارنجک</code> / <code>جینگو بمب اتم</code>) и телохранитель (<code>خرید بادیگارد</code>, цена 1,4m; раз в 4 часа <code>بادیگارد</code> блокирует одну кражу)."),
+        _gq(f"{HAND_CE} Интеллект", "<code>هوش</code>\nИмеет 5 уровней улучшения и влияет на способность интеллекта; время урока по фиксированному расписанию 6:45."),
+        _gq(f"{SPY_CE} Шпионаж", f"<code>خرید جاسوسی</code>\nЦена: {SPY_PRICE:,} томан. Затем ответьте на сообщение пользователя и напишите <code>جاسوسی</code>, чтобы увидеть его деньги, банк, работу и активность. {SPY_DAILY_LIMIT} раз в день."),
+        _gq(f"{THEFT_CE} Кража", f"Ответьте на сообщение пользователя и напишите <code>دزدی</code>\nРаз в 3 часа вы забираете из его кармана от {THEFT_MIN:,} до {THEFT_MAX:,} томан. Деньги в банке в безопасности; если карман пуст, вы лишь узнаете, что он без гроша."),
+        _gq("🏦 Банк", f"<code>بانک</code>\n<code>واریز 100m</code> (комиссия {BANK_FEE:,} томан)\n<code>برداشت 100m</code> (без комиссии)\n{BANK_INTEREST_RATE_PCT}% прибыли каждые 12 часов на остаток в банке; сумма следующей прибыли указана в панели банка."),
+        _gq("👛 Имущество", "<code>دارایی</code>\nКарманные деньги, банк и общая сумма имущества."),
+        _gq("💼 Работа и смены", "<code>شغل</code> таблица профессий (диплом и цена каждой) + кнопки выбора активной работы и покупки следующей\n<code>کار</code> рабочая смена (раз в 12 мин 30 с) и получение зарплаты."),
+        _gq("🎖 Персонаж", "<code>کاراکتر</code>\nПоказывает персонажа и уровень; уровень (от 1 до 10) зависит от учебных единиц и диплома: набирайте единицы через «تحصیل» и получайте дипломы."),
+        _gq("🚗 Машины и гараж", f"<code>ماشینم</code> панель машины\n<code>گاراژ</code> таблица машин\nМашины покупаются по порядку. Каждую из 4 деталей (двигатель, кузов, шины, стёкла и диски) можно улучшить до уровня {CAR_MAX_LEVEL}, а цвет машины стоит {CAR_COLOR_PRICE:,} томан. Почасовой доход идёт в сейф (лимит {CAR_VAULT_CAP:,} томан на машину) и забирается кнопкой «Собрать»."),
+        _gq("🏠 Дом", "<code>خونه</code>\nПокупка и ремонт дома и его вещей, сбор его дохода."),
+        _gq("🤗 Поцелуи и объятия", f"Ответьте на сообщение пользователя и напишите <code>بوس</code> или <code>بغل</code>\nКаждого пользователя можно обнять/поцеловать раз в 5 минут. Оба получают энергию и от {HUG_MONEY[0]} до {HUG_MONEY[1]} томан (в профит). Объятия/поцелуи с чужим супругом дают −3 энергии."),
+        _gq("🎁 Подарки", "<code>هدیه</code> список подарков и цены\nОтвет + <code>هدیه گل</code>\nПодарок даёт энергию получателю."),
+        _gq("⚡ Энергия", "Энергия ниже 30% — вдвое меньше денег за очки, на 25% меньше дохода машины и выше шанс попасться на преступлении. Поднимается объятиями, поцелуями и подарками."),
+        _gq("💍 Брак", "Мужчина отвечает на сообщение женщины + <code>ازدواج</code> (поддержка тоже может; развод через поддержку не двигает деньги)\n<code>همسرم</code> информация о супруге, уровень отношений и кнопка развода\n<code>سکس</code> между парами (раз в 120 мин)\n<code>فروشگاه</code> покупка презервативов и таблеток."),
+        _gq("👶 Усыновление", "Женатые пары: ответ на пользователя + <code>جینگو فرزندخواندگی</code> (или <code>فرزندخواندگی</code>); если согласится, станет вашим приёмным ребёнком.\n<code>خانواده</code> родители, дети и кнопка семейного древа (лидерборд ← семейные чемпионы). Объятия/поцелуи между родственниками не считаются изменой | <code>شجره نامه</code> картинка семейного древа.\nРодитель: ответ + <code>عیدی ۱۰۰۰۰۰</code> | ответ + <code>عاق</code>\nПриёмный ребёнок: <code>پول توجیبی</code> (50 тыс. в день от родителей) | <code>ترک خانواده</code>"),
+        _gq("💔 Ссора и примирение", "Ответ + <code>قهر</code>\nДо 3 часов они не могут обниматься, целоваться, дарить подарки, драться на дуэли и играть в казино вместе.\nОтвет + <code>آشتی</code> заканчивает ссору."),
+        _gq("🎭 Гей и лесби", "Ответ + <code>گی</code> или <code>لز</code>\nРаз в 30 минут на пользователя."),
+        _gq("🧠 Учебная дуэль", "Ответ + <code>دوئل درسی</code>\nСоперник должен согласиться; по очереди задаётся 10 вопросов, каждый верный ответ — одно очко. Сначала пригласивший выбирает ставку и тему; на каждый вопрос 15 секунд. Побеждает набравший больше очков и получает всю ставку + 5 учебных единиц. В каждой группе одновременно идёт только одна дуэль."),
+        _gq("🎰 Казино", "<code>کازینو</code>\nКости, слоты, мины, ракета и столы на двоих. Лимит ставки — 50 миллионов томан. Слоты, кости, башня сокровищ, спортивные игры и «яд или еда» — раз в 3 минуты; ставка, мины и ракета — раз в 15 секунд.\n<code>جینگو بت 10m</code> (без лимита, раз в 15 секунд)"),
+        _gq("🍔 Фастфуд", "<code>فست فودی</code>\nПостройте фастфуд (1 миллион томан, с 3 уровня). В главном меню три раздела:\n• «پخت و پز» (Готовка): 6 фритюрниц (первая бесплатная, остальные по 5m) и 8 тарелок (2 в начале, остальные по 7m). Готовьте еду во фритюрнице и нажмите «برداشت» (забрать), чтобы положить на тарелку; если тарелки заполнены, забрать нельзя. Готовая еда, не забранная за 30 минут, пригорает и её нужно выбросить в мусор. Каждое блюдо открывается продажей предыдущего.\n• «سفارشات» (Заказы): у каждого клиента отдельный заказ; некоторые берут 3 позиции и платят больше.\n• «یخچال» (Холодильник): напитки и соусы бесплатны, всего 6 штук."),
+        _gq("🚨 Преступления", "<code>خلاف</code>\nПреступные операции с риском попасться; чем меньше энергии, тем выше шанс."),
+        _gq("💸 Перевод денег", "Ответ + <code>انتقال پول 100 هزار</code>\nЛимит перевода: 200 миллионов томан в день."),
+        _gq("📋 Задания", "<code>تسک</code>\nЕжедневные и еженедельные задания с наградой; бот сам считает ваш прогресс."),
+        _gq("🏆 Лидерборд", "<code>لیدربرد</code>\nЛучшие игроки по деньгам и очкам."),
+        _gq("🔥 Событие дохода", "Иногда поддержка устраивает событие, и доход от «работы» на время умножается; бот объявляет об этом во всех группах."),
+        _gq("🎁 Розыгрыш", "Поддержка создаёт розыгрыши. Участвуйте кнопкой «участвовать» и приглашайте друзей, чтобы получить больше билетов (если приглашённый выйдет из каналов, билет пропадёт)."),
+        _gq("🔁 Перенос аккаунта", "Только в личном чате с ботом: <code>خودم</code> ← Настройки ← Перенос аккаунта по числовому ID."),
+    ]
+
+
 def settings_keyboard(uid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn("🧔👩 تغییر جنسیت", "primary", callback_data=f"sp:gender:{uid}")],
-        [btn("📖 راهنما", "success", callback_data=f"sp:guide:{uid}")],
-        [btn("🔁 انتقال اکانت با آیدی عددی", "danger", callback_data=f"sp:transfer:{uid}")],
-        [btn("🔙 برگشت به پنل شخصی", "primary", icon=EID_BACK, callback_data=f"sp:home:{uid}")],
+        [btn(T(uid, "b_gender"), "primary", callback_data=f"sp:gender:{uid}")],
+        [btn(T(uid, "b_lang"), "primary", callback_data=f"sp:lang:{uid}")],
+        [btn(T(uid, "b_guide"), "success", callback_data=f"sp:guide:{uid}")],
+        [btn(T(uid, "b_transfer"), "danger", callback_data=f"sp:transfer:{uid}")],
+        [btn(T(uid, "b_back_panel"), "primary", icon=EID_BACK, callback_data=f"sp:home:{uid}")],
     ])
 
 
@@ -9938,7 +10115,7 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("انتقال اکانت فقط تو پی‌وی ربات ممکنه؛ بیا پی‌وی و بنویس «خودم».", show_alert=True); return
     await q.answer()
     back = [[btn("🔙 برگشت به پنل شخصی", "primary", icon=EID_BACK, callback_data=f"sp:home:{uid}")]]
-    back_settings = [[btn("🔙 برگشت به تنظیمات", "primary", icon=EID_BACK, callback_data=f"sp:settings:{uid}")]]
+    back_settings = [[btn(T(uid, "b_back_settings"), "primary", icon=EID_BACK, callback_data=f"sp:settings:{uid}")]]
     if action != "transfer":
         context.user_data.pop("acc_transfer", None)
     if action == "home":
@@ -10027,24 +10204,32 @@ async def self_panel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "casino":
         await casino_main_replace(q, uid, extra_rows=back); return
     if action == "settings":
-        await _sp_edit_text(q, B("⚙️ تنظیمات\n\nیکی از گزینه‌ها رو انتخاب کن:"), parse_mode="HTML", reply_markup=settings_keyboard(uid)); return
+        await _sp_edit_text(q, B(T(uid, "st_title")), parse_mode="HTML", reply_markup=settings_keyboard(uid)); return
+    if action == "lang":
+        _lt, _lk = lang_view(uid)
+        await _sp_edit_text(q, _lt, parse_mode="HTML", reply_markup=_lk); return
+    if action in ("lang_en", "lang_ru", "lang_fa"):
+        await set_lang(uid, action[5:])
+        _lt, _lk = lang_view(uid)
+        await _sp_edit_text(q, _lt, parse_mode="HTML", reply_markup=_lk)
+        try:
+            await q.answer(T(uid, "lang_ok"))
+        except Exception:
+            pass
+        return
     if action == "gender":
         rows = list(gender_keyboard(uid).inline_keyboard) + back_settings
-        await _sp_edit_text(q, BP("جنسیتت رو انتخاب کن تا کاراکترت عوض بشه 👇"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows)); return
+        await _sp_edit_text(q, BP(T(uid, "gender_t")), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows)); return
     if action in ("guide", "guide2"):
         pg = 1 if action == "guide2" else 0
-        kb = guide_kb(pg, f"sp:settings:{uid}", f"sp:guide2:{uid}", f"sp:guide:{uid}")
-        await _sp_edit_text(q, guide_text(pg), parse_mode="HTML", reply_markup=kb); return
+        kb = guide_kb(pg, f"sp:settings:{uid}", f"sp:guide2:{uid}", f"sp:guide:{uid}", lang_of(uid))
+        await _sp_edit_text(q, guide_text(pg, lang_of(uid)), parse_mode="HTML", reply_markup=kb); return
     if action == "transfer":
         context.user_data["acc_transfer"] = {"ts": time.time()}
         await _sp_edit_text(q, 
-            B("🔁 انتقال اکانت\n\nآیدی عددی اکانت مقصد رو بفرست.\n\n"
-              "• اکانت مقصد باید قبلاً ربات رو استارت کرده باشه و کاملاً تازه و خالی باشه.\n"
-              "• همه‌ی پول، بانک، امتیازها، ماشین‌ها، خونه‌ها و سطح هوش به اون اکانت منتقل میشه و اکانت فعلی خالی میشه.\n"
-              "• اکانت مقصد هم باید انتقال رو تایید کنه.\n\n"
-              "برای لغو بنویس «لغو»."),
+            B(T(uid, "t_title")),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[btn("❌ لغو", "danger", callback_data=f"sp:settings:{uid}")]]),
+            reply_markup=InlineKeyboardMarkup([[btn(T(uid, "b_cancel"), "danger", callback_data=f"sp:settings:{uid}")]]),
         ); return
     await q.answer("این بخش پیدا نشد.", show_alert=True)
 
@@ -10058,20 +10243,20 @@ _DIGITS_TR = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567
 async def _transfer_target_error(src: int, dst: int) -> str | None:
     """None یعنی مقصد معتبره؛ وگرنه متن خطا."""
     if dst == src:
-        return "نمی‌تونی اکانت رو به خودش منتقل کنی."
+        return T(src, "t_e_self")
     if src in ADMIN_IDS or dst in ADMIN_IDS:
-        return "انتقال از/به اکانت پشتیبان‌ها ممکن نیست."
+        return T(src, "t_e_staff")
     until = BANNED.get(dst)
     if until and until > time.time():
-        return "اکانت مقصد محروم شده و نمی‌تونه انتقال بگیره."
+        return T(src, "t_e_ban")
     d = await get_user(dst)
     if not d or not d["started"]:
-        return "این آیدی پیدا نشد یا هنوز ربات رو استارت نکرده. از اکانت مقصد تو پی‌وی ربات /start بزن و دوباره امتحان کن."
+        return T(src, "t_e_nf")
     if any(int(d[c] or 0) for c in ("balance", "bank_balance", "jaghs", "hand_level", "work_count")):
-        return "اکانت مقصد باید تازه و خالی باشه (پول، امتیاز، هوش یا شغلش صفر نیست)."
+        return T(src, "t_e_notempty")
     extra = await pool.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM user_house WHERE user_id=$1)", dst)
     if extra:
-        return "اکانت مقصد باید تازه و خالی باشه (ماشین یا خونه داره)."
+        return T(src, "t_e_notempty2")
     return None
 
 
@@ -10085,13 +10270,13 @@ async def account_transfer_input(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.pop("acc_transfer", None)
         return False
     text = msg.text.strip()
-    if _word_key(text) in ("لغو", "انصراف"):
+    if _word_key(text) in ("لغو", "انصراف", "cancel", "отмена"):
         context.user_data.pop("acc_transfer", None)
-        await msg.reply_text("❌ انتقال اکانت لغو شد.")
+        await msg.reply_text(T(user.id, "t_cancelled"))
         return True
     digits = text.translate(_DIGITS_TR)
     if not digits.isdigit() or len(digits) > 15:
-        await msg.reply_text("فقط آیدی عددی رو بفرست (مثلا 123456789) یا بنویس «لغو».")
+        await msg.reply_text(T(user.id, "t_only_id"))
         return True
     dst = int(digits)
     err = await _transfer_target_error(user.id, dst)
@@ -10101,13 +10286,11 @@ async def account_transfer_input(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("acc_transfer", None)
     d = await get_user(dst)
     kb = InlineKeyboardMarkup([[
-        btn("✅ تایید و ارسال درخواست", "success", callback_data=f"at:go:{user.id}:{dst}"),
-        btn("❌ لغو", "danger", callback_data=f"at:no:{user.id}:{dst}"),
+        btn(T(user.id, "t_confirm_btn"), "success", callback_data=f"at:go:{user.id}:{dst}"),
+        btn(T(user.id, "b_cancel"), "danger", callback_data=f"at:no:{user.id}:{dst}"),
     ]])
     await msg.reply_text(
-        B(f"⚠️ مطمئنی؟\n\nهمه‌ی اطلاعات اکانت فعلیت (پول، بانک، امتیازها، ماشین‌ها، خونه‌ها، سطح هوش و ...) به اکانت "
-          f"{html.escape(d['name'] or 'کاربر')} ({dst}) منتقل میشه و اکانت فعلیت خالی میشه.\n"
-          "این کار برگشت‌پذیر نیست و اکانت مقصد هم باید تایید کنه."),
+        B(T(user.id, "t_confirm", name=html.escape(d['name'] or T(user.id, "t_user")), dst=dst)),
         parse_mode="HTML", reply_markup=kb,
     )
     return True
@@ -10121,11 +10304,11 @@ async def _do_account_transfer(src: int, dst: int) -> str | None:
             by = {r["user_id"]: r for r in rows}
             s_row, d_row = by.get(src), by.get(dst)
             if not s_row or not d_row or not d_row["started"]:
-                return "یکی از اکانت‌ها تو دیتابیس پیدا نشد."
+                return T(dst, "t_e_db")
             if any(int(d_row[c] or 0) for c in ("balance", "bank_balance", "jaghs", "hand_level", "work_count")):
-                return "اکانت مقصد دیگه خالی نیست."
+                return T(dst, "t_e_gone")
             if await conn.fetchval("SELECT (SELECT count(*) FROM cars WHERE user_id=$1) + (SELECT count(*) FROM user_house WHERE user_id=$1)", dst):
-                return "اکانت مقصد دیگه خالی نیست."
+                return T(dst, "t_e_gone")
             await conn.execute(
                 "UPDATE users SET balance=$2, bank_balance=$3, jaghs=$4, hand_level=$5, work_count=$6, gender=COALESCE($7, gender), job_level=$8, edu_units=$9, edu_degree=$10, job_sel=$11 WHERE user_id=$1",
                 dst, int(s_row["balance"] or 0), int(s_row["bank_balance"] or 0), int(s_row["jaghs"] or 0),
@@ -10165,47 +10348,46 @@ async def account_transfer_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if act == "go":  # مبدا تایید کرد → درخواست برای مقصد فرستاده میشه
         if me != src:
-            await q.answer("این دکمه مال تو نیست 😅", show_alert=True); return
+            await q.answer(T(me, "not_yours"), show_alert=True); return
         err = await _transfer_target_error(src, dst)
         if err:
             await q.answer(); await q.edit_message_text(f"❌ {err}"); return
         s_row = await get_user(src)
         kb = InlineKeyboardMarkup([[
-            btn("✅ قبول می‌کنم", "success", callback_data=f"at:ok:{src}:{dst}"),
-            btn("❌ رد", "danger", callback_data=f"at:no:{src}:{dst}"),
+            btn(T(dst, "t_accept"), "success", callback_data=f"at:ok:{src}:{dst}"),
+            btn(T(dst, "t_reject"), "danger", callback_data=f"at:no:{src}:{dst}"),
         ]])
         try:
             await context.bot.send_message(
                 dst,
-                B(f"🔁 درخواست انتقال اکانت\n\n{html.escape(s_row['name'] or 'کاربر')} ({src}) می‌خواد همه‌ی اطلاعات اکانتش (پول، بانک، امتیازها، ماشین‌ها، خونه‌ها، سطح هوش) "
-                  "رو به این اکانت منتقل کنه.\nاگه خودت درخواست دادی قبول کن؛ وگرنه رد کن.\n(این درخواست ۱۰ دقیقه اعتبار داره)"),
+                B(T(dst, "t_req", name=html.escape(s_row['name'] or T(dst, "t_user")), src=src)),
                 parse_mode="HTML", reply_markup=kb,
             )
         except Exception:
-            await q.answer(); await q.edit_message_text("❌ نتونستم به اکانت مقصد پیام بدم. باید ربات رو استارت کرده و بلاک نکرده باشه."); return
+            await q.answer(); await q.edit_message_text(T(me, "t_nodm")); return
         TRANSFER_PENDING[key] = time.time()
         await q.answer()
-        await q.edit_message_text("✅ درخواست برای اکانت مقصد فرستاده شد. منتظر تاییدش باش (۱۰ دقیقه اعتبار داره).")
+        await q.edit_message_text(T(me, "t_sent"))
         return
 
     if act == "no":  # مبدا یا مقصد لغو/رد کرد
         if me not in (src, dst):
-            await q.answer("این دکمه مال تو نیست 😅", show_alert=True); return
+            await q.answer(T(me, "not_yours"), show_alert=True); return
         TRANSFER_PENDING.pop(key, None)
         await q.answer()
-        await q.edit_message_text("❌ انتقال اکانت لغو شد.")
+        await q.edit_message_text(T(me, "t_cancelled"))
         if me == dst:
-            await tell(src, "❌ اکانت مقصد درخواست انتقال رو رد کرد.")
+            await tell(src, T(src, "t_rejected"))
         return
 
     if act == "ok":  # مقصد قبول کرد → انتقال
         if me != dst:
-            await q.answer("این دکمه مال تو نیست 😅", show_alert=True); return
+            await q.answer(T(me, "not_yours"), show_alert=True); return
         ts = TRANSFER_PENDING.pop(key, None)
         if ts is None or time.time() - ts > TRANSFER_TTL:
-            await q.answer(); await q.edit_message_text("⌛ این درخواست منقضی شده؛ از اکانت مبدا دوباره درخواست بده."); return
+            await q.answer(); await q.edit_message_text(T(me, "t_expired")); return
         if src in BANNED and BANNED[src] > time.time():
-            await q.answer(); await q.edit_message_text("❌ اکانت مبدا محروم شده و انتقال انجام نشد."); return
+            await q.answer(); await q.edit_message_text(T(me, "t_srcban")); return
         err = await _transfer_target_error(src, dst)
         if err:
             await q.answer(); await q.edit_message_text(f"❌ {err}"); return
@@ -10213,8 +10395,8 @@ async def account_transfer_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
         await q.answer()
         if err:
             await q.edit_message_text(f"❌ {err}"); return
-        await q.edit_message_text("✅ انتقال اکانت انجام شد! برای دیدن دارایی‌هات بنویس «خودم».")
-        await tell(src, "✅ انتقال اکانت انجام شد و اطلاعات اکانتت به اکانت مقصد رفت.")
+        await q.edit_message_text(T(me, "t_done"))
+        await tell(src, T(src, "t_done_src"))
         return
 
 
@@ -12598,8 +12780,8 @@ async def send_card(bot, chat_id: int, row, reply_to: int | None = None, text: s
 def gender_keyboard(uid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[
-            btn("🧔 آقا", "primary", callback_data=f"g:{uid}:m"),
-            btn("👩 خانوم", "success", callback_data=f"g:{uid}:f"),
+            btn(T(uid, "b_man"), "primary", callback_data=f"g:{uid}:m"),
+            btn(T(uid, "b_woman"), "success", callback_data=f"g:{uid}:f"),
         ]]
     )
 
@@ -12735,11 +12917,11 @@ async def pick_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     _, uid, g = q.data.split(":")
     if q.from_user.id != int(uid):
-        await q.answer("این دکمه مال تو نیست 😅", show_alert=True)
+        await q.answer(T(q.from_user.id, "not_yours"), show_alert=True)
         return
     await upsert_user(q.from_user.id, q.from_user.full_name)
     await pool.execute("UPDATE users SET gender = $1 WHERE user_id = $2", g, q.from_user.id)
-    await q.answer("ثبت شد ✅")
+    await q.answer(T(q.from_user.id, "gender_ok"))
     try:
         await q.message.delete()
     except Exception:
@@ -26607,7 +26789,7 @@ def main():
         log.warning("concurrent_updates not supported", exc_info=True)
     app = _builder.build()
     app.add_handler(TypeHandler(Update, gate), group=-1)
-    app.add_handler(CallbackQueryHandler(self_panel_cb, pattern=r"^sp:(home|bank|robbery|cars|powers|spy|theft|guard|hand|casino|settings|gender|guide|guide2|transfer|special):\d+$"))
+    app.add_handler(CallbackQueryHandler(self_panel_cb, pattern=r"^sp:(home|bank|robbery|cars|powers|spy|theft|guard|hand|casino|settings|gender|guide|guide2|transfer|special|lang|lang_en|lang_ru|lang_fa):\d+$"))
     app.add_handler(CallbackQueryHandler(special_cb, pattern=r"^spc:[vbyt]:\d+:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(hand_upgrade_cb, pattern=r"^sp:upgrade:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(account_transfer_cb, pattern=r"^at:(go|ok|no):\d+:\d+$"))
