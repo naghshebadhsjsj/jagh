@@ -7127,12 +7127,13 @@ async def _g_myself(qs, user):
     gender = r["gender"] if r["gender"] in ("m", "f") else "m"
     job = current_job(gender, int(r["jaghs"] or 0), int(r["work_count"] or 0), _jsel(r))
     lvl = row_level(r)
+    clvl = char_level(r)
     _sk = await special_current(uid)
-    photo_url = f"/api/myself/photo?l={lvl}&v={int(time.time() // 300)}" + (f"&s={_sk}" if _sk else "")
+    photo_url = f"/api/myself/photo?l={clvl}&v={int(time.time() // 300)}" + (f"&s={_sk}" if _sk else "")
     pocket = int(r["balance"] or 0)
     bank = int(r["bank_balance"] or 0)
     return _j({"id":uid,"name":r["name"] or user.get("first_name") or "کاربر",
-               "gender":gender,"level":lvl,"job":(job[1] if job else "بیکار"),"character":(SPECIALS[_sk]["name"] if _sk in SPECIALS else CHARACTERS.get(gender,CHARACTERS["m"])[lvl-1][0]),
+               "gender":gender,"level":lvl,"job":(job[1] if job else "بیکار"),"character":(SPECIALS[_sk]["name"] if _sk in SPECIALS else CHARACTERS.get(gender,CHARACTERS["m"])[clvl-1][0]),
                "energy":round(float(r["energy"] or 0),1),"bank":bank,"pocket":pocket,
                "total_assets":pocket+bank,"jaghs":int(r["jaghs"] or 0),"jagh_machine":int(await pool.fetchval("SELECT jagh_machine FROM users WHERE user_id=$1",uid) or 0),"photo":photo_url,"premium":bool(await pool.fetchval("SELECT 1 FROM mini_subscriptions WHERE user_id=$1 AND expires_at>$2",uid,time.time())),
                "cars":await _myself_cars(uid),"car_colors":[{"name":n,"rgb":list(rgb)} for n,_i,rgb in CAR_COLORS],"car_color_price":CAR_COLOR_PRICE,"car_max":CAR_MAX_LEVEL})
@@ -7262,7 +7263,7 @@ async def _g_myself_photo(qs, user):
     if _sk in SPECIALS:   # کاراکتر ویژه جای عکس کاراکتر رو می‌گیره
         return 200,"image/jpeg",_special_img(_sk,gender),{"Cache-Control":"private, max-age=300"}
     job=current_job(gender,int(r["jaghs"] or 0),int(r["work_count"] or 0), _jsel(r))
-    lvl=row_level(r)
+    lvl=char_level(r)
     data,typ=b"",None
     fid=CHAR_PHOTOS.get((gender,lvl))
     if fid and BOT_REF is not None:
@@ -9963,7 +9964,7 @@ async def self_panel_text(uid: int, name: str = "") -> str:
     lvl_pct = 0.0
     if g in JOBS:
         job = current_job(g, jaghs, work_count, _jsel(row))
-        lvl = row_level(row)
+        lvl = char_level(row)
         char_name = CHARACTERS[g][lvl - 1][0]
         job_name = job[1] if job else "بیکار"
         lvl_pct = edu_level_pct(row["edu_units"], row["edu_degree"])   # پیشرفت سطح = واحد درسی تا سطح بعدی
@@ -12556,17 +12557,18 @@ async def set_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ───────────────────────── کاراکتر من ─────────────────────────
-def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None, job_level: int = 0, msg_total: int = 0, level: int | None = None) -> str:
+def card_text(name: str, gender: str, balance: int, jaghs: int, work_count: int = 0, title_override: str | None = None, job_level: int = 0, msg_total: int = 0, level: int | None = None, title_level: int | None = None) -> str:
     # سطح/تصویر کاراکتر با سطحی که برای شغل فعلی در جدول JOBS تعریف شده هماهنگ است.
     job = current_job(gender, jaghs, work_count, job_level) if gender in JOBS else None
     real_lvl = lvl = max(1, min(int(level or 1), len(LEVEL_THRESHOLDS)))   # سطح از واحد درسی و مدرک
-    title, tagline = CHARACTERS[gender][lvl - 1]
+    tl = max(1, min(int(title_level or lvl), len(CHARACTERS[gender])))   # اسم/شعار کاراکتر از شغل فعال میاد، شماره‌ی سطح از واحد درسی
+    title, tagline = CHARACTERS[gender][tl - 1]
     if title_override:   # کاراکتر ویژه: اسمش جای اسم شغلی میاد
         title, tagline = title_override, "کاراکتر ویژه ✨"
     lines = [
         f"{ce('me', 1, '🎖')} {html.escape(name)}",
         "",
-        f"سطح {real_lvl}: {html.escape(title)} {'' if title_override else char_emojis(gender, lvl)}",
+        f"سطح {real_lvl}: {html.escape(title)} {'' if title_override else char_emojis(gender, tl)}",
         html.escape(tagline),
         "",
         f"{ce('wallet', 1, '💰')} دارایی: {balance:,} تومن",
@@ -12736,13 +12738,13 @@ async def send_card(bot, chat_id: int, row, reply_to: int | None = None, text: s
     """کارت کاراکتر کاربر: عکس + کپشن (اسم، سطح، موجودی). اگه یه مرحله خطا بده میره سراغ مرحله‌ی بعد، ولی تا جایی که بشه عکس همراه کپشن میاد."""
     gender = row["gender"]
     job = current_job(gender, row["jaghs"], row["work_count"], _jsel(row)) if row["gender"] else None
-    lvl = row_level(row)
+    lvl = char_level(row)
     try:
         _sk = await special_current(int(row["user_id"]))
     except Exception:
         _sk = None
     text = text or card_text(row["name"] or "", gender, row["balance"], row["jaghs"], row["work_count"],
-                             job_level=_jlvl(row), msg_total=int(row["msg_total"] or 0), level=row_level(row), title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
+                             job_level=_jlvl(row), msg_total=int(row["msg_total"] or 0), level=row_level(row), title_level=lvl, title_override=(SPECIALS[_sk]["name"] if _sk in SPECIALS else None))
     rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
 
     # کپشن بدون ایموجی پرمیوم (برای وقتی که تلگرام ایموجی رو قبول نکنه)
@@ -13311,6 +13313,18 @@ def _jsel(row) -> int:
     except Exception:
         s = 0
     return s if 1 <= s <= jl else jl
+
+
+def char_level(row) -> int:
+    """سطحِ کاراکتر برای عکس و اسم: اگه کاربر شغل فعالی داره، کاراکتر همون شغله (مثلاً فروشنده ← «فروشنده خسته»)؛
+    وگرنه (بیکار) از سطح درسی میاد. «سطح» و مدرک جدا از این و از واحد درسی حساب میشن."""
+    try:
+        g = row["gender"]
+        if g in JOBS and _jlvl(row) >= 1:
+            return max(1, min(int(JOBS[g][_jsel(row) - 1][1]), len(CHARACTERS[g])))
+    except Exception:
+        pass
+    return row_level(row)
 
 
 def _edeg(row) -> int:
