@@ -957,6 +957,7 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_walk DOUBLE PRECISION NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_acts INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_stats TEXT NOT NULL DEFAULT '{}'")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_guard DOUBLE PRECISION NOT NULL DEFAULT 0")
         if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'msg_total_seed_v1'"):   # یک‌بار: پیام‌های قبلیِ ثبت‌شده‌ی گروه‌ها شمرده میشه
             await c.execute("UPDATE users u SET msg_total = COALESCE((SELECT count(*) FROM group_msgs g WHERE g.user_id = u.user_id), 0)")
             await c.execute("INSERT INTO bot_settings (key, value) VALUES ('msg_total_seed_v1', '1') ON CONFLICT (key) DO NOTHING")
@@ -11040,7 +11041,18 @@ PETS = [
 PET_PRICES = [3_000_000, 15_000_000, 50_000_000, 120_000_000, 300_000_000]   # قیمت پت اول تا پنجم
 PET_UPGRADE_BASE = [2_000_000, 8_000_000, 25_000_000]   # ارتقا از رنک ۱→۲، ۲→۳، ۳→۴ (ضرب در شماره‌ی پت: پت‌های بعدی گرون‌ترن)
 PET_FEED_COST = 123_000
-PET_CD = {"pet": 20 * 60, "feed": 30 * 60, "walk": 60 * 60}   # فاصله‌ی نوازش / غذا / گردش
+PET_CD = {"pet": 10 * 60, "feed": 30 * 60, "walk": 60 * 60}   # فاصله‌ی نوازش (۱۰ دقیقه) / غذا / گردش
+# ── قدرت‌های پت‌ها (فقط وقتی اون پت «فعال» باشه کار می‌کنه) ──
+PET_GUARD_CD = 24 * 3600          # گربه: روزی یک بار جلوی یه دزدی رو می‌گیره
+PET_RABBIT_WORK_MULT = 1.02       # خرگوش: ۲٪ درآمد کار بیشتر
+PET_DOG_CRIME_BONUS = 0.10        # سگ: ۱۰ درصد (واحد) شانس موفقیت خلاف بیشتر
+PET_POWER_TEXT = {
+    1: "🛡 روزی یه بار جلوی یه دزدی از جیبت رو می‌گیره",
+    2: "💰 ۲٪ درآمد کار بیشتر",
+    3: "🚨 ۱۰٪ شانس موفقیتِ خلاف بیشتر",
+    4: "🥋 بوس و بغل به غیر فامیل خیانت حساب نمیشه (کونگ‌فو!)",
+    5: "🔋 کار کردن انرژیت رو کم نمی‌کنه",
+}
 PET_ENERGY = (3, 5)
 PET_POP_GAIN = {"pet": 3, "feed": 2, "walk": 5}
 PET_POP_CAP = 1000          # ۱۰۰٪ محبوبیت
@@ -11130,6 +11142,20 @@ def _pet_view_idx(row) -> int:
     return 1 if owned <= 0 else max(1, min(owned, int(row["pet_active"] or 1)))
 
 
+def _pet_active_idx(row) -> int:
+    """شماره‌ی پتِ فعال (۱=گربه ۲=خرگوش ۳=سگ ۴=پاندا ۵=تک‌شاخ)؛ اگه پتی نداشته باشه ۰."""
+    try:
+        owned = int(row["pets_owned"] or 0)
+        return 0 if owned <= 0 else max(1, min(owned, int(row["pet_active"] or 1)))
+    except Exception:
+        return 0
+
+
+async def pet_active_of(uid: int, conn=None) -> int:
+    r = await (conn or pool).fetchrow("SELECT pets_owned, pet_active FROM users WHERE user_id=$1", uid)
+    return _pet_active_idx(r) if r else 0
+
+
 def _pet_stage(row) -> int:
     return _pet_st(row, _pet_view_idx(row))["rank"]
 
@@ -11182,11 +11208,16 @@ def _pet_caption(row, note: str = "") -> str:
     nxt = f"ارتقای بعدی: {up:,} تومن" if up else "به آخرین رنک رسیده 👑"
     head = f"{note}\n\n" if note else ""
     pop_pct = min(100.0, st_["pop"] / PET_POP_CAP * 100)
+    guard_line = ""
+    if idx == 1:
+        gl = max(0, int(float(row["pet_t_guard"] or 0) + PET_GUARD_CD - now))
+        guard_line = "\n🛡 مراقبت امروز: " + ("آماده ✅" if gl <= 0 else f"مصرف شده، {_duration_fa(gl)} دیگه")
     return (f"{head}{_pet_ce(idx)} <b>{name}</b> · {PETS[idx - 1]['name']} {PETS[idx - 1]['titles'][stage - 1]}\n"
             f"رنک {stage} از ۴ — {nxt}\n\n"
             f"محبوبیت\n{_panel_bar('pop', '🟪', '▫️', pop_pct)}\n\n"
             f"{PET_FEED_CE} شکم\n{_panel_bar('jm', '🟪', '▫️', st_['belly'])}\n\n"
             f"نوازش: {cd('pet')}\nغذا ({PET_FEED_COST:,}): {cd('feed')}\nگردش: {cd('walk')}\n\n"
+            f"<b>قدرت {PETS[idx - 1]['name']}:</b> {PET_POWER_TEXT[idx]}{guard_line}\n\n"
             f"هر کاری با پت ۳ تا ۵ انرژی بهت میده.")
 
 
@@ -11287,15 +11318,57 @@ _PET_FAIL = {"nopet": "هنوز پت نداری! بنویس «پت» و اولی
              "full": "شکم پتت الان پره؛ یکم صبر کن گرسنه بشه."}
 
 
+_PET_NAME_CACHE: dict = {}
+
+
+async def _pet_name_map(uid: int) -> dict:
+    """اسم‌های (نرمال‌شده‌ی) پت‌های کاربر ← شماره‌ی پت؛ برای اینکه با هر پیام کوئری نزنیم ۶۰ ثانیه کش میشه."""
+    now = time.time()
+    ent = _PET_NAME_CACHE.get(uid)
+    if ent and now - ent[0] < 60:
+        return ent[1]
+    r = await pool.fetchrow("SELECT pets_owned, pet_names FROM users WHERE user_id=$1", uid)
+    mp = {}
+    if r:
+        for i in range(1, min(int(r["pets_owned"] or 0), len(PETS)) + 1):
+            mp[_word_key(_pet_name_of(r, i))] = i
+    if len(_PET_NAME_CACHE) > 5000:
+        _PET_NAME_CACHE.clear()
+    _PET_NAME_CACHE[uid] = (now, mp)
+    return mp
+
+
+async def _pet_call_by_name(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """صدا زدنِ پت با اسمش («جسی» یا «جینگو جسی») → همون پت فعال میشه و پنلش میاد."""
+    msg, user = update.effective_message, update.effective_user
+    raw = norm_word(text)
+    if not raw or len(raw) > 24 or "\n" in raw:
+        return False
+    k = _word_key(re.sub(r"^(?:ج[یي]نگو|jingo)\s+", "", raw, flags=re.I))
+    if not k:
+        return False
+    idx = (await _pet_name_map(user.id)).get(k)
+    if not idx:
+        return False
+    await pool.execute("UPDATE users SET pet_active=$1 WHERE user_id=$2", idx, user.id)
+    await send_pet_panel(context.bot, msg.chat_id, user.id, reply_to=msg.message_id)
+    return True
+
+
 async def pet_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     msg, user = update.effective_message, update.effective_user
     raw = norm_word(text)
     m = re.match(r"^جینگو\s*اسم\s*پت\s+(.+)$", raw)
     key = _word_key(text)
-    kinds = {"پتنوازش": "pet", "پتغذا": "feed", "پتگردش": "walk"}
-    if not m and key != "پت" and key not in kinds:
-        return False
-    await upsert_user(user.id, user.full_name)
+    kinds = {"پتنوازش": "pet", "پتغذا": "feed", "پتگردش": "walk",
+             "نوازش": "pet", "غذا": "feed", "گردش": "walk",
+             "جینگونوازش": "pet", "جینگوغذا": "feed", "جینگوگردش": "walk",
+             "جینگوپتنوازش": "pet", "جینگوپتغذا": "feed", "جینگوپتگردش": "walk"}
+    if not m and key not in ("پت", "جینگوپت") and key not in kinds:
+        return await _pet_call_by_name(update, context, text)
+    bare = key in ("نوازش", "غذا", "گردش")   # کلمه‌ی عادی؛ اگه پت نداشت بی‌صدا ردش می‌کنیم
+    if not bare:
+        await upsert_user(user.id, user.full_name)
     rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
     if m:
         new = m.group(1).strip()
@@ -11309,13 +11382,16 @@ async def pet_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
                 idx = max(1, min(int(r["pets_owned"]), int(r["pet_active"] or 1)))
                 names = _pet_names_of(r); names[str(idx)] = new
                 await c.execute("UPDATE users SET pet_names=$1 WHERE user_id=$2", json.dumps(names, ensure_ascii=False), user.id)
+        _PET_NAME_CACHE.pop(user.id, None)
         await msg.reply_text(B(f"از این به بعد اسم پتت «{html.escape(new)}» ـه 🐾"), parse_mode="HTML", reply_parameters=rp)
         return True
-    if key == "پت":
+    if key in ("پت", "جینگوپت"):
         await send_pet_panel(context.bot, msg.chat_id, user.id, reply_to=msg.message_id)
         return True
     kind = kinds[key]
     st, info = await _pet_do(user.id, kind)
+    if st == "nopet" and bare:
+        return False   # «غذا» / «گردش» / «نوازش» از کسی که پت نداره، یه حرف عادیه
     if st == "ok":
         gain, name = info
         await _eq_say(msg, _pet_result_text(kind, name, gain))
@@ -11395,6 +11471,7 @@ async def pet_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await c.execute("UPDATE users SET balance=balance-$1, pets_owned=pets_owned+1, pet_active=$2 WHERE user_id=$3", PET_PRICES[owned], owned + 1, uid)
         if alert:
             await q.answer(alert, show_alert=True); return
+        _PET_NAME_CACHE.pop(uid, None)
         await q.answer("پت جدیدت اومد! 🐾", show_alert=True)
         await _pet_edit(q, uid, "پت جدیدت به خانواده پیوست!")
         return
@@ -12812,7 +12889,7 @@ async def show_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 _PM_BLOCK_WORDS = {
     "خونه", "خانه", "املاک", "دست", "هوش", "کازینو", "casino", "خلاف", "دزدی", "سرقت", "جینگوسرقت", "جاسوسی",
-    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس", "بادیگارد", "خریدبادیگارد", "پت", "پتنوازش", "پتغذا", "پتگردش",
+    "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "دوئلدرسی", "دوئلدرس", "بادیگارد", "خریدبادیگارد", "پت", "پتنوازش", "پتغذا", "پتگردش", "جینگوپت", "جینگونوازش", "جینگوغذا", "جینگوگردش",
     "فروشگاه", "سکس", "موشک", "کراش",
 }
 
@@ -14605,7 +14682,7 @@ SHIFT_EMOJI_PAY = "5386757680679377085"   # اول خط حقوق شیفت
 SKIN_SEP = "٠"
 
 
-WORK_ENERGY_COST = 0.25   # هر شیفتِ کار این‌قدر انرژی کم می‌کنه
+WORK_ENERGY_COST = 0.5   # هر شیفتِ کار این‌قدر انرژی کم می‌کنه (نصفِ یک انرژی)
 
 
 def short_money(n: int) -> str:
@@ -14654,6 +14731,10 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _sp = await special_key_active(q.from_user.id, SPECIAL_KEY)
     if _sp:
         pay *= SPECIAL_WORK_MULT                     # قدرت «شاهزاده خسته»: ۱۰۰٪ درآمد بیشتر
+    _pa = _pet_active_idx(row)
+    if _pa == 2:   # خرگوشِ فعال: ۵٪ درآمد بیشتر
+        pay = int(pay * PET_RABBIT_WORK_MULT)
+    _work_cost = 0.0 if _pa == 5 else WORK_ENERGY_COST   # تک‌شاخِ فعال: کار انرژی کم نمی‌کنه
     now = time.time()
     # ۵٪ درآمد شیفت بی‌صدا میره تو «پروفیت»؛ بقیه مستقیم میره تو کیف پول (اگه پروفیت پر بود، سهمش هم میره کیف پول)
     profit_part = pay * 5 // 100
@@ -14666,7 +14747,7 @@ async def shift_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "energy = GREATEST(COALESCE(energy, 0) - $7::double precision, 0) FROM o "
         "WHERE user_id = $3::bigint AND last_shift <= $2::double precision - $4::double precision "
         "RETURNING jagh_machine, o.old_m",
-        profit_part, now, q.from_user.id, float(SHIFT_COOLDOWN), JM_CAP, wallet_part, WORK_ENERGY_COST,
+        profit_part, now, q.from_user.id, float(SHIFT_COOLDOWN), JM_CAP, wallet_part, _work_cost,
     )
     new_bal = None if _r is None else 1
     if new_bal is None:
@@ -20195,6 +20276,8 @@ async def robbery_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _spk = await conn.fetchval("SELECT key FROM special_chars WHERE user_id=$1 AND active LIMIT 1", owner)
                 if _spk in SPECIAL_CRIME_KEYS:   # ریچارد / پارکر: ۱۰۰٪ خلاف = شانس موفقیت دو برابر
                     _chance = min(SPECIAL_CRIME_CAP, _chance * SPECIAL_CRIME_MULT)
+                if await pet_active_of(owner, conn) == 3:   # سگِ فعال: ۱۰٪ شانس موفقیت بیشتر
+                    _chance = min(SPECIAL_CRIME_CAP, _chance + PET_DOG_CRIME_BONUS)
                 success = random.random() < _chance
                 new_trace = min(ROBBERY_TRACE_LIMIT, profile['trace'] + cfg['trace_step'])
                 trace_until = now + ROBBERY_TRACE_LOCK if new_trace >= ROBBERY_TRACE_LIMIT else 0
@@ -20324,7 +20407,7 @@ def _is_bot_text_command(text: str) -> bool:
         "خودمایناروببین", "خودم", "پنلمن", "پنلشخصی", "دست", "بانک",
         "خونه", "خانه", "املاک", "ازدواج", "خواستگاری", "همسرم", "خانواده", "شجرهنامه", "پولتوجیبی", "ترکخانواده", "عاق", "فرزندخواندگی", "فرزندخوندگی", "جینگوفرزندخواندگی", "جینگوفرزندخوندگی", "جینگوفرزندخونده", "جینگوفرزندخوانده", "جینگوشجرهنامه", "درختخانواده",
         "خانوادهزنم", "خانوادههمسرم", "خلاف", "دزدی", "سرقت", "جینگوسرقت", "دوئلدرسی", "دوئلدرس",
-        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "کازینو", "جینگوکافه", "کافهجینگو", "جینگودعوتبهکافه", "جینگودعوتکافه", "casino", "فروشگاه", "سکس", "موشک", "کراش",
+        "جاسوسی", "استعلامجاسوسی", "خریدجاسوسی", "خریدابزارجاسوسی", "بادیگارد", "خریدبادیگارد", "جینگونارنجک", "جینگوبمباتم", "پت", "پتنوازش", "پتغذا", "پتگردش", "جینگوپت", "جینگونوازش", "جینگوغذا", "جینگوگردش", "نوازش", "غذا", "گردش", "کازینو", "جینگوکافه", "کافهجینگو", "جینگودعوتبهکافه", "جینگودعوتکافه", "casino", "فروشگاه", "سکس", "موشک", "کراش",
         "قهر", "آشتی", "اشتی", "بغل", "بقل", "بوس", "بوش", "هدیه", "هدیهها", "gifts", "gift",
     }
     if key in exact or key in WALLET_WORDS or key in TOP_WORDS or key in JOBS_WORDS or key in EDU_WORDS or key in LESSON_WORDS or key in SHIFT_WORDS or key in CAR_WORDS or key in GIFT_LIST_WORDS or key in HUG_WORDS or key in RIFT_WORDS or key in PEACE_WORDS or key in PAIR_FUN_WORDS:
@@ -21511,7 +21594,7 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
     outcome, amount, left = "ok", 0, 0.0
     async with pool.acquire() as c:
         async with c.transaction():
-            rows = await c.fetch("SELECT user_id, balance, last_steal, bg_active, bg_last FROM users WHERE user_id = ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", [user.id, target.id])
+            rows = await c.fetch("SELECT user_id, balance, last_steal, bg_active, bg_last, pets_owned, pet_active, pet_t_guard FROM users WHERE user_id = ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", [user.id, target.id])
             by = {int(r["user_id"]): r for r in rows}
             left = THEFT_COOLDOWN - (now - float(by[user.id]["last_steal"] or 0))
             pocket = int(by[target.id]["balance"] or 0)
@@ -21523,6 +21606,10 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
                 outcome = "guard"   # بادیگارد یک دزدی رو می‌گیره و مصرف میشه؛ دزد هم کولداونش می‌خوره
                 await c.execute("UPDATE users SET bg_active=FALSE WHERE user_id=$1", target.id)
                 await c.execute("UPDATE users SET last_steal=$1 WHERE user_id=$2", now, user.id)
+            elif _pet_active_idx(by[target.id]) == 1 and now - float(by[target.id]["pet_t_guard"] or 0) >= PET_GUARD_CD:
+                outcome = "cat"     # گربه‌ی فعال: روزی یک بار جلوی دزدی رو می‌گیره؛ دزد هم کولداونش می‌خوره
+                await c.execute("UPDATE users SET pet_t_guard=$1 WHERE user_id=$2", now, target.id)
+                await c.execute("UPDATE users SET last_steal=$1 WHERE user_id=$2", now, user.id)
             else:
                 amount = min(random.randint(THEFT_MIN, THEFT_MAX), pocket)
                 await c.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", amount, target.id)
@@ -21533,6 +21620,9 @@ async def theft_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: s
         await msg.reply_text(B(f"{THEFT_CE} این بدبخت تو خط فقره💔"), parse_mode="HTML", reply_parameters=rp)
     elif outcome == "guard":
         await msg.reply_text(B(f"{BG_EMOJI} بادیگارد {_ulink(target.id, target.full_name)} جلوی دزدی {_ulink(user.id, user.full_name)} رو گرفت و حسابی حالشو گرفت! 💪"),
+                             parse_mode="HTML", reply_parameters=rp)
+    elif outcome == "cat":
+        await msg.reply_text(B(f"🐱 گربه‌ی {_ulink(target.id, target.full_name)} وسط دزدیِ {_ulink(user.id, user.full_name)} پرید و با چنگ و فس‌فس فراریش داد! 🛡"),
                              parse_mode="HTML", reply_parameters=rp)
     else:
         await msg.reply_text(B(f"{THEFT_CE} {_ulink(user.id, user.full_name)} از جیب {_ulink(target.id, target.full_name)} {amount:,} تومن دزدید!"),
@@ -24110,6 +24200,9 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
         fam_label=await family_relation_label(user.id,target.id)
         if fam_label:
             affair=False; poach=False
+    panda_save=False
+    if (affair or poach) and await pet_active_of(user.id)==4:   # پانداِ فعال: بوس/بغل به غیرِ فامیل خیانت حساب نمیشه
+        affair=False; poach=False; panda_save=True
     energy_gain=2.0 if married else round(random.uniform(*HUG_ENERGY),1)
     sk_u=await special_key_active(user.id,SPECIAL_HUG_KEYS); sk_t=await special_key_active(target.id,SPECIAL_HUG_KEYS)
     gain_u=SPECIAL_HUG_ENERGY if sk_u else energy_gain      # کاراکتر ویژه: ۲۰ انرژی
@@ -24145,6 +24238,8 @@ async def hug_kiss(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
     A=_ltr_name(user.id,user.full_name); T=_ltr_name(target.id,target.full_name)   # لینک‌شده و ایزوله‌ی راست‌به‌چپ (اسم‌های لاتین/عدد دار به‌هم نمی‌ریزن)
     if fam_label:
         await msg.reply_text(B(f"{RLM}✅ خیانت محسوب نشد؛ {T} {fam_label}!"),parse_mode="HTML")
+    if panda_save:
+        await msg.reply_text(B(f"{RLM}{_pet_ce(4)}🥋 پانداتون کونگ‌فو کار اومد! {A} همین الان {T} رو {act_past}، ولی پانداش با یه حرکت کونگ‌فو همه‌چی رو ختم به خیر کرد؛ خبری از خیانت نیست {_pet_ce(4)}"),parse_mode="HTML")
     if poach:
         await pool.execute("UPDATE users SET energy=GREATEST(energy-$1::double precision,0) WHERE user_id=$2",AFFAIR_ENERGY_PENALTY,user.id)
         await msg.reply_text(B(f"{RLM}{A} تو حواست هست؟ {A} همین الان {T} رو {act_past}، ولی {T} همسر داره؛ {_fmt_en(AFFAIR_ENERGY_PENALTY)} انرژی منفی می‌گیری تا دیگه رو زوجین لاو ندی 😤"),parse_mode="HTML")
