@@ -224,6 +224,7 @@ ADMIN_PERMS = {
     "broadcast": "📢 پیام همگانی",
     "giveaway": "🎁 قرعه‌کشی",
     "quiz_add": "❓ طرح سوال درسی",
+    "bet_odds": "🎰 ضرایب برد و باخت بت",
 }
 SUPPORT_PERMS.update(ADMIN_PERMS)
 # این دو تا رو فقط صاحب ربات می‌تونه بده؛ پشتیبانِ مدیر فقط می‌تونه ازشون بگیره
@@ -1111,6 +1112,15 @@ async def init_db(app: Application):
         BOT_ENABLED = _be != "0"
         for r in await c.fetch("SELECT chat_id FROM chats"):
             KNOWN_CHATS.add(r["chat_id"])
+        global JINGO_MULT, JINGO_WIN_CHANCE
+        for r in await c.fetch("SELECT key, value FROM bot_settings WHERE key IN ('jingo_mult', 'jingo_win_chance')"):   # ضرایب بت (تنظیم از پنل پشتیبانی)
+            try:
+                if r["key"] == "jingo_mult":
+                    JINGO_MULT = max(JINGO_MULT_MIN, min(JINGO_MULT_MAX, float(r["value"])))
+                else:
+                    JINGO_WIN_CHANCE = max(JINGO_WIN_MIN, min(JINGO_WIN_MAX, float(r["value"])))
+            except Exception:
+                log.exception("bad %s in db", r["key"])
         for r in await c.fetch("SELECT key, value FROM bot_settings WHERE key IN ('jobs_custom_m', 'jobs_custom_f')"):
             try:
                 CUSTOM_JOBS[r["key"][-1]] = json.loads(r["value"])
@@ -9654,14 +9664,15 @@ async def home_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         if "not modified" not in str(e).lower():
             log.warning("house panel update failed, resending", exc_info=True)
+            _rp = _orig_rp(q.message)
             try: await q.message.delete()
             except Exception: pass
             photo2, cap2, kb2 = await _house_panel(uid, view)
             cap2 = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", cap2)
             if photo2 is not None:
-                await context.bot.send_photo(q.message.chat_id, photo=photo2, caption=cap2, parse_mode="HTML", reply_markup=kb2)
+                await context.bot.send_photo(q.message.chat_id, photo=photo2, caption=cap2, parse_mode="HTML", reply_markup=kb2, reply_parameters=_rp)
             else:
-                await context.bot.send_message(q.message.chat_id, cap2, parse_mode="HTML", reply_markup=kb2)
+                await context.bot.send_message(q.message.chat_id, cap2, parse_mode="HTML", reply_markup=kb2, reply_parameters=_rp)
     if started_repair:
         t = asyncio.create_task(_house_repair_notify(context.bot, q.message.chat_id, q.message.message_id, uid))
         _HOUSE_TASKS.add(t); t.add_done_callback(_HOUSE_TASKS.discard)
@@ -14874,6 +14885,10 @@ JINGO_LOSE_LINES = (("به قول قلعه نویی بازیه دیگه", "53687
                     ("اشکال نداره دست بعدی تو میتونی", "5244727536016970540"))
 JINGO_MULT = 1.8            # ضریب برد (مخفی)
 JINGO_WIN_CHANCE = 0.36     # شانس برد (باخت = ۶۴٪)
+# محدوده‌ی مجاز برای تنظیم از پنل پشتیبانی (مقدار پیش‌فرض بالاست؛ تغییرها تو bot_settings می‌مونن)
+JINGO_MULT_DEFAULT, JINGO_WIN_DEFAULT = JINGO_MULT, JINGO_WIN_CHANCE
+JINGO_MULT_MIN, JINGO_MULT_MAX = 1.01, 20.0
+JINGO_WIN_MIN, JINGO_WIN_MAX = 0.01, 0.99
 JINGO_COOLDOWN = 15         # ثانیه
 JINGO_RE = re.compile(r"جینگو\s*(?:بت|قمار|شرط\s*بندی)\s*(.*)", re.S)
 
@@ -14890,6 +14905,16 @@ GAME_FA = {"dice": f"تاس {DICE_CE}", "slot": "اسلات 🎰", "crash": "م�
            "darts": "دارت 🎯", "bowl": "بولینگ 🎳", "hoop": "بسکتبال 🏀"}
 
 
+def _orig_rp(m):
+    """ریپلای به پیام اصلیِ کاربر (همونی که پنل بهش ریپلای شده)؛ مثل فست فودی. اگه نبود، به خودِ پنل ریپلای میشه."""
+    try:
+        r = getattr(m, "reply_to_message", None)
+        mid = r.message_id if r is not None else m.message_id
+        return ReplyParameters(message_id=mid, allow_sending_without_reply=True)
+    except Exception:
+        return None
+
+
 async def send_html(bot, chat_id: int, text: str, **kw):
     """HTML می‌فرسته؛ اگه ایموجی پرمیوم قبول نشد بدون اون می‌فرسته."""
     try:
@@ -14903,11 +14928,12 @@ async def edit_html(q, text: str, reply_markup=None):
     _m = q.message
     if _m is not None and getattr(_m, "photo", None) and (q.data or "").startswith(("cz:", "sg:")):
         # پنل اصلی کازینو عکس‌داره؛ ادیت متن روش جواب نمیده، پس پاک میشه و پنل متنی جدید میاد
+        _rp = _orig_rp(_m)
         try:
             await _m.delete()
         except Exception:
             pass
-        await send_html(q.get_bot(), _m.chat_id, text, reply_markup=reply_markup)
+        await send_html(q.get_bot(), _m.chat_id, text, reply_markup=reply_markup, reply_parameters=_rp)
         return
     try:
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=reply_markup)
@@ -16424,9 +16450,9 @@ async def _wf_create(q, context, user):
     try:
         if WF_IMAGE.exists():
             with open(WF_IMAGE, "rb") as f:
-                m = await context.bot.send_photo(q.message.chat_id, f, caption=caption, parse_mode="HTML", reply_markup=kb)
+                m = await context.bot.send_photo(q.message.chat_id, f, caption=caption, parse_mode="HTML", reply_markup=kb, reply_parameters=_orig_rp(q.message))
         else:
-            m = await context.bot.send_message(q.message.chat_id, caption, parse_mode="HTML", reply_markup=kb)
+            m = await context.bot.send_message(q.message.chat_id, caption, parse_mode="HTML", reply_markup=kb, reply_parameters=_orig_rp(q.message))
         g["msg"] = m.message_id
         await q.answer("میز ساخته شد!")
     except Exception as e:
@@ -19394,7 +19420,7 @@ async def send_garage_list(bot, chat_id: int, uid: int, reply_to: int | None = N
         log.warning("garage sendRichMessage failed, using <pre> table", exc_info=True)
     if rich_ok:
         if kb is not None:   # هنوز ماشینی نداره: دکمه‌ی خرید اولین ماشین لازمه
-            await send_html(bot, chat_id, B("🚗 برای خرید، اولین ماشین رو انتخاب کن 👇"), reply_markup=kb)
+            await send_html(bot, chat_id, B("🚗 برای خرید، اولین ماشین رو انتخاب کن 👇"), reply_markup=kb, reply_parameters=rp)
         return
     await send_html(bot, chat_id, garage_pre_text(bal, owned), reply_markup=kb, reply_parameters=rp)
 
@@ -19456,8 +19482,9 @@ async def _edit_cap(q, text: str, kb):
             if "not modified" in str(e).lower():
                 return
     bot = q.message.get_bot()
+    _rp = _orig_rp(q.message)
     await _drop_panel(bot, q.message)
-    await send_html(bot, q.message.chat_id, text, reply_markup=kb)
+    await send_html(bot, q.message.chat_id, text, reply_markup=kb, reply_parameters=_rp)
 
 
 def _next_car_idx(owned: dict) -> int:
@@ -19608,7 +19635,7 @@ async def _send_car_panel(chat, context, uid: int, idx: int, reply_to: int | Non
         rich_id = res.get("message_id") if isinstance(res, dict) else None
         if isinstance(res, dict) and not res.get("reply_markup"):
             # این نسخه‌ی تلگرام دکمه رو به جدول نچسبوند → دکمه‌ها تو یه پیام جدا زیرش
-            m2 = await send_html(bot, chat, B("👇 گزینه‌ها"), reply_markup=kb)
+            m2 = await send_html(bot, chat, B("👇 گزینه‌ها"), reply_markup=kb, reply_parameters=rp)
             key_id = m2.message_id
             if rich_id:
                 comp.append(rich_id)
@@ -19659,15 +19686,16 @@ async def _garage_show_car(q, context, uid: int, idx: int, color: int = 0):
     except Exception as e:
         if "not modified" not in str(e).lower():
             log.exception("car panel update failed")
+            _rp = _orig_rp(q.message)
             try:
                 await q.message.delete()
             except Exception:
                 pass
             if photo:
                 photo.seek(0)
-                await context.bot.send_photo(q.message.chat_id, photo=photo, caption=text, parse_mode="HTML", reply_markup=kb)
+                await context.bot.send_photo(q.message.chat_id, photo=photo, caption=text, parse_mode="HTML", reply_markup=kb, reply_parameters=_rp)
             else:
-                await context.bot.send_message(q.message.chat_id, text=text, parse_mode="HTML", reply_markup=kb)
+                await context.bot.send_message(q.message.chat_id, text=text, parse_mode="HTML", reply_markup=kb, reply_parameters=_rp)
 
 async def _swap_photo(q, context, idx: int, color: int, text: str, kb):
     """عکس ماشین (با رنگ داده‌شده) و کپشن پیام فعلی رو عوض می‌کنه؛ اگه نشد پیام جدید می‌فرسته."""
@@ -19681,14 +19709,15 @@ async def _swap_photo(q, context, idx: int, color: int, text: str, kb):
                 return
             log.warning("swap photo failed, resending", exc_info=True)
         photo = await _car_photo(idx, color)
+    _rp = _orig_rp(q.message)
     try:
         await q.message.delete()
     except Exception:
         pass
     if photo is not None:
-        await context.bot.send_photo(q.message.chat_id, photo=photo, caption=text, parse_mode="HTML", reply_markup=kb)
+        await context.bot.send_photo(q.message.chat_id, photo=photo, caption=text, parse_mode="HTML", reply_markup=kb, reply_parameters=_rp)
     else:
-        await send_html(context.bot, q.message.chat_id, text, reply_markup=kb)
+        await send_html(context.bot, q.message.chat_id, text, reply_markup=kb, reply_parameters=_rp)
 
 
 def _color_list_kb(uid: int, idx: int):
@@ -20715,7 +20744,8 @@ def admin_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
     add(("group_msgs", btn("👁 پیام‌های گروه‌ها", "primary", callback_data="ad:gm")))
     add(("giveaway", btn("🎁 قرعه‌کشی", "success", callback_data="ad:gw")),
         ("pay", btn("🎁 تنظیم قیمت گیفت‌ها", "success", callback_data="ad:giftprices")))
-    add(("quiz_add", btn("❓ طرح سوال درسی", "primary", callback_data="ad:qz")))
+    add(("quiz_add", btn("❓ طرح سوال درسی", "primary", callback_data="ad:qz")),
+        ("bet_odds", btn("🎰 ضرایب برد و باخت بت", "primary", callback_data="ad:odds")))
     if not rows:
         rows.append([btn("🔒 هنوز دسترسی‌ای برات فعال نشده", callback_data="ad:noop")])
     return InlineKeyboardMarkup(rows)
@@ -20727,6 +20757,7 @@ _ADMIN_ACT_PERM = {
     "gm": "group_msgs", "gl": "group_msgs", "gu0": "group_msgs", "gu": "group_msgs",
     "ban": "ban", "unban": "unban", "task_daily": "task_daily", "task_weekly": "task_weekly",
     "toggle": "bot_toggle", "stats": "stats", "bc": "broadcast", "bcgo": "broadcast", "slist": "staff_list", "gw": "giveaway", "giftprices": "pay", "giftprice": "pay", "qz": "quiz_add",
+    "odds": "bet_odds", "oddsask": "bet_odds", "oddsreset": "bet_odds",
 }
 
 
@@ -20735,6 +20766,8 @@ def _adm_state_perm(st: dict):
     act = st.get("act")
     if act == "gift_price":
         return "pay"
+    if act == "bet_odds":
+        return "bet_odds"
     if act == "quiz_add":
         return "quiz_add"
     if act == "task_add":
@@ -21009,8 +21042,24 @@ async def support_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+def _odds_panel():
+    """پنل «ضرایب برد و باخت بت» (جینگو بت): ضریب برد + شانس باخت؛ هر دو از همین‌جا تنظیم میشن."""
+    lose = round((1 - JINGO_WIN_CHANCE) * 100, 2)
+    text = (f"🎰 <b>ضرایب برد و باخت جینگو بت</b>\n\n"
+            f"• ضریب برد: <b>×{JINGO_MULT:g}</b>\n"
+            f"• شانس باخت: <b>{lose:g}٪</b> (شانس برد: {round(JINGO_WIN_CHANCE * 100, 2):g}٪)\n\n"
+            f"پیش‌فرض: ×{JINGO_MULT_DEFAULT:g} و {round((1 - JINGO_WIN_DEFAULT) * 100, 2):g}٪ باخت.\n"
+            "تغییر همون لحظه روی همه‌ی گروه‌ها اعمال میشه و بعد از ری‌استارت هم می‌مونه.")
+    kb = InlineKeyboardMarkup([
+        [btn("✏️ ضریب برد", "primary", callback_data="ad:oddsask:mult"), btn("✏️ شانس باخت", "primary", callback_data="ad:oddsask:lose")],
+        [btn("♻️ برگشت به پیش‌فرض", "danger", callback_data="ad:oddsreset")],
+        [btn("🔙 پنل", callback_data="ad:menu")],
+    ])
+    return text, kb
+
+
 async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global BOT_ENABLED
+    global BOT_ENABLED, JINGO_MULT, JINGO_WIN_CHANCE
     q = update.callback_query
     if not has_perm(q.from_user.id, "panel"):
         await q.answer("فقط پشتیبان‌ها", show_alert=True)
@@ -21057,6 +21106,26 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(
                 "❌ انتشار پست انجام نشد. مطمئن شو ربات در کانال @JinGo_Game ادمین است و اجازه‌ی ارسال پیام دارد.\n\n" + html.escape(str(e)[:500]),
                 parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[btn("🔙 پنل پشتیبانی", callback_data="ad:menu")]]))
+    elif act in ("odds", "oddsask", "oddsreset"):
+        if act == "oddsask" and len(parts) > 2 and parts[2] in ("mult", "lose"):
+            context.user_data["adm"] = {"act": "bet_odds", "step": parts[2]}
+            if parts[2] == "mult":
+                ask = (f"✏️ <b>ضریب برد جینگو بت</b>\n\nیه عدد بین {JINGO_MULT_MIN:g} تا {JINGO_MULT_MAX:g} بفرست؛ مثلاً <code>1.8</code> یعنی با بردن، "
+                       "پولِ شرط ×۱٫۸ برمی‌گرده.\nبرای لغو بنویس «لغو».")
+            else:
+                ask = (f"✏️ <b>شانس باخت جینگو بت</b>\n\nیه درصد بین {round((1 - JINGO_WIN_MAX) * 100):g} تا {round((1 - JINGO_WIN_MIN) * 100):g} بفرست؛ "
+                       "مثلاً <code>64</code> یعنی ۶۴٪ باخت و ۳۶٪ برد.\nبرای لغو بنویس «لغو».")
+            await q.edit_message_text(ask, parse_mode="HTML", reply_markup=CANCEL_KB)
+            return
+        if act == "oddsreset":
+            JINGO_MULT, JINGO_WIN_CHANCE = JINGO_MULT_DEFAULT, JINGO_WIN_DEFAULT
+            await pool.execute("DELETE FROM bot_settings WHERE key IN ('jingo_mult', 'jingo_win_chance')")
+        context.user_data.pop("adm", None)
+        text, kb = _odds_panel()
+        try:
+            await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
     elif act == "giftprices":
         rows = []
         for tier in (15, 25, 50, 100):
@@ -21397,6 +21466,34 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         except Exception as e:
             log.exception("channel post preview failed")
             await msg.reply_text("قالب متن یا کد ایموجی معتبر نیست؛ اصلاحش کن و دوباره بفرست.\n" + str(e)[:300], reply_markup=CANCEL_KB)
+        return True
+    if act == "bet_odds":
+        global JINGO_MULT, JINGO_WIN_CHANCE
+        raw = (msg.text or "").strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫٬،", "01234567890123456789.,,")).replace("%", "").replace("٪", "").replace(",", ".").strip()
+        try:
+            val = float(raw)
+        except ValueError:
+            val = None
+        step = st.get("step")
+        if step == "mult":
+            if val is None or not (JINGO_MULT_MIN <= val <= JINGO_MULT_MAX):
+                await msg.reply_text(f"ضریب معتبر نیست؛ عددی بین {JINGO_MULT_MIN:g} تا {JINGO_MULT_MAX:g} بفرست.", reply_markup=CANCEL_KB)
+                return True
+            JINGO_MULT = round(val, 2)
+            await pool.execute("INSERT INTO bot_settings (key, value) VALUES ('jingo_mult', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", str(JINGO_MULT))
+        elif step == "lose":
+            lo, hi = round((1 - JINGO_WIN_MAX) * 100), round((1 - JINGO_WIN_MIN) * 100)
+            if val is None or not (lo <= val <= hi):
+                await msg.reply_text(f"درصد معتبر نیست؛ عددی بین {lo} تا {hi} بفرست.", reply_markup=CANCEL_KB)
+                return True
+            JINGO_WIN_CHANCE = round(1 - val / 100, 4)
+            await pool.execute("INSERT INTO bot_settings (key, value) VALUES ('jingo_win_chance', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", str(JINGO_WIN_CHANCE))
+        else:
+            context.user_data.pop("adm", None)
+            return True
+        context.user_data.pop("adm", None)
+        text, kb = _odds_panel()
+        await msg.reply_text("✅ ذخیره شد.\n\n" + text, parse_mode="HTML", reply_markup=kb)
         return True
     if act == "gift_price":
         raw = (msg.text or "").strip().replace(",", "").replace("٬", "")
