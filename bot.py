@@ -11053,7 +11053,7 @@ PET_POWER_TEXT = {
     4: "🥋 بوس و بغل به غیر فامیل خیانت حساب نمیشه (کونگ‌فو!)",
     5: "🔋 کار کردن انرژیت رو کم نمی‌کنه",
 }
-PET_ENERGY = (3, 5)
+PET_ENERGY = {"pet": 0, "feed": 0, "walk": 1}   # فقط گردش ۱ انرژی میده
 PET_POP_GAIN = {"pet": 3, "feed": 2, "walk": 5}
 PET_POP_CAP = 1000          # ۱۰۰٪ محبوبیت
 PET_BELLY_DECAY = 4.0       # شکم ساعتی چند درصد خالی میشه
@@ -11078,6 +11078,18 @@ PET_LINES = {
         "{n} غرقِ لذته؛ اگه می‌تونست حرف بزنه می‌گفت: برای همیشه همین‌جا",
         "دمِ {n} با ریتمِ شادی تکون خورد؛ پیوندتون محکم‌تر شد",
         "{n} چشماش رو باز کرد و یه نگاهِ «تو بهترینی» بهت انداخت",
+        "{n} سرش رو گذاشت رو زانوت و آروم آروم خرخر کرد",
+        "با نوازشِ تو، {n} غلت زد و شکمش رو نشونت داد؛ یعنی کاملاً بهت اعتماد داره",
+        "{n} چشماش رو نیمه‌باز کرد و یه نگاهِ پر از محبت بهت انداخت",
+        "دستت که به پشتِ {n} رسید، یه لرزشِ شیرین از سرتاپاش گذشت",
+        "{n} نوکِ دستت رو بو کرد و بعد خودش رو بیشتر بهت چسبوند",
+        "یه نوازشِ دیگه و {n} حاضره هر کاری برات بکنه",
+        "{n} با خوشحالی دورِ پات چرخید و بعد آروم کنارت نشست",
+        "نوازشِ تو مثلِ یه پتوی گرم بود؛ {n} همونجا چرتش گرفت",
+        "{n} آروم سرش رو بالا آورد و نگاهت کرد؛ انگار می‌گفت «بازم، لطفاً»",
+        "گوشِ {n} رو که نوازش کردی، دمش شروع کرد به تکون خوردن",
+        "{n} یه صدای کوچیک و دوست‌داشتنی درآورد و خودش رو بغل دستت جا کرد",
+        "با هر نوازش، ستاره‌های کوچیکی دورِ {n} می‌درخشیدن",
     ],
     "feed": [
         "یه غذای شاه‌پسند جلوی {n} گذاشتی؛ تا آخرین ذره خورد و بشقاب رو برق انداخت",
@@ -11088,6 +11100,18 @@ PET_LINES = {
         "{n} غذا رو خورد و هاله‌ی انرژی دورش چرخید",
         "بوی غذا پیچید و {n} مثل برق رسید سرِ بشقاب",
         "{n} شکمش رو گرفت و ولو شد؛ حسابی چسبید",
+        "ظرفِ غذا هنوز زمین نرسیده بود که {n} پرید سراغش",
+        "{n} لقمه‌ی اول رو که خورد، چشماش از خوشی برق زد",
+        "امروز منوی ویژه بود و {n} همه‌ش رو با ولع تموم کرد",
+        "{n} غذا رو آروم و با لذت خورد و بعد لب‌هاش رو لیسید",
+        "یه ضیافتِ حسابی برای {n}؛ شکمش گرد شد و خوشحال دنبالت راه افتاد",
+        "{n} بعد از غذا کشیدش و یه خمیازه‌ی بلند کرد؛ حسابی سیر شد",
+        "بوی غذا که پیچید، {n} با دمِ تکون‌خورده اومد جلوی بشقاب",
+        "{n} حتی یه دونه هم باقی نذاشت و با چشمای براق ازت تشکر کرد",
+        "غذای گرم و خوشمزه سهمِ {n} شد؛ انرژیِ دنیا تو رگ‌هاش دوید",
+        "{n} با هر لقمه یه قدم به قهرمان شدن نزدیک‌تر شد",
+        "بشقابِ {n} برق افتاد؛ حالا فقط یه چرتِ کوتاه کم داره",
+        "{n} سیر و راضی کنارت دراز کشید و دستت رو لیسید",
     ],
     "walk": [
         "{n} رو بردی گردش؛ تو مسیر کلی ردپای افسانه‌ای جا گذاشتید",
@@ -11098,6 +11122,18 @@ PET_LINES = {
         "غروبِ قشنگی بود؛ {n} کنارت نشست و به افق خیره شد",
         "{n} با هر قدم جون تازه می‌گرفت؛ گردش حسابی چسبید",
         "تو گردش، {n} همه‌ی رقبای محله رو با یه نگاهِ ساکت خاموش کرد",
+        "{n} رو بردی کنارِ رودخونه؛ تو آب شلپ‌شلپ کرد و حسابی کیف کرد",
+        "تو پارک، {n} دنبالِ پروانه‌ها دوید و کلی خندوند‌ت",
+        "گردشِ صبحگاهی با {n}؛ هوا خنک بود و دنیا آروم",
+        "{n} تو مسیر یه کلاغ رو ترسوند و با افتخار برگشت پیشت",
+        "توی کوچه‌های خلوت، {n} جلو جلو می‌رفت و هر چند قدم برمی‌گشت ببینه پشتشی",
+        "{n} رو بردی بالای تپه؛ از اون بالا کل شهر رو تماشا کردید",
+        "یه بارونِ ریز اومد و {n} با خوشحالی توش بازی کرد",
+        "{n} تو گردش یه دوستِ جدید پیدا کرد و باهم کلی بازی کردن",
+        "غروب شد و {n} خسته ولی خوشحال کنارت قدم می‌زد",
+        "{n} تو علف‌ها غلت زد و بعد پر از برگ و خاک برگشت؛ چه روزی!",
+        "با {n} از کنار دریاچه گذشتید و یه عالمه عکس تو ذهنتون موند",
+        "{n} همه‌ی مسیر رو مثل یه ماجراجو کاوش کرد و آخرش با یه چوبِ بزرگ برگشت",
     ],
 }
 
@@ -11218,7 +11254,7 @@ def _pet_caption(row, note: str = "") -> str:
             f"{PET_FEED_CE} شکم\n{_panel_bar('jm', '🟪', '▫️', st_['belly'])}\n\n"
             f"نوازش: {cd('pet')}\nغذا ({PET_FEED_COST:,}): {cd('feed')}\nگردش: {cd('walk')}\n\n"
             f"<b>قدرت {PETS[idx - 1]['name']}:</b> {PET_POWER_TEXT[idx]}{guard_line}\n\n"
-            f"هر کاری با پت ۳ تا ۵ انرژی بهت میده.")
+            f"فقط گردش با پت ۱ انرژی بهت میده.")
 
 
 def _pet_kb(row, uid: int) -> InlineKeyboardMarkup:
@@ -11293,7 +11329,7 @@ async def _pet_do(uid: int, kind: str):
                     return "full", None
                 if int(r["balance"] or 0) < PET_FEED_COST:
                     return "poor", None
-            gain = random.randint(*PET_ENERGY)
+            gain = PET_ENERGY[kind]
             cost = PET_FEED_COST if kind == "feed" else 0
             stats = _pet_stats_of(r)
             d = dict(stats.get(str(idx)) or {})
@@ -11310,7 +11346,12 @@ async def _pet_do(uid: int, kind: str):
 
 def _pet_result_text(kind: str, name: str, gain: int) -> str:
     line = random.choice(PET_LINES[kind]).format(n=f"<b>{html.escape(name)}</b>")
-    return f"{PET_LEAD[kind]} {line}\n\n⚡ +{gain} انرژی" + (f" · {PET_FEED_COST:,} تومن غذا" if kind == "feed" else "")
+    extra = []
+    if gain > 0:
+        extra.append(f"⚡ +{gain} انرژی")
+    if kind == "feed":
+        extra.append(f"{PET_FEED_COST:,} تومن غذا")
+    return f"{PET_LEAD[kind]} {line}" + (("\n\n" + " · ".join(extra)) if extra else "")
 
 
 _PET_FAIL = {"nopet": "هنوز پت نداری! بنویس «پت» و اولین پتت رو بخر.",
@@ -18983,7 +19024,7 @@ CAR_MAX_LEVEL = 5
 MAX_LEVEL_EID = "5458653586378469798"   # ایموجی «لول آخر» (فقط ماشین)
 MAX_LEVEL_CE = f'<tg-emoji emoji-id="{MAX_LEVEL_EID}">🏆</tg-emoji>'
 CAR_PAY_EVERY = 3600
-CAR_VAULT_CAP = 100_000_000   # سقف صندوق هر ماشین؛ پر که شد درآمد جمع نمیشه تا برداشت کنی
+CAR_VAULT_CAP = 243_000_000   # سقف «مجموع» صندوق همه‌ی ماشین‌های هر کاربر؛ پر که شد درآمد جمع نمیشه تا برداشت کنی
 CAR_COLOR_PRICE = 20_000_000
 CARS = [
     ("پراید ۱۳۱", "Pride 131", "🚗", 100_000_000, 500_000),
@@ -19901,7 +19942,10 @@ async def car_profit_loop():
                     profit = int(profit * CAR_LOW_MULT)
                 async with pool.acquire() as c:
                     async with c.transaction():
-                        moved = await c.fetchval("UPDATE cars SET last_pay=last_pay+$1,pending_profit=LEAST(pending_profit+$2, $6::bigint) WHERE user_id=$3 AND car_idx=$4 AND last_pay=$5 RETURNING 1", hours*CAR_PAY_EVERY, profit, r["user_id"], r["car_idx"], r["last_pay"], CAR_VAULT_CAP)
+                        _vr = await c.fetch("SELECT pending_profit FROM cars WHERE user_id=$1 FOR UPDATE", r["user_id"])
+                        _room = max(0, CAR_VAULT_CAP - sum(int(x["pending_profit"] or 0) for x in _vr))   # سقف مجموع همه‌ی ماشین‌ها
+                        profit = min(int(profit), _room)
+                        moved = await c.fetchval("UPDATE cars SET last_pay=last_pay+$1,pending_profit=pending_profit+$2 WHERE user_id=$3 AND car_idx=$4 AND last_pay=$5 RETURNING 1", hours*CAR_PAY_EVERY, profit, r["user_id"], r["car_idx"], r["last_pay"])
         except asyncio.CancelledError:
             raise
         except Exception:
