@@ -959,6 +959,7 @@ async def init_db(app: Application):
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_acts INT NOT NULL DEFAULT 0")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_stats TEXT NOT NULL DEFAULT '{}'")
         await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_t_guard DOUBLE PRECISION NOT NULL DEFAULT 0")
+        await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS pet_talk TEXT NOT NULL DEFAULT '{}'")
         if not await c.fetchval("SELECT 1 FROM bot_settings WHERE key = 'msg_total_seed_v1'"):   # یک‌بار: پیام‌های قبلیِ ثبت‌شده‌ی گروه‌ها شمرده میشه
             await c.execute("UPDATE users u SET msg_total = COALESCE((SELECT count(*) FROM group_msgs g WHERE g.user_id = u.user_id), 0)")
             await c.execute("INSERT INTO bot_settings (key, value) VALUES ('msg_total_seed_v1', '1') ON CONFLICT (key) DO NOTHING")
@@ -11263,7 +11264,7 @@ def _pet_caption(row, note: str = "") -> str:
             f"رنک {stage} از ۴ — {nxt}\n\n"
             f"محبوبیت\n{_panel_bar('pop', '🟪', '▫️', pop_pct)}\n\n"
             f"{PET_FEED_CE} شکم\n{_panel_bar('jm', '🟪', '▫️', st_['belly'])}\n\n"
-            f"نوازش: {cd('pet')}\nغذا ({PET_FEED_COST:,}): {cd('feed')}\nگردش: {cd('walk')}\n\n"
+            f"نوازش: {cd('pet')}\nغذا ({PET_FEED_COST:,}): {cd('feed')}\nگردش: {cd('walk')}\nحرف زدن: {_pet_talk_left_txt(row)}\n\n"
             f"<b>قدرت {PETS[idx - 1]['name']}:</b> {PET_POWER_TEXT[idx]}{guard_line}\n\n"
             f"فقط گردش با پت ۱ انرژی بهت میده.")
 
@@ -11276,6 +11277,7 @@ def _pet_kb(row, uid: int) -> InlineKeyboardMarkup:
         rows.append([btn("نوازش", "success", icon=PET_PET_EID, callback_data=f"pt:pet:{uid}"),
                      btn(f"غذا ({PET_FEED_COST // 1000}k)", "primary", icon=PET_FEED_EID, callback_data=f"pt:feed:{uid}"),
                      btn("گردش", "primary", icon=PET_WALK_EID, callback_data=f"pt:walk:{uid}")])
+        rows.append([btn("حرف زدن", "primary", icon=PET_TALK_EID, callback_data=f"pt:talk:{uid}")])
         up = _pet_upgrade_price(idx, _pet_st(row, idx)["rank"])
         if up:
             rows.append([btn(f"⬆️ ارتقای رنک — {up:,}", "success", callback_data=f"pt:up:{uid}")])
@@ -11370,6 +11372,278 @@ _PET_FAIL = {"nopet": "هنوز پت نداری! بنویس «پت» و اولی
              "full": "شکم پتت الان پره؛ یکم صبر کن گرسنه بشه."}
 
 
+# ───────────────────── حرف زدن پت ─────────────────────
+# دکمه‌ی «حرف زدن» تو پنل پت، یا نوشتنِ «جینگو <اسم پت> <پیام>» مثلاً «جینگو جسی سلام عشقم».
+# ویسِ پت با کپشنِ حرفش میاد؛ روزی ۱۰ بار؛ هر بار ۲ تا ۵ محبوبیت؛ حرف‌ها تا همه‌شون نیومدن تکرار نمیشن.
+# ویس‌ها: فایل voice1..voice5 (ogg/opus/mp3/m4a) تو پوشه‌ی pets یا کنار bot.py. اگه نباشه فقط کپشن (متن) میاد.
+PET_TALK_DAILY = 10
+PET_TALK_POP = (2, 5)
+PET_TALK_EID = "5233316194458553663"
+PET_TALK_CE = f'<tg-emoji emoji-id="{PET_TALK_EID}">💬</tg-emoji>'
+_PET_VOICE_FILEID: dict = {}
+_PET_VOICE_WARNED: dict = {}
+PET_TALK_LINES = {
+    1: [   # گربه
+        "من گربه‌ام؛ دنیا باید صبر کنه تا من تصمیم بگیرم.",
+        "فکر نکن دنبالتم؛ فقط اتفاقاً هر جا بری من اونجام.",
+        "امشب سایه‌ها رو من می‌چینم؛ تو فقط آروم بخواب.",
+        "نُه جون دارم، ولی فقط یکیش رو برای تو خرج می‌کنم.",
+        "این خونه مالِ منه؛ تو فقط مستأجرِ خوش‌شانسی.",
+        "یه راز بگم؟ من هیچ‌وقت نمی‌افتم؛ همیشه روی چهارتا پا فرود میام.",
+        "نگاهم کن؛ می‌دونم ته دلت چی می‌خوای.",
+        "غذام رو یه ساعت دیرتر بدی، نوازشم رو هم یه ساعت دیرتر می‌دم.",
+        "روی شیشه‌ی ماشینت جای پنجه‌م مونده؛ اسمش امضاست.",
+        "من نمی‌دوم؛ فقط بقیه یهو خیلی آروم میشن.",
+        "میو؟ نه، این یه هشداره.",
+        "ماه هم وقتی منو می‌بینه بیشتر برق می‌زنه.",
+        "پرشِ من از قفسه یه هنره، نه حادثه.",
+        "هر پنجره‌ای که باز باشه، یه ماجرا منتظرمه.",
+        "پشتِ این چشمای براق یه نقشه‌ی بزرگ داره می‌پزه.",
+        "امروز مهربونم؛ فردا رو نمی‌دونم.",
+        "تو بهترین تختِ منی؛ فقط تکون نخور.",
+        "موش‌های محله منو ببینن، وصیت می‌نویسن.",
+        "خرخرم یه جور افسونه؛ مواظب باش خوابت نبره.",
+        "هر چی از روی میز بیفته، تقصیر جاذبه‌ست، نه من.",
+        "یه جعبه‌ی خالی برای من یعنی قصر سلطنتی.",
+        "اومدنم دست خودم بود، رفتنم هم دست خودمه؛ فعلاً موندم.",
+        "دمم رو ببین؛ یعنی «مزاحم نشو».",
+        "تو فقط یه آدمی، ولی خوشم میاد باهات هم‌خونه‌ام.",
+    ],
+    2: [   # خرگوش
+        "من سریع‌ترین خرگوشِ این شهرم؛ برق هم ازم عقبه.",
+        "هویج؟ نه، من به قهرمان بودن سوخت می‌دم.",
+        "پرشِ من یه پروازِ کوچولوئه که زمین بهش افتخار می‌کنه.",
+        "شنلم رو ببین؛ خرگوش هم می‌تونه قهرمان باشه.",
+        "گوشای من همه‌ی خطرها رو قبل از رسیدن می‌شنوه.",
+        "هیچ لونه‌ای امن‌تر از کنارِ تو نیست.",
+        "کوچیکم، ولی دلم از کوه هم بزرگ‌تره.",
+        "هر وقت دنیا سخت شد، من یه جهشِ بلند می‌کنم.",
+        "راستش ظاهرم شیرینه؛ نقشه‌هام خطرناکن.",
+        "یه چشمک بزنم، دنیات عوض میشه.",
+        "تو راه رو نشون بده؛ من زودتر از باد می‌رسم.",
+        "هویج‌ها رو شمردم؛ یکی کمه و من به خودم مشکوکم.",
+        "دمِ کوچولوم رو دست‌کم نگیر؛ رمزِ موفقیتمه.",
+        "من نترسیدم، فقط استراتژیک عقب‌نشینی کردم.",
+        "تو چمن‌ها غلت می‌زنم و دنیا رو فتح می‌کنم.",
+        "از تپه که بالا برم، کل شهر زیر پامه.",
+        "خرگوش‌ها فقط بلد نیستن بدوون؛ بلدن بدرخشن هم.",
+        "امشب ستاره‌ها رو برای تو جمع می‌کنم.",
+        "با هر جهش، یه قدم به افسانه شدن نزدیک‌ترم.",
+        "هیچ تله‌ای منو نمی‌گیره؛ من از همه‌شون زرنگ‌ترم.",
+        "بیا با هم بدویم؛ ولی من جلوتر می‌رسم.",
+        "نرمیِ من فقط پوششه؛ زیرش یه زره‌ی واقعی داره.",
+        "خرگوش وقتی به دوستش اعتماد کنه، تا آخر دنیا باهاشه.",
+        "امروز یه ماجراجوییِ کوچیک؛ فردا یه حماسه‌ی بزرگ.",
+    ],
+    3: [   # سگ
+        "هاپ! من نگهبانِ توام؛ هیچ‌کس بدون اجازه‌ی من بهت نزدیک نمیشه.",
+        "تو بهترین آدمِ دنیایی؛ این رو دمم می‌گه، نه دهنم.",
+        "بوی خطر رو از صد متر می‌فهمم؛ بوی تو رو از هزار متر.",
+        "هر جا بری من یه قدم عقب‌ترم، ولی همیشه پشتتم.",
+        "توپ رو بنداز؛ تا لبه‌ی دنیا هم می‌رم و برش می‌گردونم.",
+        "یه استخون و یه دوست؛ من چی بیشتر از این می‌خوام؟",
+        "وقتی غمگینی کنارت می‌شینم و ساکت می‌مونم؛ این بزرگ‌ترین حرفیه که بلدم.",
+        "پارسِ من یعنی: این خونه‌ی خانواده‌ی منه!",
+        "از در که میای تو، قشنگ‌ترین لحظه‌ی روزم شروع میشه.",
+        "دمم رو ببین؛ سرعتِ تکونش از شادی‌م خبر می‌ده.",
+        "گرگ‌ها هم منو می‌بینن، احترام می‌ذارن.",
+        "راه بیفتیم؟ بوی یه ماجراجویی میاد!",
+        "من گله‌ام رو انتخاب کردم؛ و اون تویی.",
+        "تو بگو دشمن کیه؛ من آماده‌ی حمله‌ام.",
+        "نیم‌نگاهِ من یعنی: غذای امشبت رو نصف کن.",
+        "هر وقت زمین خوردی، من جلوتر می‌دوم تا راه رو برات باز کنم.",
+        "من فقط یه سگم، ولی قلبم اندازه‌ی یه اقیانوسه.",
+        "گل‌های باغ رو نکندم؛ داشتم مسیرِ گنج رو حفر می‌کردم.",
+        "پاهام از باد سریع‌ترن، به شرطی که توپ دستت باشه.",
+        "امشب نگهبانیِ ماه با منه؛ تو راحت بخواب.",
+        "همه‌ی دنیا اسممو نمی‌دونه، ولی تو که صدام می‌کنی همه‌چی یادم میره.",
+        "نترس! هر کی بیاد، اول باید از روی من رد بشه.",
+        "یه نوازش پشتِ گوشم، یه عمر وفاداریه.",
+        "من نمی‌رم؛ خونه یعنی هر جا که تو باشی.",
+    ],
+    4: [   # پاندا
+        "بامبو یه فلسفه‌ست؛ هر کی نفهمه، فقط گرسنه‌ست.",
+        "من تنبل نیستم؛ دارم انرژی ذخیره می‌کنم برای یه ضربه‌ی کونگ‌فو.",
+        "عجله نکن؛ پاندا آهسته میره ولی همیشه می‌رسه.",
+        "این حلقه‌های سیاه دورِ چشمم، نشونه‌ی بیداریِ شبانه‌ی یه استاده.",
+        "کونگ‌فوی من اینه: آروم بزنم و با خنده برگردم.",
+        "یه غلت بزنم، کل جنگل می‌لرزه.",
+        "بامبوی تازه از هر گنجی ارزشمندتره.",
+        "حمله‌ی من آهسته‌ست، ولی وقتی می‌رسه همه می‌فهمن.",
+        "شکمم گرد شده؛ نه از پرخوری، از زیادیِ خوشبختی.",
+        "راهِ صد فرسنگی با یه چرتِ کوتاه شروع میشه.",
+        "من قهرمانِ مردمم؛ فقط الان وقتِ ناهاره.",
+        "ترس رو مثل برگ بامبو باید گاز زد و قورت داد.",
+        "هر وقت دنیا شلوغ شد، یه نفس عمیق می‌کشم و می‌شینم.",
+        "نگران نباش؛ پاندا همه‌چی رو درست می‌کنه... بعد از ناهار.",
+        "ضربه‌ی کفِ دستِ من تا ابرها هم می‌رسه.",
+        "استاد واقعی نمی‌دوئه؛ درست سرِ جاش می‌رسه.",
+        "بچه‌پاندا بودم و هنوزم با غلت زدن خودم رو نشون می‌دم.",
+        "اگه خسته‌ای بیا کنارم بخواب؛ ماجراها صبر می‌کنن.",
+        "رنگ من فقط سیاه و سفیده، ولی قلبم همه‌ی رنگ‌هاست.",
+        "یه لبخند و یه بامبو؛ تمام چیزیه که لازم دارم.",
+        "من از خودم قوی‌ترم، چون هنوز ناهار نخوردم.",
+        "کوه‌ها جلوی من تعظیم می‌کنن؛ من فقط دارم راحت روشون دراز می‌کشم.",
+        "ضربه‌ی آخرِ من همیشه یه بغله.",
+        "راز موفقیت؟ بخور، بخواب، کونگ‌فو کن، تکرار.",
+    ],
+    5: [   # تک‌شاخ
+        "شاخِ من فقط زینت نیست؛ یه آسمونِ جادو توشه.",
+        "هر جا قدم بذارم، یه ستاره پشتم روشن میشه.",
+        "رویاها رو من می‌چینم؛ تو فقط یه آرزو کن.",
+        "یالِ من از رنگین‌کمون بافته شده، نه از مو.",
+        "افسانه‌ها درباره‌ی من نوشته شدن، ولی من هنوز فصلِ اولم.",
+        "تو دنیای من غم فقط یه ابره که زود می‌گذره.",
+        "با هر نفسم یه گل تو دشت باز میشه.",
+        "جادوی واقعی یه چیز ساده‌ست: دوست بودن.",
+        "منو فقط کسی می‌بینه که قلبش پاکه؛ تو از اون‌هایی.",
+        "ابرها رو زیر سُم‌هام جمع می‌کنم و برات فرش می‌کنم.",
+        "شب‌ها که آسمون تاریک میشه، شاخم چراغِ راهِ همه‌ست.",
+        "هیچ تاریکی‌ای جلوی نورِ من دووم نمیاره.",
+        "تک‌شاخ نمی‌ترسه؛ فقط گاهی می‌درخشه که بقیه نترسن.",
+        "اگه صبر کنی، یه معجزه‌ی کوچیک برات پیدا می‌کنم.",
+        "من از ستاره‌ها اومدم پیشِ تو؛ قدرش رو بدون.",
+        "اشکِ من هر زخمی رو خوب می‌کنه؛ البته اگه واقعاً لازم باشه.",
+        "دنیا بدون جادو سرده؛ پس من گرمش می‌کنم.",
+        "یه جهشِ من از این قله تا اون قله‌ی افسانه‌هاست.",
+        "رنگِ من فقط سفید نیست؛ هر لحظه یه رنگ تازه از نور می‌گیرم.",
+        "گاهی بی‌صدا میام، ولی ردّ شکوفه‌ها رو جا می‌ذارم.",
+        "من نگهبانِ رویاهای توام؛ بخواب، هیچ کابوسی رو راه نمی‌دم.",
+        "هر کی منو ببینه یه آرزو می‌کنه؛ تو چی می‌خوای؟",
+        "زیرِ نورِ ماه، شاخم آهنگی می‌خونه که فقط شب می‌شنوه.",
+        "من واقعیم؛ فقط شما هنوز به اندازه‌ی کافی باور نکردید.",
+    ],
+}
+
+
+def _pet_talk_state(row) -> dict:
+    """{day, n, bag:{idx:[ایندکس حرف‌های گفته‌شده]}} با ریست روزانه‌ی شمارنده."""
+    try:
+        d = json.loads(row["pet_talk"] or "{}")
+        d = d if isinstance(d, dict) else {}
+    except Exception:
+        d = {}
+    if d.get("day") != _spy_day_key():
+        d["day"], d["n"] = _spy_day_key(), 0
+    d.setdefault("bag", {})
+    return d
+
+
+def _pet_talk_left_txt(row) -> str:
+    left = max(0, PET_TALK_DAILY - int(_pet_talk_state(row).get("n", 0)))
+    return f"{left} از {PET_TALK_DAILY} بار مونده"
+
+
+def _pet_voice_src(idx: int):
+    fid = _PET_VOICE_FILEID.get(idx)
+    if fid:
+        return fid
+    for base in (PET_DIR, PET_DIR.parent):
+        for stem in (f"voice{idx}", f"pet{idx}_voice"):
+            for ext in ("ogg", "opus", "oga", "mp3", "m4a"):
+                f = base / f"{stem}.{ext}"
+                if f.exists():
+                    return f.read_bytes()
+    if not _PET_VOICE_WARNED.get(idx):
+        _PET_VOICE_WARNED[idx] = True
+        log.warning("pet voice not found: voice%s.ogg (looked in %s and next to bot.py) — فقط کپشن فرستاده میشه", idx, PET_DIR)
+    return None
+
+
+async def _pet_talk(uid: int, want_idx: int | None = None):
+    """حرف زدن پت → (status, info). status: ok | nopet | limit"""
+    async with pool.acquire() as c:
+        async with c.transaction():
+            r = await c.fetchrow("SELECT pets_owned, pet_active, pet_names, pet_stats, pet_talk FROM users WHERE user_id=$1 FOR UPDATE", uid)
+            if not r or int(r["pets_owned"] or 0) <= 0:
+                return "nopet", None
+            owned = int(r["pets_owned"])
+            if want_idx and 1 <= want_idx <= min(owned, len(PETS)):
+                idx = want_idx
+            else:
+                idx = max(1, min(owned, int(r["pet_active"] or 1)))
+            tk = _pet_talk_state(r)
+            if int(tk.get("n", 0)) >= PET_TALK_DAILY:
+                return "limit", _pet_name_of(r, idx)
+            lines = PET_TALK_LINES[idx]
+            used = [i for i in tk["bag"].get(str(idx), []) if isinstance(i, int) and 0 <= i < len(lines)]
+            fresh = [i for i in range(len(lines)) if i not in used]
+            if not fresh:   # همه‌ی حرف‌ها گفته شد؛ دور تازه
+                used, fresh = [], list(range(len(lines)))
+            pick = random.choice(fresh)
+            tk["bag"][str(idx)] = used + [pick]
+            tk["n"] = int(tk.get("n", 0)) + 1
+            now = time.time()
+            st_ = _pet_st(r, idx, now)
+            gain = random.randint(*PET_TALK_POP)
+            stats = _pet_stats_of(r)
+            d = dict(stats.get(str(idx)) or {})
+            d["rank"], d["pop"], d["belly"], d["bt"] = st_["rank"], st_["pop"] + gain, st_["belly"], now
+            stats[str(idx)] = d
+            await c.execute("UPDATE users SET pet_stats=$1, pet_talk=$2, pet_active=$3 WHERE user_id=$4",
+                            json.dumps(stats), json.dumps(tk, ensure_ascii=False), idx, uid)
+            return "ok", {"idx": idx, "name": _pet_name_of(r, idx), "line": lines[pick],
+                          "gain": gain, "left": PET_TALK_DAILY - tk["n"]}
+
+
+async def _pet_talk_send(bot, chat_id: int, reply_to, info: dict):
+    """ویس پت + کپشنِ حرفش (اگه فایل ویس نبود یا ارسالش نشد، فقط متن)."""
+    name = html.escape(info["name"])
+    cap = (f'{PET_TALK_CE} <b>{name}:</b>\n«{info["line"]}»\n\n'
+           f'❤️ +{info["gain"]} محبوبیت · {info["left"]} بار حرف زدنِ امروز مونده')
+    plain = re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", cap)
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    src = _pet_voice_src(info["idx"])
+    if src is not None:
+        for c_ in (cap, plain):
+            try:
+                m = await bot.send_voice(chat_id, src, caption=c_, parse_mode="HTML", reply_parameters=rp)
+                if getattr(m, "voice", None):
+                    _PET_VOICE_FILEID[info["idx"]] = m.voice.file_id
+                return
+            except Exception:
+                log.warning("pet voice send failed", exc_info=True)
+    for c_ in (cap, plain):
+        try:
+            await bot.send_message(chat_id, c_, parse_mode="HTML", reply_parameters=rp)
+            return
+        except Exception:
+            log.warning("pet talk text send failed", exc_info=True)
+
+
+def _pet_talk_parse(text: str):
+    """«جینگو <اسم پت> <پیام>» مثلاً «جینگو جسی سلام عشقم» → (اسم‌های ممکن) یا None. پیام باید حداقل یه کلمه باشه."""
+    raw = norm_word(text)
+    if not raw or len(raw) > 120 or "\n" in raw:
+        return None
+    m = re.match(r"^(?:ج[یي]نگو|jingo)\s+(.+)$", raw, flags=re.I)
+    if not m:
+        return None
+    words = m.group(1).split()
+    if len(words) < 2:
+        return None   # «جینگو جسی» تنها = فقط پنل
+    # اسم پت ۱ تا ۳ کلمه‌ی اول؛ بقیه پیامه
+    return [(_word_key(" ".join(words[:n])), " ".join(words[n:])) for n in (1, 2, 3) if len(words) > n]
+
+
+async def _pet_talk_text(update: Update, context: ContextTypes.DEFAULT_TYPE, cands) -> bool:
+    msg, user = update.effective_message, update.effective_user
+    names = await _pet_name_map(user.id)
+    idx = next((names[k] for k, _ in cands if k in names), None)
+    if not idx:
+        return False   # اسمِ پتِ این کاربر نیست؛ حرفِ عادیه
+    await upsert_user(user.id, user.full_name)
+    st, info = await _pet_talk(user.id, idx)
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    if st == "ok":
+        await _pet_talk_send(context.bot, msg.chat_id, msg.message_id, info)
+    elif st == "limit":
+        await msg.reply_text(B(f"امروز {PET_TALK_DAILY} بار با {html.escape(info)} حرف زدی؛ فردا دوباره."), parse_mode="HTML", reply_parameters=rp)
+    else:
+        await msg.reply_text(B(_PET_FAIL["nopet"]), parse_mode="HTML", reply_parameters=rp)
+    return True
+
+
 _PET_NAME_CACHE: dict = {}
 
 
@@ -11416,6 +11690,10 @@ async def pet_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
              "نوازش": "pet", "غذا": "feed", "گردش": "walk",
              "جینگونوازش": "pet", "جینگوغذا": "feed", "جینگوگردش": "walk",
              "جینگوپتنوازش": "pet", "جینگوپتغذا": "feed", "جینگوپتگردش": "walk"}
+    if not m:
+        _tk = _pet_talk_parse(text)
+        if _tk is not None and await _pet_talk_text(update, context, _tk):
+            return True
     if not m and key not in ("پت", "جینگوپت") and key not in kinds:
         return await _pet_call_by_name(update, context, text)
     bare = key in ("نوازش", "غذا", "گردش")   # کلمه‌ی عادی؛ اگه پت نداشت بی‌صدا ردش می‌کنیم
@@ -11473,6 +11751,17 @@ async def pet_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer(f"پتت استراحت می‌کنه؛ {_duration_fa(info)} دیگه.", show_alert=True)
         else:
             await q.answer(_PET_FAIL[st], show_alert=True)
+        return
+    if act == "talk":
+        st, info = await _pet_talk(uid)
+        if st == "ok":
+            await q.answer()
+            await _pet_talk_send(context.bot, q.message.chat_id, q.message.message_id, info)
+            await _pet_edit(q, uid)
+        elif st == "limit":
+            await q.answer(f"امروز {PET_TALK_DAILY} بار با {info} حرف زدی؛ فردا دوباره.", show_alert=True)
+        else:
+            await q.answer(_PET_FAIL["nopet"], show_alert=True)
         return
     if act == "sel":
         try:
