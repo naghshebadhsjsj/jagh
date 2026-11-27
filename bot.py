@@ -13023,8 +13023,12 @@ async def _ex_reply(msg, text: str, kb=None, rp=None):
     """اول با ایموجی/آیکن پرمیوم می‌فرسته؛ اگه تلگرام رد کرد، خطا رو تو لاگ میذاره و نسخه‌ی ساده می‌فرسته که چیزی بی‌جواب نمونه."""
     try:
         return await msg.reply_text(text, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
-    except Exception:
-        log.exception("exchange reply failed; retrying plain")
+    except Exception as e:
+        log.warning("exchange reply failed (full): %s", e)
+    try:   # ایموجی پرمیوم تو متن، دکمه‌ها بدون آیکن
+        return await msg.reply_text(text, parse_mode="HTML", reply_markup=_ex_plain_kb(kb), reply_parameters=rp)
+    except Exception as e:
+        log.warning("exchange reply failed (plain buttons): %s", e)
     return await msg.reply_text(_ex_plain_text(text), parse_mode="HTML", reply_markup=_ex_plain_kb(kb), reply_parameters=rp)
 
 
@@ -13089,7 +13093,14 @@ async def _ex_edit(q, text: str, kb):
     except Exception as e:
         if "not modified" in str(e).lower():
             return
-        log.exception("exchange edit failed; retrying plain")
+        log.warning("exchange edit failed (full): %s", e)
+    try:
+        await q.edit_message_text(text, parse_mode="HTML", reply_markup=_ex_plain_kb(kb))
+        return
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            return
+        log.warning("exchange edit failed (plain buttons): %s", e)
     try:
         await q.edit_message_text(_ex_plain_text(text), parse_mode="HTML", reply_markup=_ex_plain_kb(kb))
     except Exception as e:
@@ -13143,6 +13154,22 @@ async def exchange_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         g = random.uniform(0.5, 4.0)
         await q.answer(f"جینگوی خوابالو می‌گه فردا طلا یه {g:.1f}٪ {d}... ولی این فاله، نه تحلیل 😴", show_alert=True); return
     await q.answer()
+
+
+async def exdebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ادمین: /exdebug — آیدی ایموجی‌های صرافی رو از تلگرام می‌پرسه و میگه کدوم معتبره."""
+    u, msg = update.effective_user, update.effective_message
+    if not u or u.id not in ADMIN_IDS or not msg:
+        return
+    ids = {f"{a['name']}": a["eid"] for a in EX_ASSETS.values()}
+    ids.update({"سود": EX_UP_EID, "ریزش": EX_DOWN_EID, "تیتر صرافی": EX_TITLE_EID})
+    try:
+        got = {st.custom_emoji_id for st in await context.bot.get_custom_emoji_stickers(list(set(ids.values())))}
+    except Exception as e:
+        await msg.reply_text(f"نتونستم از تلگرام بپرسم: {e}"); return
+    ok = [k for k, v in ids.items() if v in got]
+    bad = [f"{k} ({v})" for k, v in ids.items() if v not in got]
+    await msg.reply_text("✅ معتبر: " + (("، ".join(ok)) or "هیچ‌کدوم") + "\n❌ نامعتبر: " + (("، ".join(bad)) or "هیچ‌کدوم"))
 
 
 async def setprice_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27955,6 +27982,7 @@ def main():
     )
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("setprice", setprice_cmd))
+    app.add_handler(CommandHandler("exdebug", exdebug_cmd))
     app.add_handler(CommandHandler("me", show_me))
     app.add_handler(CommandHandler("jobs", show_jobs))
     app.add_handler(CommandHandler("shift", show_shift))
