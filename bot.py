@@ -13009,19 +13009,52 @@ def _ex_parse_trade(text: str):
     return None
 
 
+def _ex_plain_text(t: str) -> str:
+    return re.sub(r"<tg-emoji[^>]*>(.*?)</tg-emoji>", r"\1", t)
+
+
+def _ex_plain_kb(kb):
+    if kb is None:
+        return None
+    return InlineKeyboardMarkup([[InlineKeyboardButton(b.text, callback_data=b.callback_data) for b in row] for row in kb.inline_keyboard])
+
+
+async def _ex_reply(msg, text: str, kb=None, rp=None):
+    """اول با ایموجی/آیکن پرمیوم می‌فرسته؛ اگه تلگرام رد کرد، خطا رو تو لاگ میذاره و نسخه‌ی ساده می‌فرسته که چیزی بی‌جواب نمونه."""
+    try:
+        return await msg.reply_text(text, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+    except Exception:
+        log.exception("exchange reply failed; retrying plain")
+    return await msg.reply_text(_ex_plain_text(text), parse_mode="HTML", reply_markup=_ex_plain_kb(kb), reply_parameters=rp)
+
+
 async def exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    try:
+        return await _exchange_text(update, context, text)
+    except Exception:
+        log.exception("exchange_text failed")
+        if _ex_parse_trade(text) is not None or _word_key(text) in (_EX_HOME_WORDS | _EX_PORT_WORDS):
+            try:
+                await update.effective_message.reply_text(BP("صرافی یه لحظه مشکل داره؛ چند ثانیه دیگه دوباره امتحان کن."), parse_mode="HTML")
+            except Exception:
+                pass
+            return True
+        return False
+
+
+async def _exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     msg, user = update.effective_message, update.effective_user
     key = _word_key(text)
     rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
     if key in _EX_HOME_WORDS:
         await upsert_user(user.id, user.full_name)
         t, kb = await _ex_home(user.id)
-        await msg.reply_text(t, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+        await _ex_reply(msg, t, kb, rp)
         return True
     if key in _EX_PORT_WORDS:
         await upsert_user(user.id, user.full_name)
         t, kb = await _ex_portfolio_view(user.id)
-        await msg.reply_text(t, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+        await _ex_reply(msg, t, kb, rp)
         return True
     tr = _ex_parse_trade(text)
     if tr is None:
@@ -13043,7 +13076,7 @@ async def exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
     pct = float(val) if kind == "pct" else None
     st, info = await (_ex_buy if side == "buy" else _ex_sell)(user.id, code, amount, pct)
     if st == "ok":
-        await msg.reply_text(B(_ex_ok_text(side, code, info)), parse_mode="HTML", reply_parameters=rp)
+        await _ex_reply(msg, B(_ex_ok_text(side, code, info)), None, rp)
     else:
         await msg.reply_text(BP(_ex_fail_text(st, info)), parse_mode="HTML", reply_parameters=rp)
     return True
@@ -13052,9 +13085,16 @@ async def exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
 async def _ex_edit(q, text: str, kb):
     try:
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+        return
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            return
+        log.exception("exchange edit failed; retrying plain")
+    try:
+        await q.edit_message_text(_ex_plain_text(text), parse_mode="HTML", reply_markup=_ex_plain_kb(kb))
     except Exception as e:
         if "not modified" not in str(e).lower():
-            log.warning("exchange edit failed: %s", e)
+            log.exception("exchange plain edit failed")
 
 
 async def exchange_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -13773,6 +13813,8 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await admin_input(update, context):
         return
     if await account_transfer_input(update, context):
+        return
+    if msg and msg.text and await exchange_text(update, context, msg.text):   # بورس/صرافی تو پی‌وی هم کار می‌کنه
         return
     if msg and msg.text and _pm_group_only_text(msg.text):
         await msg.reply_text(B(PM_GROUP_ONLY_TEXT), parse_mode="HTML")
