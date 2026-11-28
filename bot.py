@@ -1139,6 +1139,10 @@ async def init_db(app: Application):
         await c.execute("CREATE TABLE IF NOT EXISTS exchange_hold (user_id BIGINT NOT NULL, asset TEXT NOT NULL, qty DOUBLE PRECISION NOT NULL DEFAULT 0, cost BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, asset))")
         await c.execute("CREATE TABLE IF NOT EXISTS exchange_hist (asset TEXT NOT NULL, ts DOUBLE PRECISION NOT NULL, price DOUBLE PRECISION NOT NULL)")
         await c.execute("CREATE INDEX IF NOT EXISTS exchange_hist_idx ON exchange_hist (asset, ts)")
+        await c.execute("CREATE TABLE IF NOT EXISTS exchange_lev (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, asset TEXT NOT NULL, margin BIGINT NOT NULL, lev INT NOT NULL, entry DOUBLE PRECISION NOT NULL, qty DOUBLE PRECISION NOT NULL, fee BIGINT NOT NULL DEFAULT 0, opened DOUBLE PRECISION NOT NULL DEFAULT 0)")
+        await c.execute("CREATE INDEX IF NOT EXISTS exchange_lev_asset_idx ON exchange_lev (asset)")
+        await c.execute("CREATE INDEX IF NOT EXISTS exchange_lev_user_idx ON exchange_lev (user_id)")
+        await c.execute("CREATE TABLE IF NOT EXISTS exchange_pnl (user_id BIGINT NOT NULL, period TEXT NOT NULL, pnl BIGINT NOT NULL DEFAULT 0, trades INT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, period))")
         await c.execute("CREATE TABLE IF NOT EXISTS support_manage (manager_id BIGINT NOT NULL, target_id BIGINT NOT NULL, PRIMARY KEY(manager_id, target_id))")
         await c.execute("CREATE TABLE IF NOT EXISTS referrals (referred_id BIGINT PRIMARY KEY, referrer_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DOUBLE PRECISION NOT NULL DEFAULT 0, rewarded_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_check DOUBLE PRECISION NOT NULL DEFAULT 0)")
         await c.execute("CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals (referrer_id)")
@@ -12642,6 +12646,14 @@ EX_TICK = 60               # هر چند ثانیه قیمت‌ها یه قدم 
 EX_UP_EID = "5431343001739735208"     # آیکن سود
 EX_DOWN_EID = "5429096888462751676"   # آیکن ریزش
 EX_TITLE_EID = "5080382987552424976"  # آیکن تیتر «صرافی»
+EX_LB_EID = "5393109353194604335"     # آیکن «برترین معامله‌گرها»
+EX_LEV_EID = EX_UP_EID                # آیکن دکمه‌ی «اهرم» (آیدی جدا دادی، اینجا عوضش کن)
+EX_CHART_EID = EX_TITLE_EID           # آیکن دکمه‌ی «نمودار» (آیدی جدا دادی، اینجا عوضش کن)
+EX_LEV_FEE = 0.002         # کارمزد اهرم، روی کل حجم پوزیشن؛ یه بار موقع باز کردن و یه بار موقع بستن
+EX_LEV_MAXPOS = 3          # حداکثر پوزیشن بازِ هر نفر
+EX_LEV_OPTIONS = (2, 5, 10)
+EX_HIST_KEEP = 8 * 86400   # تاریخچه‌ی قیمت برای نمودار ۷ روزه
+EX_SYM_EN = {"usd": "USD", "gold": "GOLD", "btc": "BTC", "eth": "ETH", "gram": "GRAM", "bnb": "BNB"}
 EX_ASSETS = {
     "usd":  {"name": "دلار",    "base": 292_000,         "vol": 0.00006, "eid": "5409048419211682843", "fb": "💵", "dec": 2, "sym": "دلار"},
     "gold": {"name": "طلا",     "base": 34_440_000,      "vol": 0.00045, "eid": "5291828964883458415", "fb": "🥇", "dec": 4, "sym": "گرم"},
@@ -12730,9 +12742,10 @@ async def exchange_loop():
                 EX_PRICES[code], EX_TREND[code] = p, tr
                 rows.append((p, now, code))
             await pool.executemany("UPDATE exchange_prices SET price=$1, updated=$2 WHERE asset=$3", rows)
+            await _ex_liquidate()
             if n % 10 == 0:
                 await pool.executemany("INSERT INTO exchange_hist (asset, ts, price) VALUES ($1,$2,$3)", [(c, now, EX_PRICES[c]) for c in EX_ASSETS])
-                await pool.execute("DELETE FROM exchange_hist WHERE ts < $1", now - 26 * 3600)
+                await pool.execute("DELETE FROM exchange_hist WHERE ts < $1", now - EX_HIST_KEEP)
                 await _ex_refresh_open()
         except asyncio.CancelledError:
             raise
@@ -12809,6 +12822,7 @@ async def _ex_home(uid: int, note: str = ""):
         [btn("بیتکوین", icon=EX_ASSETS["btc"]["eid"], callback_data=f"ex:a:{uid}:btc"), btn("اتریوم", icon=EX_ASSETS["eth"]["eid"], callback_data=f"ex:a:{uid}:eth")],
         [btn("گرام", icon=EX_ASSETS["gram"]["eid"], callback_data=f"ex:a:{uid}:gram"), btn("بایننس", icon=EX_ASSETS["bnb"]["eid"], callback_data=f"ex:a:{uid}:bnb")],
         [btn("طلا فردا؟", icon=EX_UP_EID, callback_data=f"ex:tm:{uid}"), btn("پرتفوی من", icon=EX_ASSETS["usd"]["eid"], callback_data=f"ex:p:{uid}")],
+        [btn("برترین معامله‌گرها", icon=EX_LB_EID, callback_data=f"ex:lb:{uid}:w")],
     ]
     return text, InlineKeyboardMarkup(rows)
 
@@ -12835,6 +12849,7 @@ async def _ex_asset_view(uid: int, code: str, note: str = ""):
          btn("خرید ۱۰۰ میل", "success", callback_data=f"ex:b:{uid}:{code}:100000000")],
         [btn("فروش ۲۵٪", "danger", callback_data=f"ex:s:{uid}:{code}:25"), btn("فروش ۵۰٪", "danger", callback_data=f"ex:s:{uid}:{code}:50"),
          btn("فروش همه", "danger", callback_data=f"ex:s:{uid}:{code}:100")],
+        [btn("نمودار", icon=EX_CHART_EID, callback_data=f"ex:c:{uid}:{code}:24h"), btn("اهرم", icon=EX_LEV_EID, callback_data=f"ex:lv:{uid}:{code}")],
         [btn("بازگشت", callback_data=f"ex:h:{uid}")],
     ])
     return text, kb
@@ -12843,6 +12858,7 @@ async def _ex_asset_view(uid: int, code: str, note: str = ""):
 async def _ex_portfolio_view(uid: int, note: str = ""):
     prices = await _ex_prices()
     rows = await pool.fetch("SELECT asset, qty, cost FROM exchange_hold WHERE user_id=$1 AND qty > 0", uid)
+    levs = await pool.fetch("SELECT * FROM exchange_lev WHERE user_id=$1 ORDER BY id", uid)
     items = []
     for r in rows:
         if r["asset"] not in EX_ASSETS:
@@ -12859,12 +12875,16 @@ async def _ex_portfolio_view(uid: int, note: str = ""):
         lines.append(f"{_ex_ce(code)} {EX_ASSETS[code]['name']} · {_ex_qty(q, code)} · ≈ {val:,} تومن · {_ex_arrow(pnl >= 0)} {abs(pct):.1f}%")
     if items:
         lines += ["", f"جمع ارزش: {tv:,} تومن", f"سود و زیان کل: {_ex_arrow(tv - tc >= 0)} {abs(tv - tc):,} تومن"]
-    else:
+    if levs:
+        lines += ["", "پوزیشن‌های اهرمی:"] + [_ex_lev_line(r, prices.get(r["asset"], float(r["entry"]))) for r in levs]
+    if not items and not levs:
         lines.append("هنوز هیچ ارزی نخریدی.")
     text = B("\n".join(lines))
     if note:
         text = B(note) + "\n\n" + text
     rows_ = []
+    for r in list(levs)[:EX_LEV_MAXPOS]:
+        rows_.append([btn(f"بستن #{r['id']} · {EX_ASSETS[r['asset']]['name']} ×{r['lev']}", "danger", callback_data=f"ex:lc:{uid}:{r['id']}")])
     if items:
         rows_.append([btn("فروش همه دارایی‌ها", "danger", callback_data=f"ex:sa:{uid}")])
     rows_.append([btn("بازگشت", callback_data=f"ex:h:{uid}")])
@@ -12927,6 +12947,7 @@ async def _ex_sell(uid: int, code: str, amount: int | None = None, pct: float | 
             else:
                 await c.execute("UPDATE exchange_hold SET qty = qty - $3, cost = cost - $4 WHERE user_id=$1 AND asset=$2", uid, code, sell, cost_part)
             await c.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", recv, uid)
+            await _ex_record_pnl(c, uid, recv - cost_part)
             return "ok", {"qty": sell, "price": price, "gross": gross, "fee": fee, "recv": recv, "pnl": recv - cost_part}
 
 
@@ -12948,7 +12969,323 @@ async def _ex_sell_all(uid: int):
                 pnl_total += recv - int(r["cost"])
                 await c.execute("DELETE FROM exchange_hold WHERE user_id=$1 AND asset=$2", uid, r["asset"])
             await c.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", recv_total, uid)
+            await _ex_record_pnl(c, uid, pnl_total)
             return "ok", {"recv": recv_total, "pnl": pnl_total}
+
+
+# ───────────── اهرم / نمودار / برترین معامله‌گرها ─────────────
+_EX_LB_WORDS = {"برترینمعاملهگرها", "برترینمعاملهگر", "جدولمعاملهگرها", "جدولبرترینمعاملهگرها", "معاملهگرها",
+                "جینگوبرترینمعاملهگرها", "جینگوجدولمعاملهگرها", "جینگوجدولبرترینمعاملهگرها", "جینگوبرترینمعاملهگر"}
+_EX_RANGES = {"6h": (6 * 3600, "۶ ساعت", "6H"), "24h": (86400, "۲۴ ساعت", "24H"), "7d": (7 * 86400, "۷ روز", "7D")}
+
+
+def _ex_tz():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("Asia/Tehran")
+    except Exception:
+        from datetime import timezone as _tzm, timedelta as _tdm
+        return _tzm(_tdm(hours=3, minutes=30))
+
+
+def _ex_week_key() -> str:
+    """شروع هفته = شنبه (به وقت تهران)."""
+    from datetime import datetime as _dt, timedelta as _td
+    d = _dt.now(_ex_tz()).date()
+    return (d - _td(days=(d.weekday() + 2) % 7)).isoformat()
+
+
+async def _ex_record_pnl(c, uid: int, pnl: int):
+    for per in ("all", _ex_week_key()):
+        await c.execute("INSERT INTO exchange_pnl (user_id, period, pnl, trades) VALUES ($1,$2,$3,1) "
+                        "ON CONFLICT (user_id, period) DO UPDATE SET pnl = exchange_pnl.pnl + EXCLUDED.pnl, trades = exchange_pnl.trades + 1",
+                        uid, per, int(pnl))
+
+
+def _ex_lev_close_value(r, price: float):
+    """(پولی که با بستن الان می‌گیره، سود/زیانِ قیمتی الان)"""
+    qty, entry, margin = float(r["qty"]), float(r["entry"]), int(r["margin"])
+    upnl = qty * (price - entry)
+    net = max(0, int(margin + upnl - qty * price * EX_LEV_FEE))
+    return net, int(upnl)
+
+
+def _ex_lev_line(r, price: float) -> str:
+    code = r["asset"]
+    _, upnl = _ex_lev_close_value(r, price)
+    liq = float(r["entry"]) * (1 - 1 / int(r["lev"]))
+    return (f"{_ex_ce(code)} {EX_ASSETS[code]['name']} ×{r['lev']} #{r['id']} · مارجین {int(r['margin']):,} · "
+            f"{_ex_arrow(upnl >= 0)} {abs(upnl):,} · لیکوئید زیر {_ex_num(liq)}")
+
+
+async def _ex_lev_open(uid: int, code: str, lev: int, amount: int | None = None, pct: float | None = None):
+    """باز کردن پوزیشن اهرمی (لانگ). مارجین از جیب کم میشه؛ اگه قیمت به اندازه‌ی ۱/اهرم بیاد پایین، مارجین می‌سوزه."""
+    if lev not in range(2, 11):
+        return "badlev", None
+    async with pool.acquire() as c:
+        async with c.transaction():
+            pocket = int(await c.fetchval("SELECT balance FROM users WHERE user_id=$1 FOR UPDATE", uid) or 0)
+            price = await c.fetchval("SELECT price FROM exchange_prices WHERE asset=$1", code)
+            if price is None:
+                return "noprice", None
+            price = float(price)
+            if int(await c.fetchval("SELECT COUNT(*) FROM exchange_lev WHERE user_id=$1", uid)) >= EX_LEV_MAXPOS:
+                return "maxpos", None
+            rate = lev * EX_LEV_FEE
+            if amount is not None:
+                margin = amount
+            else:
+                margin = int(pocket * (pct if pct is not None else 100) / 100 / (1 + rate))
+            if margin < EX_MIN:
+                return "min", None
+            fee = int(margin * rate)
+            if margin + fee > pocket:
+                return "poor", pocket
+            qty = margin * lev / price
+            await c.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", margin + fee, uid)
+            pid = await c.fetchval("INSERT INTO exchange_lev (user_id, asset, margin, lev, entry, qty, fee, opened) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+                                   uid, code, margin, lev, price, qty, fee, time.time())
+            return "ok", {"id": pid, "code": code, "lev": lev, "margin": margin, "fee": fee, "price": price, "liq": price * (1 - 1 / lev)}
+
+
+async def _ex_lev_close(uid: int, code: str | None = None, pos_id: int | None = None):
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT 1 FROM users WHERE user_id=$1 FOR UPDATE", uid)
+            if pos_id is not None:
+                rows = await c.fetch("SELECT * FROM exchange_lev WHERE id=$1 AND user_id=$2 FOR UPDATE", pos_id, uid)
+            else:
+                rows = await c.fetch("SELECT * FROM exchange_lev WHERE user_id=$1 AND asset=$2 FOR UPDATE", uid, code)
+            if not rows:
+                return "nopos", None
+            pr = {r["asset"]: float(r["price"]) for r in await c.fetch("SELECT asset, price FROM exchange_prices")}
+            payout = pnl = n = 0
+            for r in rows:
+                price = pr.get(r["asset"])
+                if price is None:
+                    continue
+                net, _ = _ex_lev_close_value(r, price)
+                payout += net
+                pnl += net - int(r["margin"]) - int(r["fee"])
+                n += 1
+                await c.execute("DELETE FROM exchange_lev WHERE id=$1", r["id"])
+            if not n:
+                return "noprice", None
+            await c.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", payout, uid)
+            await _ex_record_pnl(c, uid, pnl)
+            return "ok", {"code": rows[0]["asset"], "n": n, "payout": payout, "pnl": pnl}
+
+
+async def _ex_liquidate():
+    """هر دقیقه: پوزیشن‌هایی که قیمتشون زیر نقطه‌ی لیکوئید رفته بسته میشن و مارجینشون می‌سوزه."""
+    for code in EX_ASSETS:
+        price = EX_PRICES.get(code)
+        if price is None:
+            continue
+        async with pool.acquire() as c:
+            async with c.transaction():
+                dead = await c.fetch("DELETE FROM exchange_lev WHERE asset=$1 AND entry * (1.0 - 1.0 / lev::float8) >= $2 RETURNING user_id, margin, lev, fee", code, float(price))
+                for r in dead:
+                    await _ex_record_pnl(c, r["user_id"], -(int(r["margin"]) + int(r["fee"])))
+        for r in dead:
+            if BOT_REF is not None:
+                try:
+                    await BOT_REF.send_message(r["user_id"], B(f"{_ex_arrow(False)} پوزیشن {EX_ASSETS[code]['name']} ×{r['lev']} لیکوئید شد؛ مارجین {int(r['margin']):,} تومن سوخت."), parse_mode="HTML")
+                except Exception:
+                    pass
+
+
+async def _ex_lev_view(uid: int, code: str, lev: int = 5, note: str = ""):
+    a = EX_ASSETS[code]
+    prices = await _ex_prices()
+    p = prices[code]
+    pocket = await _ex_pocket(uid)
+    levs = await pool.fetch("SELECT * FROM exchange_lev WHERE user_id=$1 ORDER BY id", uid)
+    lines = [f"{_ex_ce(code)} اهرم · {a['name']}", f"قیمت الان: {_ex_num(p)} تومن{_ex_chg_txt(_ex_chg(code, p))}", f"جیبت: {pocket:,} تومن", "",
+             f"اهرم انتخابی: ×{lev} · اگه قیمت {100 / lev:.0f}٪ بیاد پایین (زیر {_ex_num(p * (1 - 1 / lev))}) کل مارجین می‌سوزه.",
+             f"کارمزد: {EX_LEV_FEE * 100:.1f}٪ حجم پوزیشن موقع باز کردن و همین‌قدر موقع بستن. حداکثر {EX_LEV_MAXPOS} پوزیشن باز."]
+    if levs:
+        lines += ["", "پوزیشن‌های بازت:"] + [_ex_lev_line(r, prices.get(r["asset"], float(r["entry"]))) for r in levs]
+    text = B("\n".join(lines))
+    if note:
+        text = B(note) + "\n\n" + text
+    rows = [[btn(("✅ " if lev == o else "") + f"×{o}", "primary", callback_data=f"ex:lv:{uid}:{code}:{o}") for o in EX_LEV_OPTIONS],
+            [btn(f"باز کردن {lbl}", "success", callback_data=f"ex:lo:{uid}:{code}:{lev}:{m}") for lbl, m in (("۱ میل", 1_000_000), ("۱۰ میل", 10_000_000), ("۱۰۰ میل", 100_000_000))]]
+    for r in list(levs)[:EX_LEV_MAXPOS]:
+        rows.append([btn(f"بستن #{r['id']} · {EX_ASSETS[r['asset']]['name']} ×{r['lev']}", "danger", callback_data=f"ex:lc:{uid}:{r['id']}")])
+    rows.append([btn("بازگشت", callback_data=f"ex:a:{uid}:{code}")])
+    return text, InlineKeyboardMarkup(rows)
+
+
+def _ex_lev_ok_text(info: dict) -> str:
+    c = info["code"]
+    return (f"{_ex_ce(c)} پوزیشن اهرمی باز شد #{info['id']}: {EX_ASSETS[c]['name']} ×{info['lev']}\n"
+            f"مارجین: {info['margin']:,} تومن (کارمزد {info['fee']:,})\n"
+            f"قیمت ورود: {_ex_num(info['price'])} · لیکوئید زیر {_ex_num(info['liq'])}")
+
+
+def _ex_lev_close_text(info: dict) -> str:
+    c = info["code"]
+    return (f"{_ex_ce(c)} {info['n']} پوزیشن {EX_ASSETS[c]['name']} بسته شد: {info['payout']:,} تومن گرفتی\n"
+            f"سود و زیان: {_ex_arrow(info['pnl'] >= 0)} {abs(info['pnl']):,} تومن")
+
+
+# ── نمودار قیمت
+def _ex_font(size: int):
+    for f in ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "arial.ttf"):
+        try:
+            return ImageFont.truetype(f, size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.load_default(size=size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _ex_num_en(n: float) -> str:
+    n = float(n)
+    if n >= 1e9:
+        return f"{n / 1e9:.2f}B"
+    if n >= 1e6:
+        return f"{n / 1e6:.2f}M"
+    if n >= 1e3:
+        return f"{n / 1e3:.1f}K"
+    return f"{n:.0f}"
+
+
+def _ex_chart_png(sym: str, rng_label: str, pts: list, long_range: bool) -> bytes:
+    import io as _io
+    from datetime import datetime as _dt
+    W, H, L, R, T, B_ = 960, 540, 30, 150, 100, 70
+    img = Image.new("RGB", (W, H), (15, 19, 26))
+    d = ImageDraw.Draw(img)
+    ts, ps = [p[0] for p in pts], [p[1] for p in pts]
+    lo, hi = min(ps), max(ps)
+    pad = (hi - lo) * 0.10 or hi * 0.01
+    lo, hi = lo - pad, hi + pad
+    x0, x1, y0, y1 = L, W - R, T, H - B_
+    span = (ts[-1] - ts[0]) or 1.0
+    X = lambda t: x0 + (t - ts[0]) / span * (x1 - x0)
+    Y = lambda v: y1 - (v - lo) / (hi - lo) * (y1 - y0)
+    up = ps[-1] >= ps[0]
+    col = (46, 204, 113) if up else (231, 76, 60)
+    f_s, f_m, f_b = _ex_font(18), _ex_font(26), _ex_font(36)
+    for i in range(5):
+        v = lo + (hi - lo) * i / 4
+        y = Y(v)
+        d.line([(x0, y), (x1, y)], fill=(38, 45, 58), width=1)
+        d.text((x1 + 12, y - 11), _ex_num_en(v), fill=(150, 158, 172), font=f_s)
+    xy = [(X(t), Y(v)) for t, v in pts]
+    ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(ov).polygon(xy + [(x1, y1), (x0, y1)], fill=col + (55,))
+    img = Image.alpha_composite(img.convert("RGBA"), ov).convert("RGB")
+    d = ImageDraw.Draw(img)
+    d.line(xy, fill=col, width=4, joint="curve")
+    imax, imin = ps.index(max(ps)), ps.index(min(ps))
+    for i, up_ in ((imax, True), (imin, False)):
+        x, y = xy[i]
+        d.ellipse([x - 6, y - 6, x + 6, y + 6], fill=(255, 255, 255))
+        t = _ex_num_en(ps[i])
+        tw = d.textlength(t, font=f_s)
+        d.text((min(max(x - tw / 2, x0), x1 - tw), y - 30 if up_ else y + 10), t, fill=(235, 238, 245), font=f_s)
+    chg = (ps[-1] / ps[0] - 1) * 100
+    d.text((L, 24), f"{sym}  ·  {rng_label}", fill=(235, 238, 245), font=f_b)
+    ptxt = _ex_num_en(ps[-1])
+    d.text((W - R - d.textlength(ptxt, font=f_b), 24), ptxt, fill=(235, 238, 245), font=f_b)
+    ctxt = f"{chg:+.2f}%"
+    d.text((L, 66), ctxt, fill=col, font=f_m)
+    tz = _ex_tz()
+    fmt = "%m/%d %H:%M" if long_range else "%H:%M"
+    for t, anchor in ((ts[0], "l"), (ts[-1], "r")):
+        txt = _dt.fromtimestamp(t, tz).strftime(fmt)
+        w = d.textlength(txt, font=f_s)
+        d.text((x0 if anchor == "l" else x1 - w, y1 + 16), txt, fill=(150, 158, 172), font=f_s)
+    buf = _io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+async def _ex_chart_make(code: str, rng: str):
+    """→ (png_bytes, caption) یا (None, متنِ خطا)"""
+    secs, fa, en = _EX_RANGES.get(rng, _EX_RANGES["24h"])
+    now = time.time()
+    rows = await pool.fetch("SELECT ts, price FROM exchange_hist WHERE asset=$1 AND ts>=$2 ORDER BY ts", code, now - secs)
+    pts = [(float(r["ts"]), float(r["price"])) for r in rows]
+    cur = (await _ex_prices())[code]
+    pts.append((now, float(cur)))
+    if len(pts) < 3:
+        return None, "هنوز داده‌ی کافی برای نمودار نیست؛ چند دقیقه دیگه امتحان کن."
+    if len(pts) > 220:
+        step = len(pts) / 220
+        pts = [pts[int(i * step)] for i in range(220)] + [pts[-1]]
+    png = await asyncio.to_thread(_ex_chart_png, EX_SYM_EN[code], en, pts, rng == "7d")
+    ps = [p[1] for p in pts]
+    chg = (ps[-1] / ps[0] - 1) * 100
+    cap = B(f"{_ex_ce(code)} {EX_ASSETS[code]['name']} · نمودار {fa}\n"
+            f"الان: {_ex_num(ps[-1])} تومن · {_ex_arrow(chg >= 0)} {abs(chg):.1f}%\n"
+            f"بالاترین: {_ex_num(max(ps))} · پایین‌ترین: {_ex_num(min(ps))}")
+    return png, cap
+
+
+def _ex_chart_kb(uid: int, code: str, rng: str):
+    return InlineKeyboardMarkup([
+        [btn(("✅ " if rng == k else "") + v[1], "primary", callback_data=f"ex:c:{uid}:{code}:{k}") for k, v in _EX_RANGES.items()],
+        [btn("اهرم", icon=EX_LEV_EID, callback_data=f"ex:lv:{uid}:{code}"), btn("بستن", callback_data=f"ex:cx:{uid}")],
+    ])
+
+
+async def _ex_send_photo(bot, chat_id: int, reply_to, png: bytes, cap: str, kb):
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    for caption, markup in ((cap, kb), (cap, _ex_plain_kb(kb)), (_ex_plain_text(cap), _ex_plain_kb(kb))):
+        try:
+            return await bot.send_photo(chat_id, png, caption=caption, parse_mode="HTML", reply_markup=markup, reply_parameters=rp)
+        except Exception as e:
+            log.warning("exchange chart send failed: %s", e)
+    return None
+
+
+# ── جدول برترین معامله‌گرها
+async def _ex_lb_view(uid: int, kind: str = "w"):
+    per = _ex_week_key() if kind == "w" else "all"
+    title = "این هفته (از شنبه)" if kind == "w" else "کل زمان"
+    rows = await pool.fetch("SELECT p.user_id, p.pnl, u.name FROM exchange_pnl p LEFT JOIN users u ON u.user_id = p.user_id "
+                            "WHERE p.period=$1 AND p.trades > 0 ORDER BY p.pnl DESC LIMIT 10", per)
+    lines = [f'<tg-emoji emoji-id="{EX_LB_EID}">🏆</tg-emoji> برترین معامله‌گرها · {title}', ""]
+    medals = ("🥇", "🥈", "🥉")
+    for i, r in enumerate(rows):
+        pnl = int(r["pnl"])
+        nm = html.escape((r["name"] or "ناشناس").strip()[:18] or "ناشناس")
+        lines.append(f"{medals[i] if i < 3 else str(i + 1) + '.'} {nm} · {_ex_arrow(pnl >= 0)} {abs(pnl):,} تومن")
+    if not rows:
+        lines.append("هنوز کسی معامله‌ای نبسته.")
+    mine = await pool.fetchval("SELECT pnl FROM exchange_pnl WHERE user_id=$1 AND period=$2 AND trades > 0", uid, per)
+    if mine is not None:
+        rank = await pool.fetchval("SELECT COUNT(*) + 1 FROM exchange_pnl WHERE period=$1 AND trades > 0 AND pnl > $2", per, int(mine))
+        lines += ["", f"رتبه‌ی تو: {rank} · {_ex_arrow(int(mine) >= 0)} {abs(int(mine)):,} تومن"]
+    text = B("\n".join(lines)) + "\n<blockquote>فقط سود و زیانِ معامله‌های بسته‌شده (فروش، بستن پوزیشن و لیکوئید) حساب میشه.</blockquote>"
+    kb = InlineKeyboardMarkup([
+        [btn(("✅ " if kind == "w" else "") + "این هفته", "primary", callback_data=f"ex:lb:{uid}:w"),
+         btn(("✅ " if kind == "a" else "") + "کل زمان", "primary", callback_data=f"ex:lb:{uid}:a")],
+        [btn("بازگشت", callback_data=f"ex:h:{uid}")],
+    ])
+    return text, kb
+
+
+def _ex_parse_other(text: str):
+    """«جینگو نمودار طلا» → ('chart', 'gold') | «جینگو ببند بیتکوین» → ('close', 'btc') | «جینگو برترین معامله‌گرها» → ('lb', None)"""
+    raw = norm_word(text or "")
+    if not raw or len(raw) > 60 or "\n" in raw:
+        return None
+    if _word_key(raw) in _EX_LB_WORDS:
+        return "lb", None
+    m = re.match(r"^(?:جینگو\s+)?(نمودار|چارت|ببند|بستن)\s+(?:پوزیشن\s+)?(.+)$", raw)
+    if not m:
+        return None
+    code = _EX_ALIAS.get(_word_key(m.group(2)))
+    if not code:
+        return None
+    return ("chart" if m.group(1) in ("نمودار", "چارت") else "close"), code
 
 
 _EX_FAIL = {
@@ -12963,6 +13300,12 @@ def _ex_fail_text(st: str, info) -> str:
         return f"موجودی جیبت کافی نیست؛ {int(info):,} تومن داری."
     if st == "toomuch":
         return f"ارزش دارایی‌ت از این ارز فقط {int(info):,} تومنه."
+    if st == "maxpos":
+        return f"حداکثر {EX_LEV_MAXPOS} پوزیشن اهرمی باز می‌تونی داشته باشی؛ یکی رو ببند."
+    if st == "badlev":
+        return "اهرم باید بین ۲ تا ۱۰ باشه."
+    if st == "nopos":
+        return "پوزیشن اهرمی بازی برای این ارز نداری."
     return _EX_FAIL.get(st, "نشد؛ دوباره امتحان کن.")
 
 
@@ -13037,7 +13380,7 @@ async def exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
         return await _exchange_text(update, context, text)
     except Exception:
         log.exception("exchange_text failed")
-        if _ex_parse_trade(text) is not None or _word_key(text) in (_EX_HOME_WORDS | _EX_PORT_WORDS):
+        if _ex_parse_trade(text) is not None or _ex_parse_other(text) is not None or _word_key(text) in (_EX_HOME_WORDS | _EX_PORT_WORDS):
             try:
                 await update.effective_message.reply_text(BP("صرافی یه لحظه مشکل داره؛ چند ثانیه دیگه دوباره امتحان کن."), parse_mode="HTML")
             except Exception:
@@ -13060,6 +13403,23 @@ async def _exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
         t, kb = await _ex_portfolio_view(user.id)
         await _ex_reply(msg, t, kb, rp)
         return True
+    oth = _ex_parse_other(text)
+    if oth is not None:
+        await upsert_user(user.id, user.full_name)
+        kind_, c_ = oth
+        if kind_ == "lb":
+            t, kb = await _ex_lb_view(user.id, "w")
+            await _ex_reply(msg, t, kb, rp)
+        elif kind_ == "chart":
+            png, cap = await _ex_chart_make(c_, "24h")
+            if png is None:
+                await _ex_reply(msg, BP(cap), None, rp)
+            else:
+                await _ex_send_photo(context.bot, msg.chat_id, msg.message_id, png, cap, _ex_chart_kb(user.id, c_, "24h"))
+        else:
+            st, info = await _ex_lev_close(user.id, code=c_)
+            await _ex_reply(msg, B(_ex_lev_close_text(info)) if st == "ok" else BP(_ex_fail_text(st, info)), None, rp)
+        return True
     tr = _ex_parse_trade(text)
     if tr is None:
         return False
@@ -13067,6 +13427,11 @@ async def _exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     side = "buy" if word == "خرید" else "sell"
     name = EX_ASSETS[code]["name"]
     await upsert_user(user.id, user.full_name)
+    lev = None
+    if side == "buy":   # «جینگو خرید بیتکوین 1 میلیون اهرم 5» (یا x5 / ×5 / ایکس 5)
+        ml = re.search(r"(?:^|\s)(?:اهرم|x|×|ایکس)\s*(\d{1,2})\s*$", amt_s.translate(_DIG), re.I)
+        if ml:
+            lev, amt_s = int(ml.group(1)), amt_s.translate(_DIG)[:ml.start()].strip()
     if not amt_s.strip():
         eg = "1 میلیون" if side == "buy" else "همه"
         await msg.reply_text(BP(f"مبلغ رو هم بنویس. مثال: جینگو {word} {name} {eg}"), parse_mode="HTML", reply_parameters=rp)
@@ -13078,6 +13443,10 @@ async def _exchange_text(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     kind, val = am
     amount = int(val) if kind == "amt" else None
     pct = float(val) if kind == "pct" else None
+    if lev is not None:
+        st, info = await _ex_lev_open(user.id, code, lev, amount, pct)
+        await _ex_reply(msg, B(_ex_lev_ok_text(info)) if st == "ok" else BP(_ex_fail_text(st, info)), None, rp)
+        return True
     st, info = await (_ex_buy if side == "buy" else _ex_sell)(user.id, code, amount, pct)
     if st == "ok":
         await _ex_reply(msg, B(_ex_ok_text(side, code, info)), None, rp)
@@ -13139,6 +13508,61 @@ async def exchange_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("انجام شد ✅")
         t, kb = await _ex_asset_view(uid, code, _ex_ok_text("buy" if act == "b" else "sell", code, info))
         await _ex_edit(q, t, kb); return
+    if act == "lb":
+        await q.answer(); t, kb = await _ex_lb_view(uid, "a" if (p[3:4] == ["a"]) else "w"); await _ex_edit(q, t, kb); return
+    if act == "lv" and code:
+        try:
+            L = int(p[4]) if len(p) > 4 else 5
+        except ValueError:
+            L = 5
+        await q.answer(); t, kb = await _ex_lev_view(uid, code, L if L in EX_LEV_OPTIONS else 5); await _ex_edit(q, t, kb); return
+    if act == "lo" and code:
+        try:
+            L, n = int(p[4]), int(p[5])
+        except (IndexError, ValueError):
+            await q.answer(); return
+        st, info = await _ex_lev_open(uid, code, L, amount=n)
+        if st != "ok":
+            await q.answer(_ex_fail_text(st, info), show_alert=True); return
+        await q.answer("پوزیشن باز شد ✅")
+        t, kb = await _ex_lev_view(uid, code, L, _ex_lev_ok_text(info)); await _ex_edit(q, t, kb); return
+    if act == "lc":
+        try:
+            pid = int(p[3])
+        except (IndexError, ValueError):
+            await q.answer(); return
+        st, info = await _ex_lev_close(uid, pos_id=pid)
+        if st != "ok":
+            await q.answer(_ex_fail_text(st, info), show_alert=True)
+            t, kb = await _ex_portfolio_view(uid); await _ex_edit(q, t, kb); return
+        await q.answer("بسته شد ✅")
+        t, kb = await _ex_lev_view(uid, info["code"], 5, _ex_lev_close_text(info)); await _ex_edit(q, t, kb); return
+    if act == "c" and code:
+        rng = p[4] if len(p) > 4 and p[4] in _EX_RANGES else "24h"
+        png, cap = await _ex_chart_make(code, rng)
+        if png is None:
+            await q.answer(cap, show_alert=True); return
+        await q.answer()
+        kb = _ex_chart_kb(uid, code, rng)
+        if getattr(q.message, "photo", None):
+            for k_ in (kb, _ex_plain_kb(kb)):
+                try:
+                    await q.edit_message_media(InputMediaPhoto(png, caption=cap, parse_mode="HTML"), reply_markup=k_)
+                    break
+                except Exception as e:
+                    if "not modified" in str(e).lower():
+                        break
+                    log.warning("exchange chart edit failed: %s", e)
+        else:
+            await _ex_send_photo(context.bot, q.message.chat_id, q.message.message_id, png, cap, kb)
+        return
+    if act == "cx":
+        await q.answer()
+        try:
+            await q.message.delete()
+        except Exception:
+            pass
+        return
     if act == "sa":
         kb = InlineKeyboardMarkup([[btn("بله، همه رو بفروش", "danger", callback_data=f"ex:sy:{uid}"), btn("نه", callback_data=f"ex:p:{uid}")]])
         await q.answer(); await _ex_edit(q, B("مطمئنی همه‌ی دارایی‌هات (با ۱٪ کارمزد) فروخته بشه؟"), kb); return
@@ -13162,7 +13586,7 @@ async def exdebug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not u or u.id not in ADMIN_IDS or not msg:
         return
     ids = {f"{a['name']}": a["eid"] for a in EX_ASSETS.values()}
-    ids.update({"سود": EX_UP_EID, "ریزش": EX_DOWN_EID, "تیتر صرافی": EX_TITLE_EID})
+    ids.update({"سود": EX_UP_EID, "ریزش": EX_DOWN_EID, "تیتر صرافی": EX_TITLE_EID, "برترین‌ها": EX_LB_EID})
     try:
         got = {st.custom_emoji_id for st in await context.bot.get_custom_emoji_stickers(list(set(ids.values())))}
     except Exception as e:
@@ -21342,7 +21766,7 @@ def _is_bot_text_command(text: str) -> bool:
         return True
     if key.startswith(("عیدی", "واریز", "واريز", "برداشت", "انتقال", "هدیه", "خریدجاسوسی", "ایونت", "پایانایونت")):
         return True
-    if _ex_parse_trade(raw) is not None:
+    if _ex_parse_trade(raw) is not None or _ex_parse_other(raw) is not None:
         return True
     t = norm_word(raw).translate(_DIG)
     return bool(re.fullmatch(r"جینگو\s*(?:بت|قمار|شرط\s*بندی)(?:\s+.+)?|(?:میز\s*)?(?:تاس|اسلات|مین|موشک|کراش)(?:\s+.+)?|(?:تاس|اسلات)\s*میز\s+.+", t, re.I))
